@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Denied - SentinelEdge</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f4f7f9;
+            --primary-color: #4a90e2;
+            --text-color: #333;
+            --card-bg: #ffffff;
+            --danger-color: #dc3545;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .error-container {
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .error-code {
+            font-size: 6rem;
+            font-weight: 700;
+            color: var(--danger-color);
+            margin: 0;
+            line-height: 1;
+        }
+
+        .error-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-color);
+            margin: 1rem 0;
+        }
+
+        .error-message {
+            color: #666;
+            margin-bottom: 2rem;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background-color: #357ABD;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="error-container">
+        <p class="error-code">403</p>
+        <h1 class="error-title">Access Denied</h1>
+        <p class="error-message">{{ message or "You don't have permission to access this page." }}</p>
+        <a href="{{ url_for('dashboard.dashboard_home') }}" class="btn">← Back to Dashboard</a>
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SentinelEdge Dashboard{% endblock %}</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap"
+        rel="stylesheet">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('dashboard.static', filename='css/dashboard.css') }}">
+
+    {% block extra_head %}{% endblock %}
+</head>
+
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container navbar-inner">
+            <div class="nav-left">
+                <a href="{{ url_for('dashboard.dashboard_home') }}" class="navbar-brand">
+                    <span class="brand-icon">🛡️</span>
+                    <span class="brand-text">Sentinel<span>Edge</span></span>
+                </a>
+            </div>
+
+            <div class="nav-center">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a href="{{ url_for('dashboard.dashboard_home') }}"
+                            class="nav-link {{ 'active' if request.endpoint == 'dashboard.dashboard_home' else '' }}">
+                            Overview
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="{{ url_for('dashboard.agents_list') }}"
+                            class="nav-link {{ 'active' if request.endpoint == 'dashboard.agents_list' else '' }}">
+                            Agents
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="{{ url_for('dashboard.reports') }}"
+                            class="nav-link {{ 'active' if request.endpoint == 'dashboard.reports' else '' }}">
+                            Reports
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="nav-right">
+                <div class="nav-controls">
+                    <button id="theme-toggle" class="theme-toggle" title="Toggle Dark/Light Mode">
+                        <span class="theme-toggle-icon moon">🌙</span>
+                        <span class="theme-toggle-icon sun">☀️</span>
+                    </button>
+                    <div class="search-select-group">
+                        <select id="global-agent-select" class="form-control-compact luxury-select">
+                            <option value="">Fleet Overview</option>
+                            <option disabled>Loading Agents...</option>
+                        </select>
+                    </div>
+                    <div class="date-select-group">
+                        <input type="date" id="global-date-select" class="form-control-compact luxury-date">
+                    </div>
+
+                    <!-- User Menu -->
+                    <div class="user-menu">
+                        <div class="user-menu-toggle">
+                            <span class="user-icon">👤</span>
+                            <span class="user-name">{{ session.username or 'Guest' }}</span>
+                            {% if session.role == 'admin' %}
+                            <span class="badge badge-admin-sm">Admin</span>
+                            {% endif %}
+                            <span class="dropdown-arrow">▼</span>
+                        </div>
+                        <div class="user-dropdown">
+                            {% if session.role == 'admin' %}
+                            <a href="{{ url_for('auth.list_users') }}" class="dropdown-item">
+                                👥 Manage Users
+                            </a>
+                            {% endif %}
+                            <a href="{{ url_for('auth.change_password') }}" class="dropdown-item">
+                                🔑 Change Password
+                            </a>
+                            <hr class="dropdown-divider">
+                            <a href="{{ url_for('auth.logout') }}" class="dropdown-item logout">
+                                🚪 Logout
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container footer-container">
+            <div class="footer-left">
+                <p>&copy; 2025 <span class="font-bold">SentinelEdge</span>. All rights reserved.</p>
+                <p class="text-xs text-tertiary mt-1">Enterprise Fleet Monitoring & Analytics</p>
+            </div>
+            <div class="footer-right">
+                <div class="timezone-indicator">
+                    <span class="dot pulse-success"></span>
+                    <span>System Time: <span class="font-mono" id="footer-clock"></span></span>
+                    <span class="badge badge-primary badge-xs ml-2">IST (UTC+5:30)</span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- IST Timezone Utilities (must load before other JS) -->
+    <script src="{{ url_for('dashboard.static', filename='js/timezone_utils.js') }}"></script>
+
+    <!-- Custom JS -->
+    <script src="{{ url_for('dashboard.static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('dashboard.static', filename='js/charts.js') }}"></script>
+    <script src="{{ url_for('dashboard.static', filename='js/selectors.js') }}"></script>
+    <script>
+        // Dark Mode Toggle
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.body.setAttribute('data-theme', savedTheme);
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.body.getAttribute('data-theme') || 'light';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.body.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+        }
+
+        // Initialize theme immediately (before content loads)
+        initTheme();
+
+        // Attach toggle event listener
+        document.addEventListener('DOMContentLoaded', () => {
+            const toggleBtn = document.getElementById('theme-toggle');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', toggleTheme);
+            }
+        });
+
+        // Footer Clock
+        function updateFooterClock() {
+            const clockEl = document.getElementById('footer-clock');
+            if (clockEl) {
+                const now = new Date();
+                const istTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true });
+                clockEl.textContent = istTime;
+            }
+        }
+        setInterval(updateFooterClock, 1000);
+        updateFooterClock();
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+
+</html>

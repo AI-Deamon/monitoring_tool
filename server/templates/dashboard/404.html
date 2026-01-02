@@ -1,0 +1,14 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Page Not Found - SentinelEdge{% endblock %}
+
+{% block content %}
+<div class="card p-5 text-center center-card" style="margin-top: 4rem;">
+    <h1 class="text-danger" style="font-size: 3rem; margin-bottom: 1rem;">404</h1>
+    <h2>Page Not Found</h2>
+    <p class="text-muted" style="margin: 1.5rem 0;">
+        {{ message or "The page you are looking for does not exist." }}
+    </p>
+    <a href="{{ url_for('dashboard.dashboard_home') }}" class="btn btn-primary">Return to Dashboard</a>
+</div>
+{% endblock %}

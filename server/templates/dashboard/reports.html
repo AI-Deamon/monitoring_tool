@@ -1,0 +1,462 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Reports - SentinelEdge Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header fade-in">
+    <div>
+        <h1>📊 Generate Reports</h1>
+        <p class="text-secondary">Export fleet-wide or individual agent activity data</p>
+    </div>
+</div>
+
+<!-- Report Type Selection -->
+<div class="report-types fade-in">
+    <div class="card clickable" onclick="showSection('individual')">
+        <div class="report-icon">👤</div>
+        <div class="p-4 text-center">
+            <h3>Individual Agent</h3>
+            <p class="text-xs text-tertiary mt-2">Daily activity for a specific agent</p>
+            <div class="mt-4">
+                <span class="badge badge-primary">PDF / CSV</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card clickable" onclick="showSection('fleet')">
+        <div class="report-icon">👥</div>
+        <div class="p-4 text-center">
+            <h3>Fleet Summary</h3>
+            <p class="text-xs text-tertiary mt-2">Comparative fleet-wide statistics</p>
+            <div class="mt-4">
+                <span class="badge badge-info text-white">CSV Export</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card clickable" onclick="showSection('inventory')">
+        <div class="report-icon">📦</div>
+        <div class="p-4 text-center">
+            <h3>App Inventory</h3>
+            <p class="text-xs text-tertiary mt-2">Full software inventory across fleet</p>
+            <div class="mt-4">
+                <span class="badge badge-secondary">CSV Export</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Individual Agent Report Section -->
+<div id="section-individual" class="report-section card p-4" style="display:none;">
+    <h2>👤 Individual Agent Report</h2>
+    <div class="form-group">
+        <label class="form-label">Select Agent</label>
+        <select id="agent-select" class="form-control">
+            <option value="">Loading agents...</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label class="form-label">Report Date</label>
+        <div class="date-select-group mb-4">
+            <input type="date" id="report-date" class="form-control-compact luxury-date">
+        </div>
+    </div>
+    <div class="btn-group mt-3">
+        <button onclick="openAgentReport()" class="btn btn-primary">
+            📄 View Report (Print/PDF)
+        </button>
+        <button onclick="downloadAgentCSV()" class="btn btn-secondary">
+            📥 Download CSV
+        </button>
+    </div>
+</div>
+
+<!-- Fleet Summary Section -->
+<div id="section-fleet" class="report-section card p-4" style="display:none;">
+    <h2>👥 Fleet Summary Report</h2>
+    <div class="form-group">
+        <label class="form-label">Report Date</label>
+        <div class="date-select-group mb-4">
+            <input type="date" id="fleet-date" class="form-control-compact luxury-date">
+        </div>
+    </div>
+    <div class="btn-group mt-3">
+        <button onclick="downloadFleetCSV()" class="btn btn-primary">
+            📥 Download Fleet Summary CSV
+        </button>
+    </div>
+</div>
+
+<!-- Inventory Section -->
+<div id="section-inventory" class="report-section card p-4" style="display:none;">
+    <h2>📦 Application Inventory Report</h2>
+    <div class="form-group">
+        <label class="form-label">Select Agent (or All)</label>
+        <select id="inventory-agent-select" class="form-control">
+            <option value="all">All Agents (Combined)</option>
+        </select>
+    </div>
+    <div class="btn-group mt-3">
+        <button onclick="downloadInventoryCSV()" class="btn btn-primary">
+            📥 Download Inventory CSV
+        </button>
+    </div>
+</div>
+
+<!-- Recent Reports Quick Access -->
+<div class="flex items-center gap-2 mb-4 mt-10 fade-in">
+    <h3>🚀 Quick Access - Agent Reports</h3>
+</div>
+<div class="card fade-in">
+    <div class="card-header">
+        <p class="text-xs text-tertiary uppercase font-bold letter-spacing-05">Daily activity report shortcuts</p>
+    </div>
+    <div class="card-body">
+        <div class="agents-grid" id="agents-grid">
+            <div class="text-center text-tertiary py-8">Loading agents...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .report-types {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--space-lg);
+        margin-bottom: var(--space-xl);
+    }
+
+    .clickable {
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .report-card:hover {
+        border-color: var(--primary);
+        transform: translateY(-4px);
+        box-shadow: 0 8px 20px rgba(99, 102, 241, 0.2);
+    }
+
+    .report-card.active {
+        border-color: var(--primary);
+        background: rgba(99, 102, 241, 0.1);
+    }
+
+    .report-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+    }
+
+    .report-card h3 {
+        margin: 0 0 0.5rem 0;
+        font-size: 1.1rem;
+    }
+
+    .report-card p {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        margin-bottom: 1rem;
+    }
+
+    .report-section {
+        margin-top: 1.5rem;
+        animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .form-group {
+        margin-bottom: 1.25rem;
+    }
+
+    .form-label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+
+    .btn-group {
+        display: flex;
+        gap: 1rem;
+    }
+
+    .agents-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+
+    .agent-card {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: all 0.2s ease;
+    }
+
+    .agent-card:hover {
+        border-color: var(--primary);
+        background: rgba(99, 102, 241, 0.05);
+    }
+
+    .agent-info {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .agent-name {
+        font-weight: 600;
+        color: var(--text);
+    }
+
+    .agent-meta {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+    }
+
+    @media (max-width: 768px) {
+        .report-types {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allAgents = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Set today's date as default
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('report-date').value = today;
+        document.getElementById('fleet-date').value = today;
+
+        // Load agents
+        const response = await fetchJSON('/dashboard/api/agents');
+        if (response && response.data) {
+            allAgents = response.data;
+            populateAgentSelects();
+            renderAgentsGrid();
+        }
+    });
+
+    function populateAgentSelects() {
+        const agentSelect = document.getElementById('agent-select');
+        const invSelect = document.getElementById('inventory-agent-select');
+
+        agentSelect.innerHTML = '<option value="">-- Select Agent --</option>';
+
+        allAgents.forEach(agent => {
+            const option = document.createElement('option');
+            option.value = agent.agent_id;
+            option.textContent = `${agent.hostname || 'Unknown'} (${agent.agent_id.substring(0, 8)}...)`;
+            agentSelect.appendChild(option);
+
+            const option2 = option.cloneNode(true);
+            invSelect.appendChild(option2);
+        });
+    }
+
+    function renderAgentsGrid() {
+        const grid = document.getElementById('agents-grid');
+        grid.innerHTML = '';
+
+        if (allAgents.length === 0) {
+            grid.innerHTML = '<div class="text-center text-tertiary">No agents registered</div>';
+            return;
+        }
+
+        allAgents.forEach(agent => {
+            const card = document.createElement('div');
+            card.className = 'agent-card-mini';
+
+            const statusClass = agent.is_online ? 'badge-success' : 'badge-secondary';
+            const statusText = agent.is_online ? 'Online' : 'Offline';
+
+            card.innerHTML = `
+                <div class="agent-info">
+                    <span class="agent-name font-bold">🖥️ ${agent.hostname || 'Unknown'}</span>
+                    <span class="agent-meta">${agent.os || 'Unknown OS'} • <span class="badge ${statusClass} badge-xs">${statusText}</span></span>
+                </div>
+                <a href="/dashboard/agent/${agent.agent_id}/report" class="btn btn-sm btn-ghost p-1 text-primary">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                </a>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    function showSection(section) {
+        // Hide all sections
+        document.querySelectorAll('.report-section').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('.report-card').forEach(el => el.classList.remove('active'));
+
+        // Show selected section
+        document.getElementById(`section-${section}`).style.display = 'block';
+        event.currentTarget.classList.add('active');
+    }
+
+    function openAgentReport() {
+        const agentId = document.getElementById('agent-select').value;
+        const date = document.getElementById('report-date').value;
+
+        if (!agentId) {
+            alert('Please select an agent');
+            return;
+        }
+
+        window.open(`/dashboard/agent/${agentId}/report?date=${date}`, '_blank');
+    }
+
+    async function downloadAgentCSV() {
+        const agentId = document.getElementById('agent-select').value;
+        const date = document.getElementById('report-date').value;
+
+        if (!agentId) {
+            alert('Please select an agent');
+            return;
+        }
+
+        const data = await fetchJSON(`/dashboard/api/agent/${agentId}/full-report?date=${date}`);
+        if (!data) return;
+
+        let csv = generateAgentCSV(data);
+        downloadCSV(csv, `agent_report_${data.agent?.hostname || agentId}_${date}.csv`);
+    }
+
+    async function downloadFleetCSV() {
+        const date = document.getElementById('fleet-date').value;
+
+        const data = await fetchJSON(`/dashboard/api/agents?date=${date}`);
+        if (!data || !data.data) {
+            alert('No data available');
+            return;
+        }
+
+        let csv = 'FLEET SUMMARY REPORT\n';
+        csv += `Date,${date}\n`;
+        csv += `Generated,${getCurrentTimeIST()}\n\n`;
+        csv += 'Hostname,Agent ID,OS,Status,Active (seconds),Idle (seconds),Locked (seconds),Top App,Domains Visited,Installed Apps\n';
+
+        data.data.forEach(agent => {
+            csv += `"${agent.hostname || 'Unknown'}","${agent.agent_id}","${agent.os || ''}","${agent.status}",`;
+            csv += `${agent.active_seconds || 0},${agent.idle_seconds || 0},${agent.locked_seconds || 0},`;
+            csv += `"${agent.top_app || ''}",${agent.domains_visited || 0},${agent.installed_apps || 0}\n`;
+        });
+
+        downloadCSV(csv, `fleet_summary_${date}.csv`);
+    }
+
+    async function downloadInventoryCSV() {
+        const agentId = document.getElementById('inventory-agent-select').value;
+
+        let data;
+        if (agentId === 'all') {
+            // Fetch all agents and their inventory
+            let allInventory = [];
+            for (const agent of allAgents) {
+                const inv = await fetchJSON(`/dashboard/api/agent/${agent.agent_id}/inventory`);
+                if (inv && inv.data) {
+                    inv.data.forEach(app => {
+                        app.agent_hostname = agent.hostname;
+                        app.agent_id = agent.agent_id;
+                    });
+                    allInventory = allInventory.concat(inv.data);
+                }
+            }
+            data = { data: allInventory };
+        } else {
+            data = await fetchJSON(`/dashboard/api/agent/${agentId}/inventory`);
+        }
+
+        if (!data || !data.data || data.data.length === 0) {
+            alert('No inventory data available');
+            return;
+        }
+
+        let csv = 'APPLICATION INVENTORY\n';
+        csv += `Generated,${getCurrentTimeIST()}\n\n`;
+
+        if (agentId === 'all') {
+            csv += 'Hostname,Agent ID,Application,Version,Publisher,Source\n';
+            data.data.forEach(app => {
+                csv += `"${app.agent_hostname || ''}","${app.agent_id || ''}","${app.name}","${app.version || ''}","${app.publisher || ''}","${app.source || ''}"\n`;
+            });
+        } else {
+            csv += 'Application,Version,Publisher,Source\n';
+            data.data.forEach(app => {
+                csv += `"${app.name}","${app.version || ''}","${app.publisher || ''}","${app.source || ''}"\n`;
+            });
+        }
+
+        downloadCSV(csv, `inventory_${agentId === 'all' ? 'fleet' : agentId}.csv`);
+    }
+
+    function generateAgentCSV(data) {
+        let csv = 'AGENT ACTIVITY REPORT\n';
+        csv += `Date,${data.date}\n`;
+        csv += `Agent ID,${data.agent?.agent_id || ''}\n`;
+        csv += `Hostname,${data.agent?.hostname || ''}\n`;
+        csv += `Username,${data.agent?.username || ''}\n`;
+        csv += `OS,${data.agent?.os || ''}\n\n`;
+
+        // Screen Time
+        csv += 'SCREEN TIME\n';
+        csv += 'Type,Seconds,Formatted\n';
+        csv += `Active,${data.screen_time?.active_seconds || 0},"${formatTime(data.screen_time?.active_seconds || 0)}"\n`;
+        csv += `Idle,${data.screen_time?.idle_seconds || 0},"${formatTime(data.screen_time?.idle_seconds || 0)}"\n`;
+        csv += `Locked,${data.screen_time?.locked_seconds || 0},"${formatTime(data.screen_time?.locked_seconds || 0)}"\n`;
+        csv += `Total,${data.screen_time?.total_seconds || 0},"${formatTime(data.screen_time?.total_seconds || 0)}"\n\n`;
+
+        // App Usage
+        csv += 'APPLICATION USAGE\n';
+        csv += 'Application,Duration (seconds),Duration (formatted),Sessions,Percentage\n';
+        if (data.app_usage?.data) {
+            data.app_usage.data.forEach(a => {
+                csv += `"${a.app}",${a.duration_seconds},"${formatTime(a.duration_seconds)}",${a.session_count},${a.percentage}%\n`;
+            });
+        }
+        csv += '\n';
+
+        // Domain Usage
+        csv += 'DOMAIN USAGE\n';
+        csv += 'Domain,Duration (seconds),Duration (formatted),Sessions\n';
+        if (data.domain_usage?.data) {
+            data.domain_usage.data.forEach(d => {
+                csv += `"${d.domain}",${d.duration_seconds},"${formatTime(d.duration_seconds)}",${d.session_count}\n`;
+            });
+        }
+
+        return csv;
+    }
+
+    function downloadCSV(content, filename) {
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', filename);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+</script>
+{% endblock %}

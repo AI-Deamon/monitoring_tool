@@ -1,0 +1,161 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Registered Agents - SentinelEdge Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header fade-in">
+    <div>
+        <h1>🖥️ Registered Agents</h1>
+        <p class="text-secondary">Full list of registered systems and their current state</p>
+    </div>
+    <div class="header-actions">
+        <input type="text" id="agent-search" placeholder="Search hostname, user, or ID..." class="search-input">
+        <select id="status-filter" class="filter-select">
+            <option value="all">All Agents</option>
+            <option value="active">Active Now</option>
+            <option value="idle">Idle</option>
+            <option value="offline">Offline</option>
+        </select>
+    </div>
+</div>
+
+<div class="card fade-in">
+    <div class="table-responsive">
+        <table class="data-table" id="agents-table">
+            <thead>
+                <tr>
+                    <th class="sortable" onclick="sortTable(0)">Hostname & ID</th>
+                    <th class="sortable" onclick="sortTable(1)">Operating System</th>
+                    <th class="sortable" onclick="sortTable(2)">Current Status</th>
+                    <th class="sortable" onclick="sortTable(3)">Last Activity</th>
+                    <th class="sortable" onclick="sortTable(4)">Screen Time (Today)</th>
+                    <th>Top Application</th>
+                    <th class="text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="agents-body">
+                <tr>
+                    <td colspan="7" class="text-center p-5">
+                        <div class="spinner"></div>
+                        <p class="mt-2 text-tertiary">Loading fleet data...</p>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allAgents = [];
+
+    async function loadAgents() {
+        console.log('[AGENTS] Fetching agent list...');
+        const response = await fetchJSON('/dashboard/api/agents');
+        if (!response || !response.data) {
+            console.error('[AGENTS] Failed to fetch agents or empty response');
+            showToast('Failed to load agent data', 'danger');
+            return;
+        }
+
+        allAgents = response.data;
+        console.log(`[AGENTS] Successfully loaded ${allAgents.length} agents`);
+        renderAgents();
+    }
+
+    function renderAgents() {
+        const tbody = document.getElementById('agents-body');
+        const searchTerm = document.getElementById('agent-search').value.toLowerCase();
+        const statusFilter = document.getElementById('status-filter').value;
+
+        // Filter Logic
+        const filtered = allAgents.filter(agent => {
+            const matchesSearch = (agent.hostname || '').toLowerCase().includes(searchTerm) ||
+                (agent.agent_id || '').toLowerCase().includes(searchTerm) ||
+                (agent.username || '').toLowerCase().includes(searchTerm);
+
+            let matchesStatus = true;
+            const isOnline = agent.is_online; // Use the server-provided status
+
+            if (statusFilter === 'active') matchesStatus = isOnline;
+            else if (statusFilter === 'offline') matchesStatus = !isOnline;
+
+            return matchesSearch && matchesStatus;
+        });
+
+        tbody.innerHTML = '';
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center p-5">
+                        <div class="text-4xl mb-2">🔍</div>
+                        <p class="text-lg font-bold text-secondary">No agents matching your criteria</p>
+                        <p class="text-sm text-tertiary">Try adjusting your search or filter</p>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        filtered.forEach(agent => {
+            const tr = document.createElement('tr');
+
+            // Status Badge using new design system classes
+            const statusHtml = agent.is_online
+                ? '<span class="badge badge-success">🟢 Online</span>'
+                : '<span class="badge badge-danger">🔴 Offline</span>';
+
+            // Relative time (IST)
+            const lastSeenText = agent.last_seen
+                ? getRelativeTimeIST(agent.last_seen)
+                : 'Never Seen';
+
+            // Screen time (Today)
+            const screenTime = formatTime(agent.total_screen_seconds || 0);
+
+            tr.innerHTML = `
+                <td>
+                    <div class="flex items-center gap-2">
+                        <div class="brand-icon" style="font-size: 1.2rem;">🖥️</div>
+                        <div>
+                            <div class="font-bold text-primary">${agent.hostname || 'Unknown'}</div>
+                            <div class="text-xs font-mono text-tertiary">${agent.agent_id}</div>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <div class="text-sm">${agent.os || 'Unknown OS'}</div>
+                    <div class="text-xs text-tertiary">${agent.username || 'System'}</div>
+                </td>
+                <td>${statusHtml}</td>
+                <td>
+                    <div class="text-sm font-medium" title="${agent.last_seen || ''}">${lastSeenText}</div>
+                </td>
+                <td>
+                    <div class="font-mono font-bold text-sm text-secondary">${screenTime}</div>
+                </td>
+                <td>
+                    <span class="current-app" style="font-size: 0.75rem;">${agent.top_app || 'None'}</span>
+                </td>
+                <td class="text-right">
+                    <a href="/dashboard/agent/${agent.agent_id}" class="btn btn-sm btn-primary">
+                        View Details
+                    </a>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // Event Listeners
+    document.getElementById('agent-search').addEventListener('input', debounce(renderAgents, 300));
+    document.getElementById('status-filter').addEventListener('change', renderAgents);
+
+    // Initial Load
+    document.addEventListener('DOMContentLoaded', loadAgents);
+
+    // Auto-refresh every 60 seconds
+    setInterval(loadAgents, 60000);
+</script>
+{% endblock %}

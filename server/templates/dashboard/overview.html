@@ -1,0 +1,302 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Overview - SentinelEdge Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header fade-in">
+    <div>
+        <h1>🛡️ Dashboard Overview</h1>
+        <p class="text-secondary">Fleet-wide activity and agent status summary</p>
+    </div>
+    <div class="header-actions">
+        <span id="last-updated" class="text-sm text-tertiary">Last updated: Just now</span>
+        <span class="refresh-indicator" id="refresh-indicator">
+            <span class="spinner"></span>
+        </span>
+    </div>
+</div>
+
+<!-- Fleet Summary Cards -->
+<div class="metrics-grid fade-in">
+    <div class="metric-card primary">
+        <div class="metric-icon">👥</div>
+        <div class="metric-label">Total Agents</div>
+        <p id="total-agents" class="metric-value">-</p>
+        <div class="metric-sublabel">Registered fleet size</div>
+    </div>
+    <div class="metric-card success">
+        <div class="metric-icon">🟢</div>
+        <div class="metric-label">Online Now</div>
+        <p id="active-agents" class="metric-value">-</p>
+        <div class="metric-sublabel">Active in last 5 mins</div>
+    </div>
+    <div class="metric-card danger">
+        <div class="metric-icon">🔴</div>
+        <div class="metric-label">Offline</div>
+        <p id="offline-agents" class="metric-value">-</p>
+        <div class="metric-sublabel">Agents currently disconnected</div>
+    </div>
+    <div class="metric-card gradient">
+        <div class="metric-icon">⏱️</div>
+        <div class="metric-label">Fleet Screen Time</div>
+        <p id="total-screentime" class="metric-value">-</p>
+        <div class="metric-sublabel">Total activity today</div>
+    </div>
+</div>
+
+<!-- Agent Comparison Table -->
+<div class="card fade-in">
+    <div class="card-header">
+        <h3>📋 Agent Activity Comparison</h3>
+        <p class="text-xs text-tertiary">Click hostname for detailed view</p>
+    </div>
+    <div class="table-responsive">
+        <table class="data-table" id="agents-table">
+            <thead>
+                <tr>
+                    <th>Hostname</th>
+                    <th>User</th>
+                    <th>Status</th>
+                    <th>Current Activity</th>
+                    <th>Screen Time</th>
+                    <th>Top App</th>
+                    <th>Apps</th>
+                    <th>Domains</th>
+                    <th>Inventory</th>
+                    <th>Last Seen</th>
+                </tr>
+            </thead>
+            <tbody id="agents-tbody">
+                <tr>
+                    <td colspan="10" class="text-center">Loading...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="charts-grid fade-in">
+    <div class="chart-card">
+        <h3>Agent Status</h3>
+        <div class="chart-container">
+            <canvas id="agent-status-chart"></canvas>
+        </div>
+    </div>
+    <div class="chart-card">
+        <h3>Fleet Screen Time Breakdown</h3>
+        <div class="chart-container">
+            <canvas id="screentime-chart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Top Apps & Domains -->
+<div class="metrics-grid fade-in">
+    <div class="metric-card">
+        <div class="metric-label">🏆 Top App Today</div>
+        <p id="top-app-name" class="metric-value"
+            style="font-size: 1.5rem; margin-top: 0.5rem; color: var(--brand-primary);">-</p>
+        <div id="top-app-duration" class="font-semibold text-secondary">-</div>
+        <div class="metric-sublabel">Fleet-wide usage</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">🌐 Top Domain Today</div>
+        <p id="top-domain-name" class="metric-value"
+            style="font-size: 1.5rem; margin-top: 0.5rem; color: var(--brand-primary);">-</p>
+        <div id="top-domain-duration" class="font-semibold text-secondary">-</div>
+        <div class="metric-sublabel">Fleet-wide usage</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+{# All styles now in dashboard.css #}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function getSelectedDate() {
+        // Use global date selector from navbar
+        const dateInput = document.getElementById('global-date-select');
+        if (dateInput && dateInput.value) {
+            return dateInput.value;
+        }
+        const params = new URLSearchParams(window.location.search);
+        return params.get('date') || new Date().toISOString().split('T')[0];
+    }
+
+    // Initialize global date picker and attach listener
+    document.addEventListener('DOMContentLoaded', () => {
+        const dateInput = document.getElementById('global-date-select');
+        if (dateInput) {
+            const today = new Date().toISOString().split('T')[0];
+            dateInput.value = getSelectedDate();
+            dateInput.max = today;
+            // Attach change listener for this page
+            dateInput.addEventListener('change', () => {
+                loadOverview();
+                loadAgents();
+            });
+        }
+    });
+
+    async function loadOverview() {
+        document.getElementById('refresh-indicator').classList.add('active');
+
+        const selectedDate = getSelectedDate();
+        const data = await fetchJSON(`/dashboard/api/overview?date=${selectedDate}`);
+
+        document.getElementById('refresh-indicator').classList.remove('active');
+
+        if (!data) return;
+
+        // Update metrics
+        document.getElementById('total-agents').textContent = data.total_agents;
+        document.getElementById('active-agents').textContent = data.active_agents;
+        document.getElementById('offline-agents').textContent = data.offline_agents;
+
+        const st = data.screen_time;
+        const awayTime = st.away || 0;
+        const totalScreenSeconds = st.active + st.idle + st.locked + awayTime;
+        document.getElementById('total-screentime').textContent = formatTime(totalScreenSeconds);
+
+        // Update Highlights
+        document.getElementById('top-app-name').textContent = data.top_app.name;
+        document.getElementById('top-app-duration').textContent = formatTime(data.top_app.duration);
+
+        document.getElementById('top-domain-name').textContent = data.top_domain.name;
+        document.getElementById('top-domain-duration').textContent = formatTime(data.top_domain.duration);
+
+        // Update Last Updated
+        document.getElementById('last-updated').textContent = "Last updated: " + new Date().toLocaleTimeString();
+
+        // -- Charts --
+        renderCharts(data);
+    }
+
+    async function loadAgents() {
+        const selectedDate = getSelectedDate();
+        const response = await fetchJSON(`/dashboard/api/agents?date=${selectedDate}`);
+        if (!response || !response.data) return;
+
+        const tbody = document.getElementById('agents-tbody');
+        tbody.innerHTML = '';
+
+        if (response.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="10" class="text-center">No agents registered</td></tr>';
+            return;
+        }
+
+        response.data.forEach(agent => {
+            const row = document.createElement('tr');
+
+            // Status badge
+            const statusBadge = agent.is_online
+                ? '<span class="badge badge-success">🟢 Online</span>'
+                : '<span class="badge badge-danger">🔴 Offline</span>';
+
+            // Current activity with state
+            let currentActivity = '<span class="text-muted">-</span>';
+            if (agent.current_app) {
+                const stateIcon = agent.current_state === 'active' ? '🎯' :
+                    agent.current_state === 'idle' ? '💤' : '🔒';
+                currentActivity = `<span class="current-app">${stateIcon} ${agent.current_app}</span>`;
+            }
+
+            // Last seen (relative time in IST)
+            const lastSeen = agent.last_seen
+                ? getRelativeTimeIST(agent.last_seen)
+                : 'Never';
+
+            // Screen time breakdown
+            const screenTimeInfo = `
+                <span title="Active: ${formatTime(agent.active_seconds)}, Idle: ${formatTime(agent.idle_seconds)}, Locked: ${formatTime(agent.locked_seconds)}">
+                    ${formatTime(agent.total_screen_seconds)}
+                </span>
+            `;
+
+            row.innerHTML = `
+                <td>
+                    <a href="/dashboard/agent/${agent.agent_id}?date=${selectedDate}" class="agent-link">
+                        <strong>${agent.hostname}</strong>
+                    </a>
+                    <br><small class="text-muted">${agent.os || 'Unknown OS'}</small>
+                </td>
+                <td>${agent.username || '-'}</td>
+                <td>${statusBadge}</td>
+                <td>${currentActivity}</td>
+                <td>${screenTimeInfo}</td>
+                <td>${agent.top_app || '-'}</td>
+                <td>${agent.total_apps_used}</td>
+                <td>${agent.domains_visited}</td>
+                <td>${agent.installed_apps}</td>
+                <td><span title="${agent.last_seen}">${lastSeen}</span></td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function renderCharts(data) {
+        // 1. Agent Status Pie Chart
+        const ctxStatus = document.getElementById('agent-status-chart');
+        if (window.statusChart) window.statusChart.destroy();
+
+        window.statusChart = new Chart(ctxStatus, {
+            type: 'doughnut',
+            data: {
+                labels: ['Online', 'Offline'],
+                datasets: [{
+                    data: [data.active_agents, data.offline_agents],
+                    backgroundColor: ['#10b981', '#ef4444']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+
+        // 2. Screen Time Breakdown Chart
+        const ctxScreen = document.getElementById('screentime-chart');
+        if (window.screenChart) window.screenChart.destroy();
+
+        const awayTime = data.screen_time.away || 0;
+        window.screenChart = new Chart(ctxScreen, {
+            type: 'doughnut',
+            data: {
+                labels: ['Active', 'Idle', 'Locked', 'Away'],
+                datasets: [{
+                    data: [data.screen_time.active, data.screen_time.idle, data.screen_time.locked, awayTime],
+                    backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#9e9e9e']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => ctx.label + ': ' + formatTime(ctx.parsed)
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Initial Load
+    document.addEventListener('DOMContentLoaded', () => {
+        loadOverview();
+        loadAgents();
+    });
+
+    // Refresh every 30s for more real-time data
+    setInterval(() => {
+        loadOverview();
+        loadAgents();
+    }, 30000);
+</script>
+{% endblock %}

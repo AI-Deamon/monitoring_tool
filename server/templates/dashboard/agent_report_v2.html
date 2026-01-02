@@ -1,0 +1,890 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Activity Report - {{ agent_id }} - SentinelEdge{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ===== PRINT & SCREEN STYLES ===== */
+    @media print {
+        body {
+            background: white !important;
+        }
+
+        .no-print {
+            display: none !important;
+        }
+
+        .report-container {
+            box-shadow: none;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .page-break {
+            page-break-before: always;
+        }
+
+        .nav-sidebar,
+        .navbar,
+        .header {
+            display: none !important;
+        }
+
+        .main-content {
+            margin-left: 0 !important;
+            padding: 0 !important;
+        }
+    }
+
+    /* ===== REPORT CONTAINER ===== */
+    .report-container {
+        max-width: 1000px;
+        margin: 20px auto;
+        background: white;
+        padding: 40px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        border-radius: 12px;
+    }
+
+    /* ===== HEADER ===== */
+    .report-header {
+        border-bottom: 3px solid #6366f1;
+        padding-bottom: 20px;
+        margin-bottom: 30px;
+    }
+
+    .report-title {
+        font-size: 28px;
+        font-weight: 700;
+        color: #111827;
+        margin: 0 0 8px 0;
+    }
+
+    .report-date {
+        font-size: 18px;
+        color: #6b7280;
+        margin: 0;
+    }
+
+    .report-meta {
+        font-size: 14px;
+        color: #9ca3af;
+        margin-top: 8px;
+    }
+
+    /* ===== METRIC CARDS ===== */
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+
+    .metric-card {
+        background: #f9fafb;
+        border-left: 4px solid #6366f1;
+        padding: 20px;
+        border-radius: 8px;
+    }
+
+    .metric-card.success {
+        border-left-color: #16a34a;
+    }
+
+    .metric-card.warning {
+        border-left-color: #f59e0b;
+    }
+
+    .metric-card.info {
+        border-left-color: #0ea5e9;
+    }
+
+    .metric-card.danger {
+        border-left-color: #dc2626;
+    }
+
+    .metric-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+    }
+
+    .metric-value {
+        font-size: 32px;
+        font-weight: 700;
+        color: #111827;
+        line-height: 1;
+    }
+
+    .metric-subtitle {
+        font-size: 13px;
+        color: #6b7280;
+        margin-top: 4px;
+    }
+
+    /* ===== TIME BREAKDOWN BAR ===== */
+    .time-bar-container {
+        margin: 30px 0;
+    }
+
+    .time-bar {
+        display: flex;
+        height: 50px;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .time-segment {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 600;
+        font-size: 14px;
+        transition: all 0.3s;
+    }
+
+    .time-segment:hover {
+        opacity: 0.9;
+        filter: brightness(1.1);
+    }
+
+    .time-segment.active {
+        background: #16a34a;
+    }
+
+    .time-segment.idle {
+        background: #f59e0b;
+    }
+
+    .time-segment.locked {
+        background: #dc2626;
+    }
+
+    .time-legend {
+        display: flex;
+        justify-content: center;
+        gap: 30px;
+        margin-top: 12px;
+        font-size: 13px;
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .legend-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+    }
+
+    /* ===== SECTION HEADERS ===== */
+    .section-header {
+        font-size: 18px;
+        font-weight: 700;
+        color: #111827;
+        margin: 40px 0 20px 0;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #e5e7eb;
+    }
+
+    /* ===== TABLES ===== */
+    .report-data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 30px;
+        font-size: 14px;
+    }
+
+    .report-data-table thead {
+        background: #f3f4f6;
+    }
+
+    .report-data-table th {
+        text-align: left;
+        padding: 12px 16px;
+        font-weight: 600;
+        color: #374151;
+        border-bottom: 2px solid #e5e7eb;
+    }
+
+    .report-data-table td {
+        padding: 12px 16px;
+        border-bottom: 1px solid #f3f4f6;
+        color: #1f2937;
+    }
+
+    .report-data-table tbody tr:hover {
+        background: #f9fafb;
+    }
+
+    .report-data-table .rank {
+        width: 40px;
+        text-align: center;
+        font-weight: 600;
+        color: #6b7280;
+    }
+
+    .report-data-table .percentage {
+        color: #6366f1;
+        font-weight: 600;
+    }
+
+    /* ===== TIMELINE ===== */
+    .timeline-container {
+        margin: 30px 0;
+    }
+
+    .timeline-bars {
+        display: flex;
+        gap: 2px;
+        height: 60px;
+        margin-bottom: 8px;
+    }
+
+    .timeline-hour {
+        flex: 1;
+        background: #f3f4f6;
+        border-radius: 4px;
+        position: relative;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .timeline-hour.has-activity {
+        background: #16a34a;
+    }
+
+    .timeline-hour.has-locked {
+        background: #dc2626;
+    }
+
+    .timeline-hour:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .timeline-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: #6b7280;
+        padding: 0 4px;
+    }
+
+    /* ===== FOOTER ===== */
+    .report-footer {
+        margin-top: 50px;
+        padding-top: 20px;
+        border-top: 1px solid #e5e7eb;
+        font-size: 12px;
+        color: #9ca3af;
+        text-align: center;
+    }
+
+    /* ===== AGENT INFO BADGE ===== */
+    .agent-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        background: #f3f4f6;
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 13px;
+        margin-top: 10px;
+    }
+
+    .agent-badge strong {
+        color: #374151;
+    }
+
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #16a34a;
+    }
+
+    .status-dot.offline {
+        background: #dc2626;
+    }
+
+    /* ===== HEADER BUTTONS ===== */
+    .report-actions {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+
+    .report-actions .btn {
+        padding: 8px 16px;
+        font-size: 13px;
+        border-radius: 6px;
+        cursor: pointer;
+        border: none;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .report-actions .btn-primary {
+        background: #6366f1;
+        color: white;
+    }
+
+    .report-actions .btn-primary:hover {
+        background: #4f46e5;
+    }
+
+    .report-actions .btn-secondary {
+        background: #e5e7eb;
+        color: #374151;
+    }
+
+    .report-actions .btn-secondary:hover {
+        background: #d1d5db;
+    }
+
+    /* ===== DATE PICKER ===== */
+    .date-picker-container {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+
+    .date-picker-container input[type="date"] {
+        padding: 8px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+    }
+
+    /* ===== UTILITY ===== */
+    .text-center {
+        text-align: center;
+    }
+
+    .text-right {
+        text-align: right;
+    }
+
+    .text-muted {
+        color: #6b7280;
+    }
+
+    .mb-4 {
+        margin-bottom: 1.5rem;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 40px;
+        color: #9ca3af;
+    }
+
+    .spinner-border {
+        width: 40px;
+        height: 40px;
+        border: 3px solid #e5e7eb;
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="report-container" id="report-content">
+
+    <!-- ===== HEADER CONTROLS (No Print) ===== -->
+    <div class="no-print">
+        <div class="date-picker-container">
+            <label style="font-weight: 600;">Report Date:</label>
+            <input type="date" id="report-date-input" onchange="changeReportDate()">
+            <a href="/dashboard/agent/{{ agent_id }}" class="btn btn-secondary" style="margin-left: auto;">
+                ← Back to Agent
+            </a>
+        </div>
+        <div class="report-actions">
+            <button onclick="window.print()" class="btn btn-primary">
+                📄 Print / Save PDF
+            </button>
+            <button onclick="exportCSV()" class="btn btn-secondary">
+                📊 Export CSV
+            </button>
+        </div>
+    </div>
+
+    <!-- ===== REPORT HEADER ===== -->
+    <div class="report-header">
+        <h1 class="report-title">📊 Employee Activity Report</h1>
+        <p class="report-date" id="report-date-display">Loading...</p>
+        <div class="agent-badge">
+            <span class="status-dot" id="status-indicator"></span>
+            <span><strong id="agent-hostname">-</strong></span>
+            <span class="text-muted">|</span>
+            <span id="agent-username">-</span>
+        </div>
+        <p class="report-meta">
+            Generated: <span id="generation-time"></span> |
+            System: <span id="agent-os">-</span> |
+            Agent ID: <span id="agent-id-short">-</span>
+        </p>
+    </div>
+
+    <!-- ===== LOADING STATE ===== -->
+    <div id="loading-indicator" class="text-center" style="padding: 60px;">
+        <div class="spinner-border"></div>
+        <p class="text-muted" style="margin-top: 15px;">Loading report data...</p>
+    </div>
+
+    <!-- ===== REPORT CONTENT (Hidden until loaded) ===== -->
+    <div id="report-data" style="display: none;">
+
+        <!-- ===== KEY METRICS ===== -->
+        <div class="metrics-grid">
+            <div class="metric-card success">
+                <div class="metric-label">Active Time</div>
+                <div class="metric-value" id="metric-active-time">-</div>
+                <div class="metric-subtitle" id="metric-active-percent">-</div>
+            </div>
+            <div class="metric-card info">
+                <div class="metric-label">Productivity Score</div>
+                <div class="metric-value" id="metric-productivity">-</div>
+                <div class="metric-subtitle">Based on active time</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Most Used App</div>
+                <div class="metric-value" style="font-size: 18px;" id="metric-top-app">-</div>
+                <div class="metric-subtitle" id="metric-top-app-time">-</div>
+            </div>
+            <div class="metric-card warning">
+                <div class="metric-label">Total Tracked</div>
+                <div class="metric-value" id="metric-total-time">-</div>
+                <div class="metric-subtitle" id="metric-work-hours">-</div>
+            </div>
+        </div>
+
+        <!-- ===== TIME BREAKDOWN BAR ===== -->
+        <div class="time-bar-container">
+            <h2 class="section-header">⏱️ Time Distribution</h2>
+            <div class="time-bar" id="time-bar"></div>
+            <div class="time-legend">
+                <div class="legend-item">
+                    <span class="legend-dot" style="background: #16a34a;"></span>
+                    <span>Active: <strong id="legend-active">-</strong></span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot" style="background: #f59e0b;"></span>
+                    <span>Idle: <strong id="legend-idle">-</strong></span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot" style="background: #dc2626;"></span>
+                    <span>Locked: <strong id="legend-locked">-</strong></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TOP APPLICATIONS ===== -->
+        <h2 class="section-header">📱 Top Applications</h2>
+        <table class="report-data-table">
+            <thead>
+                <tr>
+                    <th class="rank">#</th>
+                    <th>Application</th>
+                    <th class="text-right">Duration</th>
+                    <th class="text-right">Sessions</th>
+                    <th class="text-center">Usage %</th>
+                </tr>
+            </thead>
+            <tbody id="app-table-body">
+                <tr>
+                    <td colspan="5" class="text-center text-muted">Loading...</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- ===== TOP WEBSITES ===== -->
+        <h2 class="section-header">🌐 Top Websites</h2>
+        <table class="report-data-table">
+            <thead>
+                <tr>
+                    <th class="rank">#</th>
+                    <th>Domain</th>
+                    <th class="text-right">Duration</th>
+                    <th class="text-right">Visits</th>
+                </tr>
+            </thead>
+            <tbody id="domain-table-body">
+                <tr>
+                    <td colspan="4" class="text-center text-muted">Loading...</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- ===== ACTIVITY TIMELINE ===== -->
+        <h2 class="section-header">📈 Activity Timeline (24 Hours)</h2>
+        <div class="timeline-container">
+            <div class="timeline-bars" id="timeline-bars"></div>
+            <div class="timeline-labels">
+                <span>00:00</span>
+                <span>06:00</span>
+                <span>12:00</span>
+                <span>18:00</span>
+                <span>23:59</span>
+            </div>
+        </div>
+
+        <!-- ===== FOOTER ===== -->
+        <div class="report-footer">
+            <p><strong>SentinelEdge</strong> - Employee Monitoring & Analytics Platform</p>
+            <p>This report contains sensitive employee activity data. Distribution without authorization is prohibited.
+            </p>
+            <p>© 2025 SentinelEdge. All rights reserved. | All times shown in IST (UTC+5:30)</p>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/timezone_utils.js') }}"></script>
+<script>
+    // ===== CONFIGURATION =====
+    const AGENT_ID = "{{ agent_id }}";
+    const API_URL = `/dashboard/api/agent/${AGENT_ID}/full-report`;
+
+    // Get date from URL parameter or use today
+    const urlParams = new URLSearchParams(window.location.search);
+    let reportDate = urlParams.get('date') || new Date().toISOString().split('T')[0];
+
+    // Set date picker
+    document.getElementById('report-date-input').value = reportDate;
+
+    // ===== DATA FILTERING RULES =====
+    const FILTERS = {
+        MIN_APP_DURATION: 60,  // At least 1 minute
+        MIN_APP_PERCENTAGE: 0.5,  // At least 0.5% of total time
+        MAX_APPS_DISPLAY: 10,
+        MAX_DOMAINS_DISPLAY: 10,
+        EXCLUDE_APPS: ['lockapp.exe', 'searchhost.exe', 'dwm.exe', 'System', 'shellexperiencehost.exe', 'applicationframehost.exe'],
+        EXCLUDE_SYSTEM_PREFIXES: ['Microsoft.Windows', 'MicrosoftWindows.']
+    };
+
+    // Global data storage for CSV export
+    let reportData = null;
+
+    // ===== CHANGE DATE =====
+    function changeReportDate() {
+        const newDate = document.getElementById('report-date-input').value;
+        window.location.href = `/dashboard/agent/${AGENT_ID}/report-v2?date=${newDate}`;
+    }
+
+    // ===== LOAD REPORT DATA =====
+    async function loadReport() {
+        try {
+            const response = await fetch(`${API_URL}?date=${reportDate}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const data = await response.json();
+            console.log('📊 Report data loaded:', data);
+
+            reportData = data;
+            renderReport(data);
+
+        } catch (error) {
+            console.error('❌ Failed to load report:', error);
+            document.getElementById('loading-indicator').innerHTML = `
+            <div class="empty-state">
+                <h3>⚠️ Failed to Load Report</h3>
+                <p>${error.message}</p>
+                <button onclick="location.reload()" class="btn btn-primary" style="margin-top: 15px;">Retry</button>
+            </div>
+        `;
+        }
+    }
+
+    // ===== RENDER REPORT =====
+    function renderReport(data) {
+        // Hide loading, show content
+        document.getElementById('loading-indicator').style.display = 'none';
+        document.getElementById('report-data').style.display = 'block';
+
+        // Header
+        document.getElementById('report-date-display').textContent = formatDateLongIST(data.date || reportDate);
+        document.getElementById('generation-time').textContent = getCurrentTimeIST();
+        document.getElementById('agent-hostname').textContent = data.agent?.hostname || 'Unknown';
+        document.getElementById('agent-username').textContent = data.agent?.username || 'N/A';
+        document.getElementById('agent-os').textContent = data.agent?.os || 'Unknown';
+        document.getElementById('agent-id-short').textContent = (data.agent?.agent_id || AGENT_ID).substring(0, 8) + '...';
+
+        // Status indicator
+        const statusDot = document.getElementById('status-indicator');
+        statusDot.className = `status-dot ${data.agent?.is_online ? '' : 'offline'}`;
+
+        // Metrics
+        const screenTime = data.screen_time || {};
+        const totalSeconds = screenTime.total_seconds || (screenTime.active_seconds || 0) + (screenTime.idle_seconds || 0) + (screenTime.locked_seconds || 0);
+        const activeSeconds = screenTime.active_seconds || 0;
+
+        const activePercent = totalSeconds > 0
+            ? Math.round((activeSeconds / totalSeconds) * 100)
+            : 0;
+
+        document.getElementById('metric-active-time').textContent = formatTime(activeSeconds);
+        document.getElementById('metric-active-percent').textContent = `${activePercent}% of total time`;
+        document.getElementById('metric-productivity').textContent = `${activePercent}%`;
+        document.getElementById('metric-total-time').textContent = formatTime(totalSeconds);
+
+        // Top app
+        const apps = data.app_usage?.data || [];
+        if (apps.length > 0) {
+            const topApp = apps[0];
+            document.getElementById('metric-top-app').textContent = topApp.app;
+            document.getElementById('metric-top-app-time').textContent = `${formatTime(topApp.duration_seconds)} (${(topApp.percentage || 0).toFixed(1)}%)`;
+        }
+
+        // Work hours (first to last session)
+        const firstSeen = data.agent?.first_seen_today;
+        const lastSeen = data.agent?.last_seen;
+        if (firstSeen) {
+            document.getElementById('metric-work-hours').textContent = `First: ${formatTimeIST(firstSeen).replace(' IST', '')}`;
+        }
+
+        // Time breakdown bar
+        renderTimeBar(screenTime, totalSeconds);
+
+        // Applications table
+        renderApplicationsTable(apps, activeSeconds);
+
+        // Domains table
+        renderDomainsTable(data.domain_usage?.data || []);
+
+        // Activity timeline
+        renderTimeline(data.app_sessions?.data || []);
+    }
+
+    // ===== RENDER TIME BAR =====
+    function renderTimeBar(screenTime, total) {
+        if (total === 0) {
+            document.getElementById('time-bar').innerHTML = '<div class="time-segment" style="background: #e5e7eb; width: 100%;">No data</div>';
+            document.getElementById('legend-active').textContent = '0h 0m';
+            document.getElementById('legend-idle').textContent = '0h 0m';
+            document.getElementById('legend-locked').textContent = '0h 0m';
+            return;
+        }
+
+        const activeSeconds = screenTime.active_seconds || 0;
+        const idleSeconds = screenTime.idle_seconds || 0;
+        const lockedSeconds = screenTime.locked_seconds || 0;
+
+        const activePercent = (activeSeconds / total) * 100;
+        const idlePercent = (idleSeconds / total) * 100;
+        const lockedPercent = (lockedSeconds / total) * 100;
+
+        const bar = document.getElementById('time-bar');
+        bar.innerHTML = `
+        <div class="time-segment active" style="width: ${activePercent}%">
+            ${activePercent > 15 ? activePercent.toFixed(0) + '%' : ''}
+        </div>
+        <div class="time-segment idle" style="width: ${idlePercent}%">
+            ${idlePercent > 15 ? idlePercent.toFixed(0) + '%' : ''}
+        </div>
+        <div class="time-segment locked" style="width: ${lockedPercent}%">
+            ${lockedPercent > 15 ? lockedPercent.toFixed(0) + '%' : ''}
+        </div>
+    `;
+
+        document.getElementById('legend-active').textContent = formatTime(activeSeconds);
+        document.getElementById('legend-idle').textContent = formatTime(idleSeconds);
+        document.getElementById('legend-locked').textContent = formatTime(lockedSeconds);
+    }
+
+    // ===== RENDER APPLICATIONS TABLE =====
+    function renderApplicationsTable(apps, totalActiveSeconds) {
+        // Filter apps
+        const filtered = apps.filter(app => {
+            // Must meet minimum duration
+            if (app.duration_seconds < FILTERS.MIN_APP_DURATION) return false;
+
+            // Must meet minimum percentage
+            if ((app.percentage || 0) < FILTERS.MIN_APP_PERCENTAGE) return false;
+
+            // Exclude system apps
+            const appLower = app.app.toLowerCase();
+            if (FILTERS.EXCLUDE_APPS.some(excl => appLower.includes(excl.toLowerCase()))) return false;
+            if (FILTERS.EXCLUDE_SYSTEM_PREFIXES.some(prefix => app.app.startsWith(prefix))) return false;
+
+            return true;
+        }).slice(0, FILTERS.MAX_APPS_DISPLAY);
+
+        const tbody = document.getElementById('app-table-body');
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No application data available</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = filtered.map((app, index) => `
+        <tr>
+            <td class="rank">${index + 1}</td>
+            <td><strong>${escapeHtml(app.app)}</strong></td>
+            <td class="text-right">${formatTime(app.duration_seconds)}</td>
+            <td class="text-right">${app.session_count || '-'}</td>
+            <td class="text-center percentage">${(app.percentage || 0).toFixed(1)}%</td>
+        </tr>
+    `).join('');
+    }
+
+    // ===== RENDER DOMAINS TABLE =====
+    function renderDomainsTable(domains) {
+        // Filter domains
+        const filtered = domains
+            .filter(d => d.duration_seconds >= FILTERS.MIN_APP_DURATION)
+            .slice(0, FILTERS.MAX_DOMAINS_DISPLAY);
+
+        const tbody = document.getElementById('domain-table-body');
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No website data available</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = filtered.map((domain, index) => `
+        <tr>
+            <td class="rank">${index + 1}</td>
+            <td><strong>${escapeHtml(domain.domain)}</strong></td>
+            <td class="text-right">${formatTime(domain.duration_seconds)}</td>
+            <td class="text-right">${domain.session_count || '-'}</td>
+        </tr>
+    `).join('');
+    }
+
+    // ===== RENDER ACTIVITY TIMELINE =====
+    function renderTimeline(sessions) {
+        const container = document.getElementById('timeline-bars');
+
+        // Create 24 hour bins
+        const hourBins = Array(24).fill(0).map(() => ({ active: 0, locked: 0 }));
+
+        if (sessions && sessions.length > 0) {
+            sessions.forEach(session => {
+                if (!session.start_time) return;
+
+                // Parse timestamp - treat as UTC if no timezone info
+                let ts = session.start_time;
+                if (!ts.endsWith('Z') && !ts.includes('+')) {
+                    ts += 'Z';
+                }
+                const startDate = new Date(ts);
+
+                // Convert to IST hour (UTC + 5:30)
+                const utcHour = startDate.getUTCHours();
+                const utcMinutes = startDate.getUTCMinutes();
+                let istHour = utcHour + 5;
+                if (utcMinutes >= 30) istHour += 1;
+                if (istHour >= 24) istHour -= 24;
+
+                if (session.app && session.app.toLowerCase().includes('lockapp')) {
+                    hourBins[istHour].locked += session.duration_seconds || 0;
+                } else {
+                    hourBins[istHour].active += session.duration_seconds || 0;
+                }
+            });
+        }
+
+        container.innerHTML = hourBins.map((bin, hour) => {
+            const hasActivity = bin.active > 0;
+            const hasLocked = bin.locked > 0 && !hasActivity;
+            const classes = hasLocked ? 'has-locked' : (hasActivity ? 'has-activity' : '');
+            const title = `${hour.toString().padStart(2, '0')}:00 IST - Active: ${formatTime(bin.active)}, Locked: ${formatTime(bin.locked)}`;
+
+            return `<div class="timeline-hour ${classes}" title="${title}"></div>`;
+        }).join('');
+    }
+
+    // ===== CSV EXPORT =====
+    function exportCSV() {
+        if (!reportData) {
+            alert('Report data not loaded yet');
+            return;
+        }
+
+        const data = reportData;
+        let csv = 'AGENT ACTIVITY REPORT\n';
+        csv += `Date,${data.date || reportDate}\n`;
+        csv += `Agent ID,${data.agent?.agent_id || ''}\n`;
+        csv += `Hostname,${data.agent?.hostname || ''}\n`;
+        csv += `Username,${data.agent?.username || ''}\n`;
+        csv += `OS,${data.agent?.os || ''}\n\n`;
+
+        // Screen Time
+        csv += 'SCREEN TIME\n';
+        csv += 'Type,Seconds,Formatted\n';
+        csv += `Active,${data.screen_time?.active_seconds || 0},"${formatTime(data.screen_time?.active_seconds || 0)}"\n`;
+        csv += `Idle,${data.screen_time?.idle_seconds || 0},"${formatTime(data.screen_time?.idle_seconds || 0)}"\n`;
+        csv += `Locked,${data.screen_time?.locked_seconds || 0},"${formatTime(data.screen_time?.locked_seconds || 0)}"\n`;
+        csv += `Total,${data.screen_time?.total_seconds || 0},"${formatTime(data.screen_time?.total_seconds || 0)}"\n\n`;
+
+        // App Usage
+        csv += 'APPLICATION USAGE\n';
+        csv += 'Application,Duration (seconds),Duration (formatted),Sessions,Percentage\n';
+        if (data.app_usage?.data) {
+            data.app_usage.data.forEach(a => {
+                csv += `"${a.app}",${a.duration_seconds},"${formatTime(a.duration_seconds)}",${a.session_count || 0},${(a.percentage || 0).toFixed(1)}%\n`;
+            });
+        }
+        csv += '\n';
+
+        // Domain Usage
+        csv += 'DOMAIN USAGE\n';
+        csv += 'Domain,Duration (seconds),Duration (formatted),Sessions\n';
+        if (data.domain_usage?.data) {
+            data.domain_usage.data.forEach(d => {
+                csv += `"${d.domain}",${d.duration_seconds},"${formatTime(d.duration_seconds)}",${d.session_count || 0}\n`;
+            });
+        }
+
+        // Download
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `report_${data.agent?.hostname || AGENT_ID}_${data.date || reportDate}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    // ===== UTILITY FUNCTIONS =====
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ===== INITIALIZE ON LOAD =====
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('🚀 Report v2 initialized for agent:', AGENT_ID, 'Date:', reportDate);
+        loadReport();
+    });
+</script>
+{% endblock %}

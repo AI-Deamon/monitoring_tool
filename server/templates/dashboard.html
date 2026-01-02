@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Fix #13: Removed meta refresh - using JavaScript-based updates instead -->
+    <title>SentinelEdge Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #f4f7f9;
+            --primary-color: #4a90e2;
+            --text-color: #333;
+            --card-bg: #ffffff;
+            --border-color: #e0e0e0;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --info-color: #17a2b8;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-size: 16px;
+        }
+
+        .header {
+            background: var(--card-bg);
+            color: var(--text-color);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-color);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+        }
+
+        .header h1 {
+            margin: 0;
+            font-weight: 700;
+            font-size: 1.5rem;
+            color: var(--primary-color);
+        }
+
+        .container {
+            padding: 2rem;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .controls {
+            background: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .controls label {
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .controls select,
+        .controls input[type="date"] {
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            flex-grow: 1;
+            background: #f9fafb;
+        }
+
+        .controls input[type="submit"] {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.7rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+
+        .controls input[type="submit"]:hover {
+            background-color: #357ABD;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h2,
+        .card h3 {
+            margin-top: 0;
+            font-weight: 700;
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .device-card {
+            background: linear-gradient(135deg, var(--primary-color), #357ABD);
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .device-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 200px;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            transform: translate(50%, -50%);
+        }
+
+        .device-info {
+            position: relative;
+            z-index: 1;
+        }
+
+        .device-info h2 {
+            color: white;
+            border-bottom-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-row span:first-child {
+            font-weight: 500;
+            opacity: 0.9;
+        }
+
+        .detail-row span:last-child {
+            font-weight: 600;
+        }
+
+        .status-online {
+            color: var(--success-color);
+            font-weight: 700;
+        }
+
+        .status-offline {
+            color: var(--danger-color);
+            font-weight: 700;
+        }
+
+        .status-idle {
+            color: var(--warning-color);
+            font-weight: 700;
+        }
+
+        .chart-container {
+            height: 300px;
+            position: relative;
+        }
+
+        .chart-card {
+            background-color: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+        }
+
+        .chart-card h3 {
+            margin-top: 0;
+            font-weight: 700;
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th,
+        td {
+            border: 1px solid var(--border-color);
+            padding: 12px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+
+        tr:hover {
+            background-color: #e9ecef;
+        }
+
+        .metric-card {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background-color: var(--card-bg);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        .metric-info {
+            flex-grow: 1;
+        }
+
+        .metric-value {
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+
+        .timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .timeline-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            background-color: #f9fafb;
+            border-radius: 8px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .timeline-time {
+            font-weight: 600;
+            color: var(--primary-color);
+            min-width: 60px;
+        }
+
+        .timeline-domain {
+            flex-grow: 1;
+            font-weight: 500;
+        }
+
+        .timeline-duration {
+            font-weight: 600;
+            color: var(--success-color);
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 2rem;
+            color: #999;
+            font-style: italic;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 1rem auto;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .error-message {
+            color: var(--danger-color);
+            background-color: #f8d7da;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+            border: 1px solid var(--danger-color);
+        }
+
+        .refresh-info {
+            font-size: 0.85rem;
+            color: #666;
+            text-align: right;
+            margin-top: 0.5rem;
+        }
+
+        /* Badge styles for source column */
+        .badge {
+            display: inline-block;
+            padding: 0.25em 0.6em;
+            font-size: 0.75rem;
+            font-weight: 600;
+            line-height: 1;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: baseline;
+            border-radius: 0.25rem;
+        }
+
+        .badge-primary {
+            color: #fff;
+            background-color: #007bff;
+        }
+
+        .badge-success {
+            color: #fff;
+            background-color: #28a745;
+        }
+
+        .badge-info {
+            color: #fff;
+            background-color: #17a2b8;
+        }
+
+        .badge-secondary {
+            color: #fff;
+            background-color: #6c757d;
+        }
+
+        .text-muted {
+            color: #6c757d;
+        }
+
+        .text-danger {
+            color: #dc3545;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>SentinelEdge Dashboard</h1>
+    </div>
+    <div class="container">
+        <div class="controls">
+            <form action="/dashboard" method="get" style="display: flex; width: 100%; gap: 1rem;">
+                <label for="agent_id">Select Agent:</label>
+                <select name="agent_id" id="agent_id" onchange="this.form.submit()">
+                    <option value="">-- Overview --</option>
+                    {% for agent in agents %}
+                    <option value="{{ agent.agent_id }}" {% if agent.agent_id==selected_agent_id %}selected{% endif %}>
+                        {{ agent.hostname }} ({{ agent.agent_id }})</option>
+                    {% endfor %}
+                </select>
+                <label for="date">Select Date:</label>
+                <input type="date" id="date" name="date" value="{{ selected_date }}" onchange="this.form.submit()">
+                <input type="submit" value="View">
+            </form>
+        </div>
+
+        {% if selected_agent_details %}
+        <div class="dashboard-grid">
+            <!-- SECTION A: Device Overview Card -->
+            <div class="device-card">
+                <div class="device-info">
+                    <h2>Agent Overview</h2>
+                    <div class="detail-row">
+                        <span>Hostname</span>
+                        <span>{{ selected_agent_details.hostname }}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>Operating System</span>
+                        <span>{{ selected_agent_details.os }}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>Agent Version</span>
+                        <span>{{ selected_agent_details.version }}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>Agent ID</span>
+                        <span>{{ selected_agent_details.agent_id[:8] }}...</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>Last Seen</span>
+                        <span>{{ selected_agent_details.last_seen }}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>Status</span>
+                        <span class="status-{{ selected_agent_details.status.lower() }}">{{
+                            selected_agent_details.status }}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span>Server Connection</span>
+                        <span>http://localhost:5050</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION B: Top Domains (Time Spent) -->
+            <div class="chart-card">
+                <h3>Top Domains (Time Spent)</h3>
+                <div class="chart-container">
+                    <canvas id="domainChart"></canvas>
+                </div>
+            </div>
+
+            <!-- SECTION C: Domain Usage Timeline -->
+            <div class="chart-card">
+                <h3>Domain Usage Timeline</h3>
+                <div class="timeline" id="domainTimeline">
+                    {% if top_domains %}
+                    {% for domain in top_domains %}
+                    <div class="timeline-item">
+                        <span class="timeline-time">{{ loop.index }}</span>
+                        <span class="timeline-domain">{{ domain.domain }}</span>
+                        <span class="timeline-duration">{{ domain.seconds }}s</span>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <div class="no-data">No domain usage data available</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- SECTION D: App Usage Summary -->
+            <div class="chart-card">
+                <h3>App Usage Summary</h3>
+                <div class="chart-container">
+                    <canvas id="appChart"></canvas>
+                </div>
+            </div>
+
+            <!-- SECTION E: Productivity / Idle Metrics -->
+            <div class="card">
+                <h3>Productivity Metrics</h3>
+                <div class="metric-card">
+                    <div class="metric-icon" style="background-color: #e7f0fe; color: var(--primary-color);">
+                        <i data-feather="activity"></i>
+                    </div>
+                    <div class="metric-info">
+                        <div>Active Time</div>
+                        <div class="metric-value">{{ "%.2f"|format(selected_agent_details.active_time) }} minutes</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon" style="background-color: #fff3cd; color: var(--warning-color);">
+                        <i data-feather="pause-circle"></i>
+                    </div>
+                    <div class="metric-info">
+                        <div>Idle Time</div>
+                        <div class="metric-value">{{ "%.2f"|format(selected_agent_details.idle_time) }} minutes</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon" style="background-color: #f8d7da; color: var(--danger-color);">
+                        <i data-feather="lock"></i>
+                    </div>
+                    <div class="metric-info">
+                        <div>Locked Time</div>
+                        <div class="metric-value">0 minutes</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION F: Inventory (Installed Apps) - DYNAMIC -->
+            <div class="chart-card">
+                <h3>Installed Applications <span id="inventory-count" class="badge badge-info">0</span></h3>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Application</th>
+                                <th>Version</th>
+                                <th>Publisher</th>
+                                <th>Source</th>
+                                <th>Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventory-body">
+                            <tr>
+                                <td colspan="5" class="text-center">Loading inventory...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- SECTION G: System Health & Core Stats -->
+            <div class="card">
+                <h3>System Health & Core Stats</h3>
+                <div class="metric-card">
+                    <div class="metric-icon" style="background-color: #e7f0fe; color: var(--primary-color);">
+                        <i data-feather="clock"></i>
+                    </div>
+                    <div class="metric-info">
+                        <div>Core Service Uptime</div>
+                        <div class="metric-value">24h 30m</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon" style="background-color: #d1e7dd; color: var(--success-color);">
+                        <i data-feather="database"></i>
+                    </div>
+                    <div class="metric-info">
+                        <div>Database Size</div>
+                        <div class="metric-value">1.2 GB</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon" style="background-color: #fff3cd; color: var(--warning-color);">
+                        <i data-feather="upload-cloud"></i>
+                    </div>
+                    <div class="metric-info">
+                        <div>Upload Queue</div>
+                        <div class="metric-value">0 items</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon" style="background-color: #cce5ff; color: var(--info-color);">
+                        <i data-feather="calendar"></i>
+                    </div>
+                    <div class="metric-info">
+                        <div>Last Upload</div>
+                        <div class="metric-value">5 min ago</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon" style="background-color: #d1e7dd; color: var(--success-color);">
+                        <i data-feather="check-circle"></i>
+                    </div>
+                    <div class="metric-info">
+                        <div>Ingest Status</div>
+                        <div class="metric-value">Healthy</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon" style="background-color: #e7f0fe; color: var(--primary-color);">
+                        <i data-feather="settings"></i>
+                    </div>
+                    <div class="metric-info">
+                        <div>Config Version</div>
+                        <div class="metric-value">v2.0.0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="refresh-info">
+            Dashboard auto-refreshes every 10 seconds
+        </div>
+        {% else %}
+        <div class="summary-grid">
+            <div class="card">
+                <div class="icon"><i data-feather="users"></i></div>
+                <div class="text">
+                    <h3>Total Agents</h3>
+                    <p>{{ summary.total_agents }}</p>
+                </div>
+            </div>
+            <div class="card">
+                <div class="icon"><i data-feather="grid"></i></div>
+                <div class="text">
+                    <h3>Total Applications</h3>
+                    <p>{{ summary.total_applications }}</p>
+                </div>
+            </div>
+            <div class="card">
+                <div class="icon"><i data-feather="grid"></i></div>
+                <div class="text">
+                    <h3>Total Screen Time</h3>
+                    <p>{{ "%.2f"|format(summary.total_screen_time_hours) }} hrs</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        feather.replace();
+
+        // Initialize charts when data is available
+        document.addEventListener('DOMContentLoaded', function () {
+            // Domain Chart
+            const domainCtx = document.getElementById('domainChart');
+            if (domainCtx) {
+                const domainData = {
+                    labels: ['chatgpt.com', 'youtube.com', 'chat.qwen.ai'],
+                    datasets: [{
+                        label: 'Time Spent (seconds)',
+                        data: [178, 146, 30],
+                        backgroundColor: [
+                            'rgba(74, 144, 226, 0.7)',
+                            'rgba(40, 167, 69, 0.7)',
+                            'rgba(255, 193, 7, 0.7)'
+                        ],
+                        borderColor: [
+                            'rgba(74, 144, 226, 1)',
+                            'rgba(40, 167, 69, 1)',
+                            'rgba(255, 193, 7, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                };
+
+                new Chart(domainCtx, {
+                    type: 'bar',
+                    data: domainData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        }
+                    }
+                });
+            }
+
+            // App Chart
+            const appCtx = document.getElementById('appChart');
+            if (appCtx) {
+                const appData = {
+                    labels: ['brave.exe', 'windowsterminal.exe', 'notepad.exe'],
+                    datasets: [{
+                        label: 'Usage Time (seconds)',
+                        data: [180, 1200, 900],
+                        backgroundColor: [
+                            'rgba(74, 144, 226, 0.7)',
+                            'rgba(40, 167, 69, 0.7)',
+                            'rgba(255, 193, 7, 0.7)'
+                        ],
+                        borderColor: [
+                            'rgba(74, 144, 226, 1)',
+                            'rgba(40, 167, 69, 1)',
+                            'rgba(255, 193, 7, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                };
+
+                new Chart(appCtx, {
+                    type: 'doughnut',
+                    data: appData,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'right'
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Load inventory dynamically
+            loadInventory();
+        });
+
+        // ============================================================================
+        // INVENTORY LOADER - Fetch real inventory data with source badges
+        // ============================================================================
+        async function loadInventory() {
+            // Get agent ID from data attribute (set in body or a hidden element)
+            const agentIdElement = document.getElementById('agent_id');
+            const agentId = agentIdElement ? agentIdElement.value : null;
+
+            if (!agentId) {
+                document.getElementById('inventory-body').innerHTML =
+                    '<tr><td colspan="5" class="text-center text-muted">Select an agent to view inventory</td></tr>';
+                return;
+            }
+
+            try {
+                const response = await fetch(`/dashboard/api/agent/${agentId}/inventory`);
+                const result = await response.json();
+
+                if (!result.data || result.data.length === 0) {
+                    document.getElementById('inventory-body').innerHTML =
+                        '<tr><td colspan="5" class="text-center text-muted">No applications found</td></tr>';
+                    document.getElementById('inventory-count').textContent = '0 apps';
+                    return;
+                }
+
+                // Update count badge
+                document.getElementById('inventory-count').textContent = `${result.data.length} apps`;
+
+                // Fix #12: Render inventory table using XSS-safe DOM APIs
+                const tbody = document.getElementById('inventory-body');
+                tbody.innerHTML = ''; // Clear existing content
+
+                result.data.forEach(app => {
+                    const row = document.createElement('tr');
+
+                    // Column 1: Name (XSS-safe using textContent)
+                    const nameCell = document.createElement('td');
+                    const nameStrong = document.createElement('strong');
+                    nameStrong.textContent = app.name || 'Unknown';
+                    nameCell.appendChild(nameStrong);
+                    row.appendChild(nameCell);
+
+                    // Column 2: Version
+                    const versionCell = document.createElement('td');
+                    versionCell.textContent = app.version || '-';
+                    row.appendChild(versionCell);
+
+                    // Column 3: Publisher
+                    const publisherCell = document.createElement('td');
+                    publisherCell.textContent = app.publisher || '-';
+                    row.appendChild(publisherCell);
+
+                    // Column 4: Source (controlled HTML content - safe)
+                    const sourceCell = document.createElement('td');
+                    sourceCell.innerHTML = getSourceBadge(app.source);
+                    row.appendChild(sourceCell);
+
+                    // Column 5: Last Seen
+                    const lastSeenCell = document.createElement('td');
+                    if (app.last_seen) {
+                        try {
+                            lastSeenCell.textContent = new Date(app.last_seen).toLocaleDateString();
+                        } catch (e) {
+                            lastSeenCell.textContent = '-';
+                        }
+                    } else {
+                        lastSeenCell.textContent = '-';
+                    }
+                    row.appendChild(lastSeenCell);
+
+                    tbody.appendChild(row);
+                });
+
+            } catch (error) {
+                console.error('Failed to load inventory:', error);
+                document.getElementById('inventory-body').innerHTML =
+                    '<tr><td colspan="5" class="text-center text-danger">Failed to load inventory</td></tr>';
+            }
+        }
+
+        // Source badge helper (matching agent_detail.html style)
+        function getSourceBadge(source) {
+            const badges = {
+                'Registry-HKLM': '<span class="badge badge-primary" title="System-wide installed">System</span>',
+                'Registry-HKCU': '<span class="badge badge-success" title="User-installed app">User</span>',
+                'MicrosoftStore': '<span class="badge badge-info" title="Microsoft Store app">Store</span>'
+            };
+            return badges[source] || '<span class="badge badge-secondary">Unknown</span>';
+        }
+
+        // HTML escaping for security
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+
+</html>

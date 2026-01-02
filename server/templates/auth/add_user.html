@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add User - SentinelEdge</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f4f7f9;
+            --primary-color: #4a90e2;
+            --text-color: #333;
+            --card-bg: #ffffff;
+            --border-color: #e0e0e0;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .header {
+            background: var(--card-bg);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header h1 {
+            margin: 0;
+            font-weight: 700;
+            font-size: 1.5rem;
+            color: var(--primary-color);
+        }
+
+        .container {
+            padding: 2rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+        }
+
+        .card h2 {
+            margin-top: 0;
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #555;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 0.75rem;
+            font-size: 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: #f9fafb;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+        }
+
+        .form-group small {
+            display: block;
+            margin-top: 0.25rem;
+            color: #888;
+            font-size: 0.85rem;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #357ABD;
+        }
+
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #5a6268;
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+
+        .alert-danger {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>Add New User</h1>
+    </div>
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <div class="card">
+            <h2>Create Dashboard User</h2>
+            <form method="POST" action="{{ url_for('auth.add_user') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group">
+                    <label for="username">Username *</label>
+                    <input type="text" id="username" name="username" required placeholder="Enter username"
+                        minlength="3">
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password *</label>
+                    <input type="password" id="password" name="password" required placeholder="Enter password"
+                        minlength="8">
+                    <small>Minimum 8 characters</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="role">Role *</label>
+                    <select id="role" name="role" required>
+                        <option value="user">User (can only view own data)</option>
+                        <option value="admin">Admin (can view all data)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="linked_username">Linked Windows Username</label>
+                    <input type="text" id="linked_username" name="linked_username" list="username-options"
+                        placeholder="Select or type Windows username">
+                    <datalist id="username-options">
+                        {% if available_usernames %}
+                        {% for username in available_usernames %}
+                        <option value="{{ username }}">{{ username }}</option>
+                        {% endfor %}
+                        {% endif %}
+                    </datalist>
+                    <small>
+                        {% if available_usernames %}
+                        Select the Windows username from the dropdown. This user will only see data for this Windows
+                        account.
+                        {% else %}
+                        No Windows usernames available yet. Agents need to connect and report their usernames first.
+                        {% endif %}
+                    </small>
+                </div>
+
+                <div class="btn-group">
+                    <button type="submit" class="btn btn-primary">Create User</button>
+                    <a href="{{ url_for('auth.list_users') }}" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+
+</html>

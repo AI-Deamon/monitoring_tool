@@ -1,0 +1,1097 @@
+# SentinelEdge Data Flow Documentation
+
+## Overview
+This document traces exactly how data flows from Helper (user-level) → Core (system-level) → Server for each telemetry type.
+
+---
+
+## 1. SCREEN TIME (Active/Idle/Locked States)
+
+### Helper Side (collector.py → comm.py)
+
+**Collection Interval:** Every 30 seconds (heartbeat_interval)
+
+**In `collect_heartbeat()`:**
+```python
+# From IdleDetector.sample()
+idle_state = self.idle_detector.sample()
+# Returns:
+# {
+#   'state': 'active' | 'idle' | 'locked',
+#   'cumulative': {
+#     'active_seconds': 1234.56,    # Total since session start
+#     'idle_seconds': 456.78,
+#     'locked_seconds': 89.01,
+#     'session_start': '2025-01-15T10:00:00Z',
+#     'heartbeat_count': 42
+#   }
+# }
+```
+
+**In Heartbeat Packet (sent every 30 seconds):**
+```json
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john.doe",
+  "sequence": 42,
+  "timestamp": "2025-01-15T10:01:30Z",
+  "pulsetime": 30,
+  "idle": {
+    "state": "active",
+    "changed": false,
+    "duration": 30.0,
+    "idle_seconds_raw": 0,
+    "time_in_state": 450.0
+  },
+  "screentime": {
+    "active_seconds": 1234.56,
+    "idle_seconds": 456.78,
+    "locked_seconds": 89.01,
+    "session_start": "2025-01-15T09:30:00Z",
+    "heartbeat_count": 42
+  }
+}
+```
+
+### Core Side (ingest.py)
+
+**Receives in `_handle_heartbeat()`:**
+```python
+# Core receives the heartbeat and stores it in buffer
+row_id = self.server.buffer.store_heartbeat(data)
+```
+
+**Also feeds to LiveTelemetryTracker (`live_telemetry.py`):**
+```python
+# Fast non-blocking update
+self.live_telemetry.process_heartbeat(heartbeat_data)
+
+# Extracts screentime:
+helper_active = screentime_data.get('active_seconds', 0)
+helper_idle = screentime_data.get('idle_seconds', 0)
+helper_locked = screentime_data.get('locked_seconds', 0)
+
+# Stores as:
+self.current_state['helper_cumulative'] = {
+    'active': helper_active,
+    'idle': helper_idle,
+    'locked': helper_locked,
+    'session_start': screentime_data.get('session_start'),
+    'heartbeat_count': screentime_data.get('heartbeat_count', 0)
+}
+```
+
+**Every 30 seconds, sends to server:**
+```json
+POST /api/v1/telemetry/screentime
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john.doe",
+  "timestamp": "2025-01-15T10:01:30Z",
+  "period_start": "2025-01-15T10:01:00Z",
+  "period_end": "2025-01-15T10:01:30Z",
+  "active_seconds": 30,        ← Time ACTIVE in this 30s period
+  "idle_seconds": 0,           ← Time IDLE in this 30s period
+  "locked_seconds": 0,         ← Time LOCKED in this 30s period
+  "current_state": "active"    ← Current state right now
+}
+```
+
+### Server Data Structure
+
+**Table: `agent_screentime`**
+```sql
+CREATE TABLE agent_screentime (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  agent_id VARCHAR(36),
+  username VARCHAR(255),
+  timestamp DATETIME,
+  period_start DATETIME,
+  period_end DATETIME,
+  active_seconds FLOAT,
+  idle_seconds FLOAT,
+  locked_seconds FLOAT,
+  current_state VARCHAR(20),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (agent_id, timestamp)
+);
+```
+
+**Display on Dashboard (per day):**
+```
+John Doe - 2025-01-15
+─────────────────────────────
+Active:  8h 45m 30s (60% of work hours)
+Idle:    2h 15m 45s (15% of work hours)
+Locked:  1h 30m 00s (10% of work hours)
+Offline: 1h 30m 45s (15% of work hours)
+
+Live this period: ACTIVE
+```
+
+---
+
+## 2. APPLICATION USAGE
+
+### Helper Side (collector.py → window.py → comm.py)
+
+**Collection Interval:** Every 30 seconds (same heartbeat)
+
+**In `collect_heartbeat()`:**
+```python
+# From WindowTracker.sample()
+current_app = self.window_tracker.get_current_app_duration()
+# Returns:
+# {
+#   'app_name': 'chrome.exe',
+#   'friendly_name': 'Google Chrome',
+#   'category': 'browser',
+#   'is_browser': True,
+#   'window_title': 'Gmail - Google Chrome',
+#   'duration_seconds': 180.5,      ← Time in CURRENT session
+#   'session_start': '2025-01-15T10:00:00Z',
+#   'cumulative_seconds': 3600.0    ← Total today
+# }
+```
+
+**In Heartbeat Packet (sent every 30 seconds):**
+```json
+{
+  "app": {
+    "current": "chrome.exe",
+    "friendly_name": "Google Chrome",
+    "category": "browser",
+    "is_browser": true,
+    "current_title": "Gmail - Google Chrome",
+    "duration": 180.5,
+    "session_start": "2025-01-15T10:00:00Z",
+    "cumulative_seconds": 3600.0
+  }
+}
+```
+
+**When app changes (every time window switches):**
+```python
+# _send_app_switch_event() called in LiveTelemetryTracker
+```
+
+**Immediate POST to server when app changes:**
+```json
+POST /api/v1/telemetry/app-active
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john.doe",
+  "timestamp": "2025-01-15T10:02:15Z",
+  "app": "chrome.exe",
+  "friendly_name": "Google Chrome",
+  "category": "browser",
+  "window_title": "Gmail - Google Chrome",
+  "session_start": "2025-01-15T10:00:00Z",
+  "duration_seconds": 135.0,
+  "is_active": true
+}
+```
+
+**Every 30 seconds sends current app status:**
+```json
+POST /api/v1/telemetry/app-active
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john.doe",
+  "timestamp": "2025-01-15T10:01:30Z",
+  "app": "chrome.exe",
+  "friendly_name": "Google Chrome",
+  "category": "browser",
+  "window_title": "Gmail - Google Chrome",
+  "session_start": "2025-01-15T10:00:00Z",
+  "duration_seconds": 180.5,
+  "is_active": true
+}
+```
+
+### Server Data Structure
+
+**Table: `agent_app_usage`**
+```sql
+CREATE TABLE agent_app_usage (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  agent_id VARCHAR(36),
+  username VARCHAR(255),
+  app_name VARCHAR(255),
+  friendly_name VARCHAR(255),
+  category VARCHAR(50),
+  window_title TEXT,
+  session_start DATETIME,
+  session_end DATETIME,
+  duration_seconds FLOAT,
+  is_active BOOLEAN,
+  timestamp DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (agent_id, timestamp),
+  INDEX (app_name, timestamp)
+);
+```
+
+**Display on Dashboard (per day):**
+```
+John Doe - 2025-01-15
+─────────────────────────────
+Google Chrome:      3h 45m (45%)
+Visual Studio Code: 2h 30m (30%)
+Slack:              1h 15m (15%)
+Outlook:              45m (10%)
+
+Active right now: Google Chrome (3h 45m)
+```
+
+---
+
+## 3. BROWSER DOMAIN VISITS
+
+### Two parallel systems:
+
+#### 3A. Active Domain Sessions (NEW - Session-based tracking)
+
+**Collection:** Continuous during heartbeats
+
+**In `collector.py collect_domain_sessions()`:**
+```python
+# From ActiveDomainTracker.get_pending_sessions()
+# Returns completed domain sessions:
+# [
+#   {
+#     'domain': 'gmail.com',
+#     'browser': 'Google Chrome',
+#     'url': 'https://mail.google.com/mail/u/0/',
+#     'title': 'Gmail',
+#     'start': '2025-01-15T10:00:00Z',
+#     'end': '2025-01-15T10:05:30Z',
+#     'duration_seconds': 330.5
+#   },
+#   {
+#     'domain': 'github.com',
+#     'browser': 'Google Chrome',
+#     'url': 'https://github.com/user/repo',
+#     'title': 'My Repo - GitHub',
+#     'start': '2025-01-15T10:05:31Z',
+#     'end': '2025-01-15T10:15:00Z',
+#     'duration_seconds': 569.0
+#   }
+# ]
+```
+
+**Sent every heartbeat to Core:**
+```json
+POST http://localhost:48123/domains_active
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-01-15T10:15:00Z",
+  "domains_active": [
+    {
+      "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+      "domain": "gmail.com",
+      "browser": "Google Chrome",
+      "url": "https://mail.google.com/mail/u/0/",
+      "title": "Gmail",
+      "start": "2025-01-15T10:00:00Z",
+      "end": "2025-01-15T10:05:30Z",
+      "duration_seconds": 330.5
+    }
+  ]
+}
+```
+
+**Core stores in buffer.py:**
+```python
+buffer.store_domain_sessions(sessions)
+# INSERT INTO domain_active_sessions (
+#   agent_id, domain, browser, url, title,
+#   start_time, end_time, duration_seconds, uploaded
+# )
+```
+
+**Core uploads to server every 60 seconds:**
+```json
+POST /api/v1/domain-active
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "domains_active": [
+    {
+      "domain": "gmail.com",
+      "browser": "Google Chrome",
+      "url": "https://mail.google.com/mail/u/0/",
+      "title": "Gmail",
+      "start": "2025-01-15T10:00:00Z",
+      "end": "2025-01-15T10:05:30Z",
+      "duration_seconds": 330.5
+    },
+    {
+      "domain": "github.com",
+      "browser": "Google Chrome",
+      "url": "https://github.com/user/repo",
+      "title": "My Repo - GitHub",
+      "start": "2025-01-15T10:05:31Z",
+      "end": "2025-01-15T10:15:00Z",
+      "duration_seconds": 569.0
+    }
+  ]
+}
+```
+
+#### 3B. Browser History Visits (LEGACY - History-based)
+
+**Collection:** Every 60 seconds
+
+**In `collector.py collect_domains()`:**
+```python
+# From BrowserHistoryTracker.sample()
+# Returns new history entries extracted from Chrome/Edge/Firefox history:
+# [
+#   {
+#     'domain': 'stackoverflow.com',
+#     'url': 'https://stackoverflow.com/questions/12345',
+#     'title': 'How to...',
+#     'browser': 'Google Chrome',
+#     'timestamp': '2025-01-15T10:12:45Z'
+#   }
+# ]
+```
+
+**Sent to Core every 60 seconds:**
+```json
+POST http://localhost:48123/domains
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-01-15T10:15:00Z",
+  "domains": [
+    {
+      "domain": "stackoverflow.com",
+      "url": "https://stackoverflow.com/questions/12345",
+      "title": "How to...",
+      "browser": "Google Chrome",
+      "timestamp": "2025-01-15T10:12:45Z"
+    }
+  ]
+}
+```
+
+### Server Data Structure
+
+**Table: `agent_domain_sessions`** (Active tracking)
+```sql
+CREATE TABLE agent_domain_sessions (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  agent_id VARCHAR(36),
+  domain VARCHAR(255),
+  browser VARCHAR(100),
+  url TEXT,
+  title TEXT,
+  start_time DATETIME,
+  end_time DATETIME,
+  duration_seconds FLOAT,
+  timestamp DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (agent_id, domain, start_time),
+  INDEX (domain, start_time)
+);
+```
+
+**Table: `agent_domain_visits`** (History-based)
+```sql
+CREATE TABLE agent_domain_visits (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  agent_id VARCHAR(36),
+  domain VARCHAR(255),
+  browser VARCHAR(100),
+  url TEXT,
+  title TEXT,
+  timestamp DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (agent_id, domain, timestamp),
+  INDEX (domain, timestamp)
+);
+```
+
+**Display on Dashboard (per day) - Column A (Focused):**
+```
+John Doe - 2025-01-15
+─────────────────────────────
+Focused Domain Time:
+  gmail.com:        1h 45m (40%)
+  github.com:         45m (17%)
+  stackoverflow.com:  30m (11%)
+  slack.com:          20m (8%)
+  linkedin.com:       15m (5%)
+  [other]:            30m (19%)
+```
+
+**Display on Dashboard (per day) - Column B (Visited):**
+```
+Sites Opened Today:
+  twitter.com
+  medium.com
+  google.com
+  youtube.com
+  wikipedia.org
+  [23 more sites]
+
+Total unique domains visited: 28
+```
+
+---
+
+## 4. APPLICATION INVENTORY
+
+### Helper Side (inventory.py)
+
+**Collection Interval:** 
+- Full inventory on startup/registration (force=True)
+- Check every 4 hours for changes
+- Only send if changes detected
+
+**In `collect_inventory(force=False)`:**
+```python
+# Uses PowerShell to get installed apps from Registry
+# Returns:
+# {
+#   'timestamp': '2025-01-15T10:15:00Z',
+#   'total_apps': 47,
+#   'inventory_hash': 'a1b2c3d4',
+#   'is_full_inventory': False,
+#   'changes': {
+#     'changed': True,
+#     'installed': ['Visual Studio Code 1.87'],
+#     'uninstalled': [],
+#     'updated': ['Google Chrome 122.0']
+#   },
+#   'apps': [
+#     {
+#       'name': 'Google Chrome',
+#       'version': '122.0.6261.112',
+#       'publisher': 'Google LLC',
+#       'install_location': 'C:\\Program Files\\Google\\Chrome\\...',
+#       'install_date': '2024-06-15'
+#     },
+#     # ... 46 more apps
+#   ]
+# }
+```
+
+**Sent to Core when changes detected:**
+```json
+POST http://localhost:48123/inventory
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-01-15T10:15:00Z",
+  "total_apps": 47,
+  "inventory_hash": "a1b2c3d4",
+  "is_full_inventory": false,
+  "changes": {
+    "changed": true,
+    "installed": ["Visual Studio Code 1.87"],
+    "uninstalled": [],
+    "updated": ["Google Chrome 122.0"]
+  },
+  "apps": [
+    {
+      "name": "Google Chrome",
+      "version": "122.0.6261.112",
+      "publisher": "Google LLC",
+      "install_location": "C:\\Program Files\\Google\\Chrome\\...",
+      "install_date": "2024-06-15"
+    }
+  ]
+}
+```
+
+**Core stores and uploads to server:**
+```json
+POST /api/v1/inventory
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-01-15T10:15:00Z",
+  "total_apps": 47,
+  "inventory_hash": "a1b2c3d4",
+  "is_full_inventory": false,
+  "changes": {
+    "changed": true,
+    "installed": ["Visual Studio Code 1.87"],
+    "uninstalled": [],
+    "updated": ["Google Chrome 122.0"]
+  },
+  "apps": [
+    {
+      "name": "Google Chrome",
+      "version": "122.0.6261.112",
+      "publisher": "Google LLC",
+      "install_location": "C:\\Program Files\\Google\\Chrome\\...",
+      "install_date": "2024-06-15"
+    }
+  ]
+}
+```
+
+### Server Data Structure
+
+**Table: `agent_inventory`**
+```sql
+CREATE TABLE agent_inventory (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  agent_id VARCHAR(36),
+  timestamp DATETIME,
+  total_apps INT,
+  inventory_hash VARCHAR(16),
+  is_full_inventory BOOLEAN,
+  apps_json LONGTEXT,          ← Store full app list as JSON
+  changes_json JSON,           ← {installed: [], uninstalled: [], updated: []}
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (agent_id, timestamp)
+);
+
+CREATE TABLE agent_installed_apps (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  agent_id VARCHAR(36),
+  app_name VARCHAR(255),
+  version VARCHAR(100),
+  publisher VARCHAR(255),
+  install_location TEXT,
+  install_date DATE,
+  first_seen DATETIME,
+  last_seen DATETIME,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (agent_id, app_name),
+  INDEX (agent_id, last_seen)
+);
+```
+
+**Display on Dashboard (per agent):**
+```
+John Doe - Installed Software
+──────────────────────────────
+Total applications: 47
+
+Recently installed:
+  • Visual Studio Code (5 hours ago)
+  • Python 3.11 (2 days ago)
+
+Recently updated:
+  • Google Chrome 122.0 (today)
+  • Windows 11 Build 23631 (3 days ago)
+
+Recently uninstalled:
+  • Node.js v18.14 (1 week ago)
+
+All 47 applications [show list]
+```
+
+---
+
+## 30-SECOND CYCLE SUMMARY
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  EVERY 30 SECONDS                                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Helper (User Context)                                      │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ collect_heartbeat():                                   │ │
+│  │  • Sample idle state (IdleDetector)                    │ │
+│  │  • Sample foreground app (WindowTracker)               │ │
+│  │  • Sample active domain (ActiveDomainTracker)          │ │
+│  │  • Build heartbeat packet                              │ │
+│  │                                                        │ │
+│  │ comm.send_heartbeat(heartbeat)                         │ │
+│  │  ↓ POST http://localhost:48123/heartbeat              │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                          ↓                                   │
+│  Core (System Context)                                      │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ ingest/_handle_heartbeat():                            │ │
+│  │  • Store in buffer.store_heartbeat()                   │ │
+│  │  • Feed to LiveTelemetryTracker.process_heartbeat()    │ │
+│  │                                                        │ │
+│  │ LiveTelemetryTracker._send_periodic_update():          │ │
+│  │  ↓ POST /api/v1/telemetry/screentime                  │ │
+│  │  ↓ POST /api/v1/telemetry/app-active                  │ │
+│  │  ↓ POST /api/v1/telemetry/domain-active               │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                          ↓                                   │
+│  Server                                                      │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ Receives:                                              │ │
+│  │  • /api/v1/telemetry/screentime                        │ │
+│  │  • /api/v1/telemetry/app-active                        │ │
+│  │  • /api/v1/telemetry/domain-active (if sessions end)   │ │
+│  │                                                        │ │
+│  │ Insert into:                                           │ │
+│  │  • agent_screentime                                    │ │
+│  │  • agent_app_usage                                     │ │
+│  │  • agent_domain_sessions                               │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+
+EVERY 60 SECONDS (Helper)
+├─ collect_domains() → send to Core /domains
+│  └─ Core stores and uploads to /api/v1/domains
+│
+EVERY 4 HOURS (Helper)
+├─ collect_inventory() → send to Core /inventory
+│  └─ Core stores and uploads to /api/v1/inventory (if changes)
+```
+
+---
+
+## Key Points for Server Implementation
+
+### 1. **Screentime Endpoints**
+- Receive periods (30s chunks)
+- Accumulate to hourly/daily summaries
+- Show active vs idle vs locked percentages
+
+### 2. **App Usage Endpoints**
+- Receive current app every 30s
+- Accumulate duration across all samples
+- Group by day/app for reporting
+
+### 3. **Domain Endpoints**
+- **`/domains_active`** = Sessions with duration (focused time)
+- **`/domains`** = History visits without duration (sites visited)
+- Different queries for Column A (focused) vs Column B (visited)
+
+### 4. **Inventory Endpoints**
+- Store full inventory on registration
+- Track changes (installed/uninstalled/updated)
+- Most recent snapshot is current state
+
+---
+
+## SQL Queries for Dashboard
+
+### Screen Time Today
+```sql
+SELECT 
+  SUM(active_seconds) as total_active,
+  SUM(idle_seconds) as total_idle,
+  SUM(locked_seconds) as total_locked
+FROM agent_screentime
+WHERE agent_id = ? 
+  AND DATE(timestamp) = CURDATE()
+```
+
+### Top Apps Today
+```sql
+SELECT 
+  friendly_name,
+  SUM(duration_seconds) as total_seconds
+FROM agent_app_usage
+WHERE agent_id = ? 
+  AND DATE(timestamp) = CURDATE()
+GROUP BY friendly_name
+ORDER BY total_seconds DESC
+LIMIT 5
+```
+
+### Top Domains Focused Today
+```sql
+SELECT 
+  domain,
+  SUM(duration_seconds) as total_seconds,
+  COUNT(*) as session_count
+FROM agent_domain_sessions
+WHERE agent_id = ? 
+  AND DATE(start_time) = CURDATE()
+GROUP BY domain
+ORDER BY total_seconds DESC
+LIMIT 5
+```
+
+### Sites Visited Today
+```sql
+SELECT DISTINCT domain
+FROM agent_domain_visits
+WHERE agent_id = ? 
+  AND DATE(timestamp) = CURDATE()
+ORDER BY timestamp DESC
+```
+# SentinelEdge Server Implementation Prompt
+
+## Context
+You are building a backend server for **SentinelEdge**, an endpoint monitoring agent that tracks employee activity on Windows machines. The Windows agent (both Core service and Helper process) sends telemetry data about screen time, app usage, browser domains, and installed software.
+
+**Data sources:**
+- **Helper** (user-level process) collects all telemetry every 30 seconds
+- **Core** (system-level service) aggregates, buffers, and uploads to your server
+- **Agent registration** creates agent/user accounts before any telemetry flows
+
+## Current Data Flow
+The agent sends 4 types of data:
+
+### 1. Screen Time (Every 30 seconds)
+```
+POST /api/v1/telemetry/screentime
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john.doe",
+  "timestamp": "2025-01-15T10:01:30Z",
+  "period_start": "2025-01-15T10:01:00Z",
+  "period_end": "2025-01-15T10:01:30Z",
+  "active_seconds": 30,
+  "idle_seconds": 0,
+  "locked_seconds": 0,
+  "current_state": "active"
+}
+```
+
+**Purpose:** Track when user is actively working vs idle vs workstation locked
+
+---
+
+### 2. App Usage (Every 30 seconds + app changes)
+```
+POST /api/v1/telemetry/app-active
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john.doe",
+  "timestamp": "2025-01-15T10:02:15Z",
+  "app": "chrome.exe",
+  "friendly_name": "Google Chrome",
+  "category": "browser",
+  "window_title": "Gmail - Google Chrome",
+  "session_start": "2025-01-15T10:00:00Z",
+  "duration_seconds": 135.0,
+  "is_active": true
+}
+```
+
+**Purpose:** Track which applications user is using and for how long
+
+---
+
+### 3. Domain Sessions (Every heartbeat that ends a session)
+```
+POST /api/v1/telemetry/domain-active
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john.doe",
+  "timestamp": "2025-01-15T10:05:00Z",
+  "domain": "gmail.com",
+  "browser": "Google Chrome",
+  "url": "https://mail.google.com/mail/u/0/",
+  "session_start": "2025-01-15T10:00:00Z",
+  "session_end": "2025-01-15T10:05:00Z",
+  "duration_seconds": 330.5,
+  "is_active": false
+}
+```
+
+**Purpose:** Track focused time on specific websites (active tab detection)
+
+---
+
+### 4. Domain History Visits (Every 60 seconds)
+```
+POST /api/v1/domains
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "domains": [
+    {
+      "domain": "stackoverflow.com",
+      "url": "https://stackoverflow.com/questions/12345",
+      "title": "How to...",
+      "browser": "Google Chrome",
+      "timestamp": "2025-01-15T10:12:45Z"
+    }
+  ]
+}
+```
+
+**Purpose:** Track all websites visited (background tabs, quick visits) - NO duration
+
+---
+
+### 5. Application Inventory (Every 4 hours, when changes detected)
+```
+POST /api/v1/inventory
+{
+  "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-01-15T10:15:00Z",
+  "total_apps": 47,
+  "inventory_hash": "a1b2c3d4",
+  "is_full_inventory": false,
+  "changes": {
+    "changed": true,
+    "installed": ["Visual Studio Code 1.87"],
+    "uninstalled": [],
+    "updated": ["Google Chrome 122.0"]
+  },
+  "apps": [
+    {
+      "name": "Google Chrome",
+      "version": "122.0.6261.112",
+      "publisher": "Google LLC",
+      "install_location": "C:\\Program Files\\Google\\Chrome\\...",
+      "install_date": "2024-06-15"
+    }
+  ]
+}
+```
+
+**Purpose:** Track installed software and changes over time
+
+---
+
+## Requirements
+
+### Phase 1: Data Storage & Ingestion
+Build API endpoints that:
+
+1. **Accept and validate** all 5 endpoint types
+2. **Store** data in database tables (design schema as needed)
+3. **Handle duplicates** gracefully (same data sent twice won't double-count)
+4. **Log errors** clearly (malformed JSON, missing fields, etc.)
+5. **Support Bearer token authentication** (Authorization: Bearer {api_key})
+
+### Phase 2: Daily Aggregation
+Create jobs/functions that:
+
+1. **Screen Time Summaries** - Per agent, per day:
+   - Total active/idle/locked hours
+   - Percentage breakdown
+   - Time by hour (heatmap data)
+
+2. **App Usage Summaries** - Per agent, per day:
+   - Top 10 apps by duration
+   - Category breakdown (browser, development, communication, etc.)
+   - Total unique apps used
+
+3. **Domain Summaries** - Two columns:
+   - **Column A (Focused):** Domains with cumulative session time (from domain-active)
+   - **Column B (Visited):** All unique domains visited (from domains history)
+
+4. **Inventory Snapshots** - Per agent:
+   - Current list of installed apps
+   - Total app count
+   - Recently installed/uninstalled/updated
+
+### Phase 3: Dashboard Queries
+Write query helpers that return:
+
+1. **Agent Overview** (today):
+   ```json
+   {
+     "agent_id": "...",
+     "username": "john.doe",
+     "date": "2025-01-15",
+     "screen_time": {
+       "active_hours": 8.75,
+       "idle_hours": 1.25,
+       "locked_hours": 0.5,
+       "offline_hours": 0
+     },
+     "top_apps": [
+       {"name": "Google Chrome", "hours": 4.5, "percent": 51},
+       {"name": "Visual Studio Code", "hours": 2.5, "percent": 28},
+       {"name": "Slack", "hours": 1.0, "percent": 11}
+     ],
+     "top_domains_focused": [
+       {"domain": "gmail.com", "hours": 1.5, "percent": 35},
+       {"domain": "github.com", "hours": 1.0, "percent": 23}
+     ],
+     "sites_visited": 28,
+     "unique_domains": ["gmail.com", "github.com", "stackoverflow.com", ...],
+     "apps_installed": 47,
+     "recent_changes": {
+       "installed": ["Visual Studio Code"],
+       "uninstalled": [],
+       "updated": ["Chrome 122.0"]
+     }
+   }
+   ```
+
+2. **Hourly Breakdown** (for heatmaps):
+   ```json
+   {
+     "agent_id": "...",
+     "date": "2025-01-15",
+     "hourly": [
+       {"hour": 9, "active": 60, "idle": 0, "locked": 0},
+       {"hour": 10, "active": 55, "idle": 5, "locked": 0},
+       {"hour": 11, "active": 60, "idle": 0, "locked": 0}
+     ]
+   }
+   ```
+
+3. **Timeline (Minute-level)** (for detailed view):
+   ```json
+   {
+     "agent_id": "...",
+     "date": "2025-01-15",
+     "timeline": [
+       {
+         "timestamp": "2025-01-15T09:00:00Z",
+         "idle_state": "active",
+         "current_app": "outlook.exe",
+         "current_domain": "outlook.office.com"
+       },
+       {
+         "timestamp": "2025-01-15T09:30:00Z",
+         "idle_state": "active",
+         "current_app": "chrome.exe",
+         "current_domain": "gmail.com"
+       }
+     ]
+   }
+   ```
+
+---
+
+## Success Criteria
+
+- [ ] All 5 endpoints accept POST requests and validate input
+- [ ] Data is stored without loss or duplication
+- [ ] Authentication works (401 on missing/invalid token)
+- [ ] Daily aggregation runs automatically (or on-demand)
+- [ ] Dashboard queries return data in < 500ms for a single agent
+- [ ] Data integrity: screentime for a day always = 24 hours (or uptime hours)
+- [ ] Can query by date range (e.g., "last 7 days", "last 30 days")
+- [ ] Error responses are clear and actionable
+
+---
+
+## Nice-to-Haves
+
+- Batch API endpoint (POST multiple events in one request)
+- Caching of daily summaries (Redis or in-memory)
+- Rate limiting per agent_id
+- Data retention policy (e.g., keep 90 days of raw, 2 years of aggregated)
+- Export to CSV/Excel
+- Team-level views (sum across multiple agents)
+
+---
+
+## Technology Stack (Choose what fits)
+
+**Framework Options:**
+- FastAPI (Python) - fast, async, auto-docs
+- Express (Node.js) - lightweight, familiar
+- Django (Python) - batteries included
+- Spring Boot (Java) - enterprise-grade
+
+**Database Options:**
+- PostgreSQL (relational, best for this)
+- MySQL (relational, similar to PostgreSQL)
+- MongoDB (document, if you prefer)
+
+**Key Libraries:**
+- ORM: SQLAlchemy, TypeORM, Sequelize, Django ORM
+- Auth: JWT, OAuth2
+- Validation: Pydantic, Joi, Zod, class-validator
+- Caching: Redis
+- Task Queue: Celery, Bull, APScheduler
+
+---
+
+## Endpoint Signatures
+
+```
+POST /api/v1/telemetry/screentime
+  Authorization: Bearer {api_key}
+  Body: screentime object
+  Returns: { "status": "ok", "id": 12345 }
+
+POST /api/v1/telemetry/app-active
+  Authorization: Bearer {api_key}
+  Body: app usage object
+  Returns: { "status": "ok", "id": 12346 }
+
+POST /api/v1/telemetry/domain-active
+  Authorization: Bearer {api_key}
+  Body: domain session object
+  Returns: { "status": "ok", "id": 12347 }
+
+POST /api/v1/domains
+  Authorization: Bearer {api_key}
+  Body: { domains: [...] }
+  Returns: { "status": "ok", "count": 3 }
+
+POST /api/v1/inventory
+  Authorization: Bearer {api_key}
+  Body: inventory object
+  Returns: { "status": "ok", "id": 12348 }
+
+GET /api/v1/agents/{agent_id}/summary?date=2025-01-15
+  Authorization: Bearer {api_key}
+  Returns: dashboard summary object
+
+GET /api/v1/agents/{agent_id}/hourly?date=2025-01-15
+  Authorization: Bearer {api_key}
+  Returns: hourly breakdown
+
+GET /api/v1/agents/{agent_id}/timeline?date=2025-01-15
+  Authorization: Bearer {api_key}
+  Returns: minute-level timeline
+```
+
+---
+
+## Schema Design Guidance
+
+**Minimum Tables:**
+1. `agent_screentime` - One row per 30-second sample
+2. `agent_app_usage` - One row per app period (or per 30s snapshot)
+3. `agent_domain_sessions` - One row per domain session (variable length)
+4. `agent_domain_visits` - One row per history entry
+5. `agent_inventory` - One row per scan (stores full JSON list)
+6. `agent_inventory_apps` - Denormalized app list for faster queries
+7. `daily_summary_screentime` - Pre-aggregated daily stats
+8. `daily_summary_apps` - Pre-aggregated app rankings
+9. `daily_summary_domains` - Pre-aggregated domain rankings
+
+**Indexes Priority:**
+- `(agent_id, timestamp)`
+- `(agent_id, DATE(timestamp))`
+- `(domain, DATE(timestamp))`
+- `(app_name, DATE(timestamp))`
+
+---
+
+## Notes
+
+- **No encryption needed yet** - focus on getting data in/out cleanly
+- **Timestamps must be ISO-8601 with timezone** (as shown above)
+- **Agent IDs are UUIDs** - validate format
+- **Usernames are Windows usernames** - no special format needed
+- **Domains are lowercase** - normalize on insert
+- **Apps are .exe filenames** - store both exe name and friendly name
+- **Durations in seconds** - store as FLOAT for precision
+- **All times in UTC** - convert on the client if needed
+
+---
+
+## Example: Screen Time Calculation
+
+```
+Raw data (every 30 seconds):
+09:00:00 -> active_seconds=30, idle=0, locked=0
+09:00:30 -> active_seconds=30, idle=0, locked=0
+09:01:00 -> active_seconds=30, idle=0, locked=0
+...
+17:00:00 -> (end of workday)
+
+Daily Summary:
+Total samples: 960 (32 hours of capture = agent was on)
+Sum of active_seconds: 28800 (8 hours)
+Sum of idle_seconds: 2400 (40 minutes)
+Sum of locked_seconds: 1200 (20 minutes)
+Offline: 3600 seconds (1 hour = 32 - 31 actual)
+
+Result:
+- Active: 8h 0m (72% of capture time)
+- Idle: 40m (19% of capture time)
+- Locked: 20m (9% of capture time)
+- Online hours: 8h (total working time)
+```
+
+This is your spec. Use this to build the server.
