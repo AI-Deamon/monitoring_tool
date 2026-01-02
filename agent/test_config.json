@@ -1,0 +1,35 @@
+{
+  "agent": {
+    "agent_id": "",
+    "local_agent_key": "",
+    "agent_name": "TestAgent"
+  },
+  "server": {
+    "url": "http://localhost:5050",
+    "allow_insecure_http": true,
+    "skip_manifest_verification": true
+  },
+  "core": {
+    "listen_port": 48123,
+    "aggregation_interval": 300,
+    "upload_interval": 60,
+    "heartbeat_interval": 300,
+    "enable_ingest": true,
+    "enable_uploader": true,
+    "enable_aggregator": true
+  },
+  "helper": {},
+  "thresholds": {
+    "idle_seconds": 300
+  },
+  "retry": {
+    "max_attempts": 5,
+    "initial_backoff_seconds": 2,
+    "max_backoff_seconds": 300
+  },
+  "dynamic_reload": {
+    "enabled": true,
+    "check_interval": 30
+  },
+  "local_mode": true
+}

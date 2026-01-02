@@ -1,0 +1,23 @@
+# SentinelEdge Agent Dependencies
+# ================================
+
+# Core Windows Integration
+pywin32>=305
+
+# System Monitoring
+psutil>=5.9.0
+
+# HTTP Requests
+requests>=2.31.0
+
+# Timezone Support (optional - fallback to UTC if missing)
+pytz>=2023.3
+
+# SEC-004: Token Encryption
+# =========================
+# The agent uses Windows DPAPI for encryption (zero dependencies, built-in).
+# cryptography is OPTIONAL - only needed if DPAPI fails for some reason.
+# On Windows 7+, DPAPI should always work.
+#
+# If you need cryptography as fallback (non-Windows or DPAPI issues):
+# cryptography>=41.0.0
