@@ -36,44 +36,8 @@
         <p id="offline-agents" class="metric-value">-</p>
         <div class="metric-sublabel">Agents currently disconnected</div>
     </div>
-    <div class="metric-card gradient">
-        <div class="metric-icon">⏱️</div>
-        <div class="metric-label">Fleet Screen Time</div>
-        <p id="total-screentime" class="metric-value">-</p>
-        <div class="metric-sublabel">Total activity today</div>
-    </div>
 </div>
 
-<!-- Agent Comparison Table -->
-<div class="card fade-in">
-    <div class="card-header">
-        <h3>📋 Agent Activity Comparison</h3>
-        <p class="text-xs text-tertiary">Click hostname for detailed view</p>
-    </div>
-    <div class="table-responsive">
-        <table class="data-table" id="agents-table">
-            <thead>
-                <tr>
-                    <th>Hostname</th>
-                    <th>User</th>
-                    <th>Status</th>
-                    <th>Current Activity</th>
-                    <th>Screen Time</th>
-                    <th>Top App</th>
-                    <th>Apps</th>
-                    <th>Domains</th>
-                    <th>Inventory</th>
-                    <th>Last Seen</th>
-                </tr>
-            </thead>
-            <tbody id="agents-tbody">
-                <tr>
-                    <td colspan="10" class="text-center">Loading...</td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-</div>
 
 <!-- Charts Row -->
 <div class="charts-grid fade-in">
@@ -108,6 +72,36 @@
         <div class="metric-sublabel">Fleet-wide usage</div>
     </div>
 </div>
+
+<!-- Top 5 Agents Widget -->
+<div class="card fade-in" style="margin-top: 2rem;">
+    <div class="card-header">
+        <h3>🏆 Top 5 Agents</h3>
+        <p class="text-xs text-tertiary">Leaders by screen time category</p>
+    </div>
+    <div class="card-body">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+            <div>
+                <h4 style="font-size: 0.875rem; color: var(--warning); margin-bottom: 1rem;">⏸️ Most Idle Time</h4>
+                <ul id="top-idle-list" style="list-style: none; padding: 0; margin: 0;">
+                    <li class="text-muted">Loading...</li>
+                </ul>
+            </div>
+            <div>
+                <h4 style="font-size: 0.875rem; color: var(--success); margin-bottom: 1rem;">✅ Most Active Time</h4>
+                <ul id="top-active-list" style="list-style: none; padding: 0; margin: 0;">
+                    <li class="text-muted">Loading...</li>
+                </ul>
+            </div>
+            <div>
+                <h4 style="font-size: 0.875rem; color: var(--danger); margin-bottom: 1rem;">🔒 Most Locked Time</h4>
+                <ul id="top-locked-list" style="list-style: none; padding: 0; margin: 0;">
+                    <li class="text-muted">Loading...</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_css %}
@@ -136,7 +130,6 @@
             // Attach change listener for this page
             dateInput.addEventListener('change', () => {
                 loadOverview();
-                loadAgents();
             });
         }
     });
@@ -156,10 +149,6 @@
         document.getElementById('active-agents').textContent = data.active_agents;
         document.getElementById('offline-agents').textContent = data.offline_agents;
 
-        const st = data.screen_time;
-        const awayTime = st.away || 0;
-        const totalScreenSeconds = st.active + st.idle + st.locked + awayTime;
-        document.getElementById('total-screentime').textContent = formatTime(totalScreenSeconds);
 
         // Update Highlights
         document.getElementById('top-app-name').textContent = data.top_app.name;
@@ -168,6 +157,9 @@
         document.getElementById('top-domain-name').textContent = data.top_domain.name;
         document.getElementById('top-domain-duration').textContent = formatTime(data.top_domain.duration);
 
+        // Update Top 5 Agents
+        renderTop5Agents(data);
+
         // Update Last Updated
         document.getElementById('last-updated').textContent = "Last updated: " + new Date().toLocaleTimeString();
 
@@ -175,67 +167,6 @@
         renderCharts(data);
     }
 
-    async function loadAgents() {
-        const selectedDate = getSelectedDate();
-        const response = await fetchJSON(`/dashboard/api/agents?date=${selectedDate}`);
-        if (!response || !response.data) return;
-
-        const tbody = document.getElementById('agents-tbody');
-        tbody.innerHTML = '';
-
-        if (response.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="10" class="text-center">No agents registered</td></tr>';
-            return;
-        }
-
-        response.data.forEach(agent => {
-            const row = document.createElement('tr');
-
-            // Status badge
-            const statusBadge = agent.is_online
-                ? '<span class="badge badge-success">🟢 Online</span>'
-                : '<span class="badge badge-danger">🔴 Offline</span>';
-
-            // Current activity with state
-            let currentActivity = '<span class="text-muted">-</span>';
-            if (agent.current_app) {
-                const stateIcon = agent.current_state === 'active' ? '🎯' :
-                    agent.current_state === 'idle' ? '💤' : '🔒';
-                currentActivity = `<span class="current-app">${stateIcon} ${agent.current_app}</span>`;
-            }
-
-            // Last seen (relative time in IST)
-            const lastSeen = agent.last_seen
-                ? getRelativeTimeIST(agent.last_seen)
-                : 'Never';
-
-            // Screen time breakdown
-            const screenTimeInfo = `
-                <span title="Active: ${formatTime(agent.active_seconds)}, Idle: ${formatTime(agent.idle_seconds)}, Locked: ${formatTime(agent.locked_seconds)}">
-                    ${formatTime(agent.total_screen_seconds)}
-                </span>
-            `;
-
-            row.innerHTML = `
-                <td>
-                    <a href="/dashboard/agent/${agent.agent_id}?date=${selectedDate}" class="agent-link">
-                        <strong>${agent.hostname}</strong>
-                    </a>
-                    <br><small class="text-muted">${agent.os || 'Unknown OS'}</small>
-                </td>
-                <td>${agent.username || '-'}</td>
-                <td>${statusBadge}</td>
-                <td>${currentActivity}</td>
-                <td>${screenTimeInfo}</td>
-                <td>${agent.top_app || '-'}</td>
-                <td>${agent.total_apps_used}</td>
-                <td>${agent.domains_visited}</td>
-                <td>${agent.installed_apps}</td>
-                <td><span title="${agent.last_seen}">${lastSeen}</span></td>
-            `;
-            tbody.appendChild(row);
-        });
-    }
 
     function renderCharts(data) {
         // 1. Agent Status Pie Chart
@@ -269,7 +200,7 @@
                 labels: ['Active', 'Idle', 'Locked', 'Away'],
                 datasets: [{
                     data: [data.screen_time.active, data.screen_time.idle, data.screen_time.locked, awayTime],
-                    backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#9e9e9e']
+                    backgroundColor: ['#38bdf8', '#fbbf24', '#64748b', '#334155']
                 }]
             },
             options: {
@@ -287,16 +218,55 @@
         });
     }
 
+    function renderTop5Agents(data) {
+        // Render Top Idle Agents
+        const idleList = document.getElementById('top-idle-list');
+        if (data.top_idle_agents && data.top_idle_agents.length > 0) {
+            idleList.innerHTML = data.top_idle_agents.map((agent, index) => `
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;">
+                    <span><strong>${index + 1}.</strong> ${agent.hostname}</span>
+                    <span class="font-mono" style="color: var(--warning);">${formatTime(agent.idle_seconds)}</span>
+                </li>
+            `).join('');
+        } else {
+            idleList.innerHTML = '<li class="text-muted">No data</li>';
+        }
+
+        // Render Top Active Agents
+        const activeList = document.getElementById('top-active-list');
+        if (data.top_active_agents && data.top_active_agents.length > 0) {
+            activeList.innerHTML = data.top_active_agents.map((agent, index) => `
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;">
+                    <span><strong>${index + 1}.</strong> ${agent.hostname}</span>
+                    <span class="font-mono" style="color: var(--success);">${formatTime(agent.active_seconds)}</span>
+                </li>
+            `).join('');
+        } else {
+            activeList.innerHTML = '<li class="text-muted">No data</li>';
+        }
+
+        // Render Top Locked Agents
+        const lockedList = document.getElementById('top-locked-list');
+        if (data.top_locked_agents && data.top_locked_agents.length > 0) {
+            lockedList.innerHTML = data.top_locked_agents.map((agent, index) => `
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;">
+                    <span><strong>${index + 1}.</strong> ${agent.hostname}</span>
+                    <span class="font-mono" style="color: var(--danger);">${formatTime(agent.locked_seconds)}</span>
+                </li>
+            `).join('');
+        } else {
+            lockedList.innerHTML = '<li class="text-muted">No data</li>';
+        }
+    }
+
     // Initial Load
     document.addEventListener('DOMContentLoaded', () => {
         loadOverview();
-        loadAgents();
     });
 
     // Refresh every 30s for more real-time data
     setInterval(() => {
         loadOverview();
-        loadAgents();
     }, 30000);
 </script>
 {% endblock %}

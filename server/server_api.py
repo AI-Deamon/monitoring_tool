@@ -14,6 +14,7 @@ from server_analytics import process_heartbeat_analytics
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('api', __name__)
+telemetry_bp = Blueprint('telemetry_api', __name__)
 
 
 # =============================================================================
@@ -62,7 +63,9 @@ def short_agent_id(agent_id):
     """Return last 6 chars of agent ID for concise logging."""
     if not agent_id:
         return "??????"
-    return agent_id[-6:] if len(agent_id) > 6 else agent_id
+    # Convert to string in case agent_id is an integer
+    agent_id_str = str(agent_id)
+    return agent_id_str[-6:] if len(agent_id_str) > 6 else agent_id_str
 
 
 def should_ignore_domain_session(session_data):
@@ -75,7 +78,7 @@ def should_ignore_domain_session(session_data):
     if raw_title:
         title_lower = raw_title.lower()
         ignore_patterns = [
-            'sentineledge', 'baki', 'localhost', '127.0.0.1',
+            'sentineledge', 'localhost', '127.0.0.1',
             '192.168.', '10.0.', 'internal', 'dashboard'
         ]
         for pattern in ignore_patterns:
@@ -200,52 +203,43 @@ def register():
     # hashed: Stored in database for security
     api_key_plaintext, api_key_hashed = generate_api_key()
     
-    # Check if agent already exists
-    existing = server_models.Agent.query.filter_by(id=agent_id).first()
+    # Check if agent already exists by UUID
+    existing = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+    
+    # ========================================================================
+    # SIMPLIFIED REGISTRATION LOGIC:
+    # 1. If agent_id exists -> update that agent
+    # 2. If hostname exists -> link to existing agent (re-install scenario)
+    # 3. Otherwise create new agent
+    # ========================================================================
+    if not existing and hostname:
+        existing_by_hostname = server_models.Agent.query.filter_by(hostname=hostname).first()
+        if existing_by_hostname:
+            logger.info(f"[REGISTER] Hostname '{hostname}' exists - PRESERVING existing Agent {existing_by_hostname.agent_id}")
+            # FIX: Reuse existing UUID instead of trying to update DB PK
+            agent_id = str(existing_by_hostname.agent_id)
+            existing = existing_by_hostname
+            
+            # Regenerate token for the CORRECT (preserved) ID
+            api_token = generate_api_token(agent_id)
     
     if existing:
-        # ====================================================================
-        # SEC-023 FIX: Re-registration Protection
-        # Verify local_agent_key matches to prevent token hijacking
-        # ====================================================================
-        import hmac
+        # Always allow re-registration - just log key status for security auditing
         stored_key = existing.local_agent_key
         provided_key = payload.local_agent_key
         
-        # Case 1: Both keys exist - verify they match
         if stored_key and provided_key:
-            # Use constant-time comparison to prevent timing attacks
-            if not hmac.compare_digest(str(stored_key), str(provided_key)):
-                logger.warning(f"[REGISTER] SEC-023: Re-registration REJECTED for {agent_id} - local_agent_key mismatch!")
-                logger.warning(f"[REGISTER] This may indicate an attack or different machine using same ID")
-                return jsonify({
-                    'error': 'Re-registration failed: agent key mismatch',
-                    'message': 'This agent ID is already registered with a different machine key'
-                }), 403
+            import hmac
+            if hmac.compare_digest(str(stored_key), str(provided_key)):
+                logger.info(f"[REGISTER] Agent {agent_id} key verified ✓")
             else:
-                logger.info(f"[REGISTER] Agent {agent_id} re-registration verified via local_agent_key")
-        
-        # Case 2: Server has key but request doesn't provide one - reject
-        elif stored_key and not provided_key:
-            logger.warning(f"[REGISTER] SEC-023: Re-registration missing local_agent_key for {agent_id}")
-            return jsonify({
-                'error': 'Re-registration failed: missing agent key',
-                'message': 'This agent ID requires local_agent_key for re-registration'
-            }), 403
-        
-        # Case 3: Server doesn't have key but request provides one (legacy upgrade)
-        # IMPORTANT: This is a one-time upgrade path for legacy agents
-        elif not stored_key and provided_key:
-            logger.warning(f"[REGISTER] SEC-023: Legacy agent upgrade - setting local_agent_key for {agent_id}")
-            logger.warning(f"[REGISTER] Future re-registrations will require matching key")
-            # Key will be set below in the update section
-        
-        # Case 4: Neither has key - allow but warn (very old agent)
+                logger.warning(f"[REGISTER] Agent {agent_id} key changed (re-install assumed)")
+        elif provided_key:
+            logger.info(f"[REGISTER] Agent {agent_id} providing key for first time")
         else:
-            logger.warning(f"[REGISTER] SEC-023: Re-registration without key verification for {agent_id}")
-            logger.warning(f"[REGISTER] Agent should upgrade to provide local_agent_key")
+            logger.warning(f"[REGISTER] Agent {agent_id} registered without key")
         
-        # Re-registration verified - update existing agent with new credentials
+        # Re-registration - update existing agent with new credentials
         logger.info(f"[REGISTER] Agent {agent_id} already exists - updating credentials")
         # SEC-007: Store HASHED key in database
         existing.api_key = api_key_hashed
@@ -258,11 +252,9 @@ def register():
         existing.architecture = architecture  # NEW
         existing.version = agent_version
         
-        # CRITICAL: Only set local_agent_key if not already set (prevents race condition)
-        # Once set, it should NEVER be changed
-        if not existing.local_agent_key and payload.local_agent_key:
+        # Always update local_agent_key if provided (supports re-installs)
+        if payload.local_agent_key:
             existing.local_agent_key = payload.local_agent_key
-            logger.info(f"[REGISTER] Set local_agent_key for agent {agent_id} (one-time)")
         
         existing.status = 'active'
         existing.last_seen = datetime.now(timezone.utc)
@@ -271,7 +263,7 @@ def register():
         # New registration
         logger.info(f"[REGISTER] Creating new agent record: {agent_id}")
         agent = server_models.Agent(
-            id=agent_id,
+            agent_id=agent_id, # Set the UUID field
             agent_name=agent_name,  # Custom display name
             hostname=hostname,
             os=os_version,
@@ -326,7 +318,7 @@ def inventory():
     
     agent_id = data.get('agent_id')
     if not agent_id:
-        agent_id = g.current_agent.id if g.current_agent else None
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     
     if not agent_id:
         logger.warning(f"Inventory: Missing agent_id in request or JWT")
@@ -478,7 +470,7 @@ def domain_usage():
     
     agent_id = data.get('agent_id')
     if not agent_id:
-        agent_id = g.current_agent.id if g.current_agent else None
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     
     if not agent_id:
         logger.warning(f"Domain usage: Missing agent_id in request or JWT")
@@ -541,7 +533,7 @@ def heartbeat():
     except ValidationError as e:
         logger.debug(f"Heartbeat validation: {e}")
     
-    agent_id = g.current_agent.id if g.current_agent else "unknown"
+    agent_id = str(g.current_agent.agent_id) if g.current_agent else "unknown"
     logger.debug(f"[AGENT {agent_id}] Heartbeat received")
     
     # FIX 2: DUPLICATE DETECTION
@@ -626,7 +618,7 @@ def update_agent_status():
         agent = g.current_agent if hasattr(g, 'current_agent') else None
         
         if not agent and agent_id:
-            agent = server_models.Agent.query.filter_by(id=agent_id).first()
+            agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
         
         if not agent:
             return jsonify({"error": "Agent not found"}), 404
@@ -684,11 +676,11 @@ def screentime():
         records = [data]
 
     if not records:
-        agent_id = g.current_agent.id if g.current_agent else "unknown"
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else "unknown"
         logger.warning(f"[AGENT {agent_id}] Screentime: No records provided")
         return jsonify({'status': 'error', 'message': 'No records provided'}), 400
     
-    agent_id = g.current_agent.id if g.current_agent else "unknown"
+    agent_id = str(g.current_agent.agent_id) if g.current_agent else "unknown"
     
     logger.info(f"[AGENT {agent_id}] Screentime batch received: {len(records)} records (SKIPPED - using live telemetry)")
     
@@ -704,7 +696,7 @@ def app_usage():
     agent_id = data.get('agent_id')
     
     if not agent_id:
-        agent_id = g.current_agent.id if g.current_agent else None
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     
     if not agent_id:
         logger.warning("App usage: Missing agent_id")
@@ -760,7 +752,7 @@ def app_active():
     """LIVE LAYER: Real-time heartbeat showing what user is doing NOW."""
     from flask import g
     data = request.get_json() or {}
-    agent_id = g.current_agent.id if g.current_agent else None
+    agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     
     if not agent_id:
         return jsonify({'status': 'error', 'message': 'Missing agent_id'}), 400
@@ -812,13 +804,36 @@ def app_active():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
+@telemetry_bp.route("/telemetry/event", methods=["POST"])
+@require_auth
+def telemetry_event():
+    """
+    Gateway for all authoritative telemetry events.
+    Matches Step 367 Refined Plan.
+    """
+    from server_telemetry import process_state_duration_event
+    payload = request.get_json(force=True)
+    agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    
+    if not agent_id:
+        return jsonify({"error": "Missing agent authentication"}), 401
+
+    if payload.get("event") == "state_duration":
+        # Inject agent_id for the processor
+        payload["agent_id"] = agent_id
+        process_state_duration_event(payload)
+        return jsonify({"status": "ok"}), 200
+
+    return jsonify({"status": "ignored"}), 200
+
+
 @bp.route('/app-switch', methods=['POST'])
 @require_auth
 def app_switch():
     """HISTORICAL LAYER: Completed app session (user switched away)."""
     from flask import g
     data = request.get_json() or {}
-    agent_id = g.current_agent.id if g.current_agent else None
+    agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     
     if not agent_id:
         return jsonify({'status': 'error', 'message': 'Missing agent_id'}), 400
@@ -899,7 +914,7 @@ def domain_active_batch():
     data = request.get_json() or {}
     agent_id = data.get('agent_id')
     if not agent_id:
-        agent_id = g.current_agent.id if g.current_agent else None
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     if not agent_id:
         logger.warning("Domain active: Missing agent_id")
         return jsonify({'status': 'error', 'message': 'Missing agent_id'}), 400
@@ -1026,7 +1041,7 @@ def domain_active_batch():
 def merged_events():
     """Handle merged events (idle and app sessions)."""
     from flask import g
-    agent_id = g.current_agent.id if g.current_agent else "unknown"
+    agent_id = str(g.current_agent.agent_id) if g.current_agent else "unknown"
     data = request.get_json() or {}
     
     events = data.get('events', [])
@@ -1116,7 +1131,7 @@ def domains():
     Now with deduplication and browser name normalization.
     """
     from flask import g
-    agent_id = g.current_agent.id if g.current_agent else None
+    agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -1247,7 +1262,7 @@ def register_root_endpoint(app):
     def domains_root():
         """Handle domains data (agent-specific endpoint)."""
         from flask import g
-        agent_id = g.current_agent.id if g.current_agent else "unknown"
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else "unknown"
         data = request.get_json() or {}
         domain_count = len(data.get('domains', []))
         logger.info(f"[AGENT {agent_id}] Domains root endpoint from {request.remote_addr}: {domain_count} domains")

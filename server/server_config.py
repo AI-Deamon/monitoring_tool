@@ -32,9 +32,9 @@ def get_config() -> SimpleNamespace:
         MAX_REQUEST_SIZE=10 * 1024 * 1024,  # 10MB
         REQUEST_TIMEOUT=30,  # seconds
         
-        # Agent Health
-        AGENT_HEARTBEAT_TIMEOUT=300,  # 5 minutes - mark offline
-        AGENT_STALE_TIMEOUT=600,  # 10 minutes - mark stale
+        # Agent Health (Optimized for 1-min uploads)
+        AGENT_HEARTBEAT_TIMEOUT=120,   # 2 minutes - mark offline
+        AGENT_STALE_TIMEOUT=240,       # 4 minutes - mark stale
         
         # Rate Limiting
         RATE_LIMIT_ENABLED=os.getenv('RATE_LIMIT_ENABLED', 'true').lower() == 'true',

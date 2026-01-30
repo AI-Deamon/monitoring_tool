@@ -62,7 +62,7 @@ def get_agent_integrity_status(agent_id: str) -> Dict:
     """
     issues = []
     
-    agent = server_models.Agent.query.get(agent_id)
+    agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
     if not agent:
         return {'status': 'unknown', 'issues': ['Agent not found']}
     
@@ -173,7 +173,7 @@ def get_all_agents_integrity() -> List[Dict]:
     
     results = []
     for agent in agents:
-        status = get_agent_integrity_status(agent.id)
+        status = get_agent_integrity_status(str(agent.agent_id))
         status['hostname'] = agent.hostname
         status['agent_name'] = agent.agent_name
         results.append(status)
@@ -200,8 +200,8 @@ def verify_agent_signature(agent_id: str, data: Dict) -> Tuple[bool, str]:
     Returns:
         (is_valid, error_message)
     """
-    # Get agent's signing key fingerprint
-    agent = server_models.Agent.query.get(agent_id)
+    # Get agent by UUID
+    agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
     if not agent:
         return False, "Agent not found"
     
@@ -240,7 +240,7 @@ def verify_agent_signature(agent_id: str, data: Dict) -> Tuple[bool, str]:
 @require_auth
 def api_integrity_status():
     """Get integrity status for current agent"""
-    agent_id = g.current_agent.id if g.current_agent else None
+    agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     
     if not agent_id:
         return jsonify({'error': 'Agent not authenticated'}), 401
@@ -257,7 +257,7 @@ def api_integrity_report():
     Contains anomalies, manifest hash, watchdog status.
     """
     data = request.get_json() or {}
-    agent_id = g.current_agent.id if g.current_agent else None
+    agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     
     if not agent_id:
         return jsonify({'error': 'Agent not authenticated'}), 401
@@ -269,7 +269,7 @@ def api_integrity_report():
         # Don't reject, just log for now
     
     # Store/update agent integrity info
-    agent = server_models.Agent.query.get(agent_id)
+    agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
     if agent:
         # Store diagnostics JSON
         agent.diagnostics_json = json.dumps({

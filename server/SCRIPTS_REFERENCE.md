@@ -73,6 +73,20 @@ python scripts/fixes/add_indexes.py
 python scripts/fixes/apply_sync_functions.py
 ```
 
+### 9. ensure_procedures_correct.py (CRITICAL)
+**Purpose:** Fix broken stored procedures (round() error, duplicate functions)
+**When to use:** On Startup, After Migration, HTTP 500 Errors
+```bash
+python scripts/fixes/ensure_procedures_correct.py
+```
+
+### 10. startup_checks.py (MASTER)
+**Purpose:** Run ALL critical checks and fixes in order
+**When to use:** Before starting server (included in start_server.sh)
+```bash
+python scripts/startup_checks.py
+```
+
 ---
 
 ## 🛠️ UTILITY SCRIPTS (scripts/utilities/)
@@ -182,6 +196,11 @@ python scripts/fixes/fix_locked_state.py
 ### Database slow
 ```bash
 python scripts/fixes/add_indexes.py
+```
+
+### HTTP 500 "function round(...) does not exist"
+```bash
+python scripts/fixes/ensure_procedures_correct.py
 ```
 
 ### Agent not appearing

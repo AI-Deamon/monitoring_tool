@@ -54,9 +54,31 @@ def upgrade():
     DECLARE
         v_date DATE;
         v_inserted BOOLEAN;
+        v_clamped_seconds FLOAT;
     BEGIN
         v_date := p_session_start::DATE;
         v_inserted := FALSE;
+        
+        -- Reject NULL app name
+        IF p_app IS NULL OR p_app = '' THEN
+            RETURN QUERY SELECT 'skipped'::TEXT, 'NULL or empty app name'::TEXT;
+            RETURN;
+        END IF;
+
+        -- Reject negative durations
+        IF p_total_seconds < 0 THEN
+            RETURN QUERY SELECT 'error'::TEXT, 'Negative duration rejected'::TEXT;
+            RETURN;
+        END IF;
+
+        -- EXCESSIVE DURATION CHECK (> 8 hours)
+        IF p_total_seconds > 28800 THEN
+            RETURN QUERY SELECT 'skipped'::TEXT, 
+                format('Excessive duration rejected (%s hours)', round((p_total_seconds/3600.0)::numeric, 1))::TEXT;
+            RETURN;
+        END IF;
+        
+        v_clamped_seconds := LEAST(p_total_seconds, 28800);
         
         -- 1. Try to insert into app_sessions (History)
         -- Skip if duplicate (same agent, app, start_time)
@@ -64,7 +86,7 @@ def upgrade():
             INSERT INTO app_sessions (
                 agent_id, app, window_title, start_time, end_time, duration_seconds, created_at
             ) VALUES (
-                p_agent_id, p_app, p_window_title, p_session_start, p_session_end, p_total_seconds, NOW()
+                p_agent_id, p_app, p_window_title, p_session_start, p_session_end, v_clamped_seconds, NOW()
             );
             v_inserted := TRUE;
         EXCEPTION WHEN unique_violation THEN
@@ -78,7 +100,7 @@ def upgrade():
             INSERT INTO app_usage (
                 agent_id, date, app, duration_seconds, session_count, last_updated
             ) VALUES (
-                p_agent_id, v_date, p_app, p_total_seconds::INTEGER, 1, NOW()
+                p_agent_id, v_date, p_app, v_clamped_seconds::INTEGER, 1, NOW()
             )
             ON CONFLICT (agent_id, date, app) DO UPDATE SET
                 duration_seconds = app_usage.duration_seconds + EXCLUDED.duration_seconds,

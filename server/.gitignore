@@ -1,0 +1,59 @@
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+ENV/
+
+# SentinelEdge Specific
+.env
+logs/
+*.log
+backups/
+*.db
+*.sqlite
+dashboard.txt
+errors.txt
+cookies.txt
+
+# Deployment Packages
+sentineledge_server_deploy_*/
+sentineledge_server_v3_final/
+*.zip
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Diagnostic/Temporary scripts
+debug_exclusions.py
+create_server_v3.py
+debug_*.py
+test_upload.py
+check_screentime_heartbeat.py
+check_server_status.py
+check_spans_flow.py
+clear_agent_data.py

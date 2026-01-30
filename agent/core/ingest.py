@@ -30,7 +30,7 @@ class ReplayProtectionCache:
         self.max_size = max_size
         self.window_seconds = window_seconds
         self.cache = OrderedDict()
-        self.cleanup_interval = 300  # 5 minutes
+        self.cleanup_interval = 120  # 2 minutes
         self.last_cleanup = time.time()
     
     def is_valid(self, agent_id: str, timestamp: str, payload_hash: str) -> bool:
@@ -558,6 +558,9 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
             elif self.path == "/telemetry/state-change":
                 return self._handle_state_change(data)
 
+            elif self.path == "/screentime_spans":
+                return self._handle_screentime_spans(data)
+
             else:
                 return self._send_error("Unknown endpoint", 404)
 
@@ -705,6 +708,29 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"State-change handler error: {e}", exc_info=True)
             self._send_error('Storage failed', 500)
+
+    def _handle_screentime_spans(self, data):
+        """Handle state spans from Helper for screen time tracking"""
+        try:
+            spans = data.get("spans", [])
+            agent_id = data.get("agent_id")
+            
+            if not spans:
+                return self._send_json({"status": "ok", "count": 0})
+            
+            count = 0
+            for span in spans:
+                span["agent_id"] = agent_id
+                if self.server.buffer.store_state_span(span):
+                    count += 1
+            
+            logger.info(f"[INGEST] Received {len(spans)} spans, stored {count} in buffer")
+            
+            self._send_json({"status": "ok", "count": count})
+
+        except Exception as e:
+            logger.error(f"Screentime spans storage error: {e}")
+            self._send_error("Storage failed", 500)
 
 
 class IngestServer:

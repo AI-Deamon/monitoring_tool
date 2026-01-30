@@ -6,6 +6,10 @@ Usage:
     python add_source_column.py
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from server_app import create_app
 from extensions import db
 from sqlalchemy import text

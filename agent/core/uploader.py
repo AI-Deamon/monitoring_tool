@@ -389,6 +389,13 @@ class ServerUploader:
             logger.info(f"[REGISTER] Agent ID: {self.config.agent_id}")
             logger.info(f"[REGISTER] Agent Name: {self.config.agent_name}")
             logger.info(f"[REGISTER] Hostname: {platform.node()}")
+            # Debug: Show if registration secret is configured
+            if self.config.registration_secret:
+                masked_secret = self.config.registration_secret[:8] + "***" if len(self.config.registration_secret) > 8 else "***"
+                logger.info(f"[REGISTER] Registration secret: {masked_secret} (configured)")
+            else:
+                logger.warning("[REGISTER] ⚠️ Registration secret: NOT CONFIGURED!")
+                logger.warning("[REGISTER] Check config.json -> server -> registration_secret")
             logger.info("=" * 70)
             
             # Match exact specification format (include local_agent_key for server validation)
@@ -438,7 +445,12 @@ class ServerUploader:
             
             if server_agent_id and server_agent_id != self.config.agent_id:
                 logger.warning(f"[REGISTER] Server assigned different Agent ID: {self.config.agent_id} -> {server_agent_id}")
-                self.config.agent_id = server_agent_id
+                
+                # Use set_agent_id to atomically update memory and disk
+                try:
+                    self.config.set_agent_id(server_agent_id)
+                except Exception as e:
+                    logger.error(f"[REGISTER] Failed to adopt server-assigned ID: {e}")
             
             logger.info(f"[REGISTER] Agent status: {agent_data.get('status', 'unknown')}")
             logger.info(f"[REGISTER] Last seen: {agent_data.get('last_seen', 'unknown')}")
@@ -703,6 +715,9 @@ class ServerUploader:
             # Upload domain sessions (NEW - session-based)
             self._upload_domain_sessions()
             
+            # Upload state spans (NEW - Idempotent screen time tracking)
+            self._upload_state_spans()
+            
             # Upload inventory
             self._upload_inventory()
             
@@ -832,15 +847,16 @@ class ServerUploader:
                 response = self._make_request('/telemetry/app-switch', payload)
             
             elif event_type == 'screentime':
-                # Get delta values from state dict (buffer stores them there)
+                # Get cumulative values from state dict (aggregator sums deltas)
+                # Server expects: active_seconds, idle_seconds, locked_seconds (NOT delta_*)
                 state = event.get('state', {})
                 payload = {
                     'agent_id': event.get('agent_id'),
                     'username': event.get('username', 'unknown'),
                     'timestamp': event.get('start'),  # Buffer stores as 'start'
-                    'delta_active_seconds': state.get('delta_active_seconds', 0),
-                    'delta_idle_seconds': state.get('delta_idle_seconds', 0),
-                    'delta_locked_seconds': state.get('delta_locked_seconds', 0),
+                    'active_seconds': state.get('delta_active_seconds', 0),  # Cumulative total
+                    'idle_seconds': state.get('delta_idle_seconds', 0),      # Cumulative total
+                    'locked_seconds': state.get('delta_locked_seconds', 0),  # Cumulative total
                     'current_state': state.get('current_state', 'active')
                 }
                 
@@ -888,26 +904,42 @@ class ServerUploader:
             logger.debug("Failed to upload domains (server offline?)")
     
     def _upload_domain_sessions(self):
-        """Upload domain active sessions - server handles calculations"""
+        """Upload domain sessions - uses domain-switch for historical tracking"""
         sessions = self.buffer.get_unuploaded_domain_sessions(limit=500)
         
         if not sessions:
             return
         
-        payload = {
-            'agent_id': self.config.agent_id,
-            'domains_active': sessions
-        }
+        uploaded_ids = []
         
-        response = self._make_request('/domain-active', payload)  # Fixed: removed /telemetry/ prefix
-        
-        if response and response.get('status') in ('ok', 'success'):
-            # Mark as uploaded
-            session_ids = [s['id'] for s in sessions]
-            self.buffer.mark_domain_sessions_uploaded(session_ids)
+        # Send each session individually to domain-switch endpoint
+        # (which stores in domain_sessions and aggregates to domain_usage)
+        for session in sessions:
+            payload = {
+                'agent_id': self.config.agent_id,
+                'domain': session.get('domain'),
+                'browser': session.get('browser', ''),
+                'url': session.get('url'),
+                'session_start': session.get('start'),
+                'session_end': session.get('end'),
+                'total_seconds': session.get('duration_seconds', 0),
+                'timestamp': session.get('end')  # Use end time as timestamp
+            }
             
-            total_duration = sum(s.get('duration_seconds', 0) for s in sessions)
-            logger.info(f"[OK] Uploaded {len(sessions)} domain sessions ({total_duration:.0f}s)")
+            response = self._make_request('/telemetry/domain-switch', payload)
+            
+            if response and response.get('status') in ('ok', 'success', 'skipped'):
+                uploaded_ids.append(session['id'])
+        
+        # Mark uploaded sessions
+        if uploaded_ids:
+            self.buffer.mark_domain_sessions_uploaded(uploaded_ids)
+            
+            total_duration = sum(
+                s.get('duration_seconds', 0) for s in sessions 
+                if s['id'] in uploaded_ids
+            )
+            logger.info(f"[OK] Uploaded {len(uploaded_ids)} domain sessions ({total_duration:.0f}s)")
         else:
             logger.debug("Failed to upload domain sessions (server offline?)")
     
@@ -983,4 +1015,37 @@ class ServerUploader:
         except Exception as e:
             logger.error(f"Failed to upload state-change: {e}")
             return False
+
+    def _upload_state_spans(self):
+        """Upload buffered state spans for idempotent screen time tracking"""
+        spans = self.buffer.get_unuploaded_state_spans(limit=100)
+        
+        if not spans:
+            return
+        
+        uploaded_ids = []
+        
+        # Format payload and send
+        payload = {
+            'agent_id': self.config.agent_id,
+            'spans': [
+                {
+                    'span_id': s['span_id'],
+                    'state': s['state'],
+                    'start_time': s['start_time'],
+                    'end_time': s['end_time'],
+                    'duration_seconds': s['duration_seconds'],
+                    'created_at': s['created_at']
+                } for s in spans
+            ]
+        }
+        
+        response = self._make_request('/telemetry/screentime-spans', payload)
+        
+        if response:
+            uploaded_ids = [s['id'] for s in spans]
+            self.buffer.mark_state_spans_uploaded(uploaded_ids)
+            logger.info(f"[OK] Uploaded {len(uploaded_ids)} state spans")
+        else:
+            logger.debug("Failed to upload state spans (server offline?)")
 

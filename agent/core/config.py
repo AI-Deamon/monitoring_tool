@@ -24,8 +24,8 @@ class CoreConfig:
         self.logger = logging.getLogger('CoreConfig')
         
         # Define paths using environment variable for flexibility
-        program_data = os.environ.get('ProgramData', r'C:\ProgramData')
-        self.data_dir = Path(program_data) / 'SentinelEdge'
+        # Try ProgramData first (requires admin), fallback to user's LocalAppData
+        self.data_dir = self._get_writable_data_dir()
         self.logs_dir = self.data_dir / 'logs'
         self.buffer_dir = self.data_dir / 'buffer'
         self.db_path = self.buffer_dir / 'core_buffer.db'
@@ -52,10 +52,76 @@ class CoreConfig:
         # Ensure agent ID file exists
         self.ensure_agent_id_file()
     
-    def _get_default_config_path(self) -> str:
-        """Get default config path"""
+    def _get_writable_data_dir(self) -> Path:
+        """
+        Get a writable data directory with intelligent fallback.
+        Tries ProgramData (admin) first, falls back to LocalAppData (user).
+        """
+        # Option 1: Check if SENTINELEDGE_DATA_DIR is set (explicit override)
+        env_data_dir = os.environ.get('SENTINELEDGE_DATA_DIR')
+        if env_data_dir:
+            data_dir = Path(env_data_dir)
+            if self._is_dir_writable(data_dir):
+                return data_dir
+        
+        # Option 2: Try ProgramData (requires admin rights)
         program_data = os.environ.get('ProgramData', r'C:\ProgramData')
-        return str(Path(program_data) / 'SentinelEdge' / 'config.json')
+        admin_dir = Path(program_data) / 'SentinelEdge'
+        if self._is_dir_writable(admin_dir):
+            return admin_dir
+        
+        # Option 3: Fallback to user's LocalAppData (no admin required)
+        local_app_data = os.environ.get('LOCALAPPDATA')
+        if local_app_data:
+            user_dir = Path(local_app_data) / 'SentinelEdge'
+            try:
+                user_dir.mkdir(parents=True, exist_ok=True)
+                if self._is_dir_writable(user_dir):
+                    logging.getLogger('CoreConfig').info(
+                        f"[CONFIG] Using user directory (no admin): {user_dir}"
+                    )
+                    return user_dir
+            except Exception:
+                pass
+        
+        # Option 4: Ultimate fallback to home directory
+        home_dir = Path.home() / '.sentineledge'
+        home_dir.mkdir(parents=True, exist_ok=True)
+        logging.getLogger('CoreConfig').warning(
+            f"[CONFIG] Using home fallback directory: {home_dir}"
+        )
+        return home_dir
+    
+    def _is_dir_writable(self, path: Path) -> bool:
+        """Check if directory is writable (create test file)"""
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            test_file = path / '.write_test'
+            test_file.write_text('test')
+            test_file.unlink()
+            return True
+        except (PermissionError, OSError):
+            return False
+        except Exception:
+            return False
+    
+    def _get_default_config_path(self) -> str:
+        """Get default config path - tries admin location first, then user location"""
+        # Check if config exists in admin location
+        program_data = os.environ.get('ProgramData', r'C:\ProgramData')
+        admin_config = Path(program_data) / 'SentinelEdge' / 'config.json'
+        if admin_config.exists():
+            return str(admin_config)
+        
+        # Check user location
+        local_app_data = os.environ.get('LOCALAPPDATA')
+        if local_app_data:
+            user_config = Path(local_app_data) / 'SentinelEdge' / 'config.json'
+            if user_config.exists():
+                return str(user_config)
+        
+        # Default to admin location (installer will create it)
+        return str(admin_config)
     
     def _load_and_apply_config(self):
         """Load, validate, and apply configuration"""
@@ -104,10 +170,11 @@ class CoreConfig:
         if not agent.get("agent_name"):
             config["agent"]["agent_name"] = self.agent_name
         
-        # Server settings
+        # Server settings (with fallback to root-level for v1 compatibility)
         server = config.get("server", {})
-        self.server_url = server.get("url", "http://localhost:5050")
-        self.registration_secret = server.get("registration_secret", "")  # SEC-002
+        # Check nested first, then fallback to root-level (v1 format)
+        self.server_url = server.get("url") or config.get("server_url") or "http://localhost:5050"
+        self.registration_secret = server.get("registration_secret") or config.get("registration_secret", "")  # SEC-002
         self.server_cert_fingerprint = server.get("cert_pinning_fingerprint", "")
         self.allow_insecure_http = server.get("allow_insecure_http", False)
         self.skip_manifest_verification = server.get("skip_manifest_verification", False)
@@ -120,9 +187,9 @@ class CoreConfig:
         core = config.get("core", {})
         self.listen_host = 'localhost'
         self.listen_port = core.get("listen_port", 48123)
-        self.aggregation_interval = core.get("aggregation_interval", 300)
+        self.aggregation_interval = core.get("aggregation_interval", 60)
         self.upload_interval = core.get("upload_interval", 60)
-        self.heartbeat_interval = core.get("heartbeat_interval", 300)
+        self.heartbeat_interval = core.get("heartbeat_interval", 60)
         self.enable_ingest = core.get("enable_ingest", True)
         self.enable_uploader = core.get("enable_uploader", True)
         self.enable_aggregator = core.get("enable_aggregator", True)
@@ -133,7 +200,7 @@ class CoreConfig:
         
         # Thresholds
         thresholds = config.get("thresholds", {})
-        self.idle_threshold = thresholds.get("idle_seconds", 300)
+        self.idle_threshold = thresholds.get("idle_seconds", 120)
         
         # Retry settings
         retry = config.get("retry", {})
@@ -154,16 +221,20 @@ class CoreConfig:
         self.dynamic_reload_enabled = dynamic_reload.get("enabled", True)
         self.dynamic_reload_interval = dynamic_reload.get("check_interval", 30)
         
-        # Paths (not configurable for security)
-        program_data = os.environ.get('ProgramData', r'C:\ProgramData')
-        self.data_dir = Path(program_data) / 'SentinelEdge'
+        # Paths - use writable directory (handles admin/non-admin)
+        self.data_dir = self._get_writable_data_dir()
         self.state_dir = self.data_dir / 'state'
         self.buffer_dir = self.data_dir / 'buffer'
         self.logs_dir = self.data_dir / 'logs'
         
-        # Ensure directories exist
+        # Ensure directories exist with proper error handling
         for dir_path in [self.state_dir, self.buffer_dir, self.logs_dir]:
-            dir_path.mkdir(parents=True, exist_ok=True)
+            try:
+                dir_path.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                self.logger.error(f"[CONFIG] Cannot create directory: {dir_path}")
+            except Exception as e:
+                self.logger.warning(f"[CONFIG] Directory creation warning: {dir_path} - {e}")
         
         # Database
         self.db_path = self.buffer_dir / 'core_buffer.db'
@@ -327,6 +398,8 @@ class CoreConfig:
                 current_checksum = hashlib.sha256(f.read()).hexdigest()
             
             if current_checksum == self._last_checksum:
+                # Content unchanged, but update mtime to avoid rechecking
+                self._last_mtime = current_mtime
                 return False
             
             # Config has changed - reload it
@@ -415,6 +488,40 @@ class CoreConfig:
             self.config['api_key'] = ''
             self.save_config()
             self.logger.info("[CONFIG] Cleared API key from config.json")
+    
+    def set_agent_id(self, new_id: str):
+        """
+        Set agent ID explicitly (called when server assigns a different identity).
+        Updates both memory state and the authoritative file on disk atomically.
+        
+        This is used when the server assigns an existing agent ID based on hostname
+        matching, and the agent needs to adopt that ID to maintain history.
+        """
+        if not new_id or new_id == self.agent_id:
+            return
+        
+        with self._config_lock:
+            old_id = self.agent_id
+            self.logger.info(f"[CONFIG] Updating Agent ID: {old_id} -> {new_id}")
+            
+            # Update in-memory state
+            self.agent_id = new_id
+            if "agent" not in self.config:
+                self.config["agent"] = {}
+            self.config["agent"]["agent_id"] = new_id
+            
+            # Update authoritative file on disk FIRST
+            # This prevents ensure_agent_id_file() from reverting to the old ID
+            try:
+                agent_id_file = self.data_dir / 'agent_id'
+                agent_id_file.write_text(new_id)
+                self.logger.info(f"[CONFIG] Updated authoritative agent_id file")
+            except Exception as e:
+                self.logger.error(f"[CONFIG] Failed to update agent_id file: {e}")
+                # Revert memory state on failure
+                self.agent_id = old_id
+                self.config["agent"]["agent_id"] = old_id
+                raise
     
     def get_hmac_key(self) -> bytes:
         """Get HMAC key as bytes"""

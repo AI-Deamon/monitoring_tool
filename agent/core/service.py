@@ -706,13 +706,13 @@ class SentinelCore:
                 self.logger.info("[REGISTRATION] Verifying registration with server...")
                 if self.uploader.ensure_registered():
                     self.logger.info("=" * 70)
-                    self.logger.info("[REGISTRATION] âœ“ Registration verified successfully")
+                    self.logger.info("[REGISTRATION] [OK] Registration verified successfully")
                     self.logger.info(f"[REGISTRATION] Agent ID: {self.config.agent_id}")
                     self.logger.info(f"[REGISTRATION] Server URL: {self.config.server_url}")
                     self.logger.info("=" * 70)
                 else:
                     self.logger.warning("=" * 70)
-                    self.logger.warning("[REGISTRATION] âš  Registration verification failed")
+                    self.logger.warning("[REGISTRATION] [WARN] Registration verification failed")
                     self.logger.warning("[REGISTRATION] Will attempt re-registration...")
                     self.logger.warning("=" * 70)
                     
@@ -726,7 +726,7 @@ class SentinelCore:
                         
                         if self.uploader.register():
                             self.logger.info("=" * 70)
-                            self.logger.info("[REGISTRATION] âœ“ Re-registration successful")
+                            self.logger.info("[REGISTRATION] [OK] Re-registration successful")
                             self.logger.info("=" * 70)
                             break
                         else:
@@ -737,7 +737,7 @@ class SentinelCore:
                     
                     if registration_attempts >= max_attempts:
                         self.logger.error("=" * 70)
-                        self.logger.error("[REGISTRATION] âœ— Re-registration failed after all attempts")
+                        self.logger.error("[REGISTRATION] [FAIL] Re-registration failed after all attempts")
                         self.logger.error("[REGISTRATION] Agent will continue but uploads may fail")
                         self.logger.error("[REGISTRATION] Will retry automatically during operation")
                         self.logger.error("=" * 70)
@@ -760,7 +760,7 @@ class SentinelCore:
                     
                     if self.uploader.register():
                         self.logger.info("=" * 70)
-                        self.logger.info("[REGISTRATION] âœ“âœ“âœ“ REGISTRATION SUCCESSFUL âœ“âœ“âœ“")
+                        self.logger.info("[REGISTRATION] [OK][OK][OK] REGISTRATION SUCCESSFUL [OK][OK][OK]")
                         self.logger.info(f"[REGISTRATION] Agent {self.config.agent_id} is now registered")
                         if self.config.api_key:
                             self.logger.info(f"[REGISTRATION] API key: {self.config.api_key[:20]}...")
@@ -768,7 +768,7 @@ class SentinelCore:
                         self.logger.info("=" * 70)
                         break
                     else:
-                        self.logger.warning(f"[REGISTRATION] âœ— Attempt {registration_attempts} failed")
+                        self.logger.warning(f"[REGISTRATION] [FAIL] Attempt {registration_attempts} failed")
                         
                         if registration_attempts < max_attempts:
                             wait_time = min(5 * registration_attempts, 30)  # Exponential backoff
@@ -776,7 +776,7 @@ class SentinelCore:
                             time.sleep(wait_time)
                         else:
                             self.logger.error("=" * 70)
-                            self.logger.error("[REGISTRATION] âœ—âœ—âœ— REGISTRATION FAILED âœ—âœ—âœ—")
+                            self.logger.error("[REGISTRATION] [FAIL][FAIL][FAIL] REGISTRATION FAILED [FAIL][FAIL][FAIL]")
                             self.logger.error(f"[REGISTRATION] Failed after {max_attempts} attempts")
                             self.logger.error("[REGISTRATION] Possible issues:")
                             self.logger.error("[REGISTRATION]   1. Server is not reachable")
@@ -964,8 +964,8 @@ class SentinelCore:
         
         while not self.shutdown_event.is_set():
             try:
-                # Wait 5 minutes between checks
-                self.shutdown_event.wait(300)
+                # Wait 2 minutes between checks
+                self.shutdown_event.wait(120)
                 
                 if self.is_suspended:
                     continue
@@ -986,22 +986,22 @@ class SentinelCore:
                 # Check registration status
                 if self.config.is_registered():
                     api_key = self.config.api_key or self.config.api_token
-                    self.logger.info(f"[HEALTH] Registration: âœ“ Active")
+                    self.logger.info(f"[HEALTH] Registration: [OK] Active")
                     if api_key:
                         self.logger.info(f"[HEALTH] API Key: {api_key[:20]}...")
                 else:
-                    self.logger.warning("[HEALTH] Registration: âœ— Not registered")
+                    self.logger.warning("[HEALTH] Registration: [FAIL] Not registered")
                     self.logger.warning("[HEALTH] Attempting registration...")
                     if self.uploader.register():
-                        self.logger.info("[HEALTH] âœ“ Registration successful")
+                        self.logger.info("[HEALTH] [OK] Registration successful")
                     else:
-                        self.logger.error("[HEALTH] âœ— Registration failed")
+                        self.logger.error("[HEALTH] [FAIL] Registration failed")
                 
                 # Verify server connectivity
                 if self.uploader.ensure_registered():
-                    self.logger.info("[HEALTH] Server connection: âœ“ OK")
+                    self.logger.info("[HEALTH] Server connection: [OK] OK")
                 else:
-                    self.logger.warning("[HEALTH] Server connection: âœ— Failed")
+                    self.logger.warning("[HEALTH] Server connection: [FAIL] Failed")
                 
                 self.logger.info("=" * 70)
                     

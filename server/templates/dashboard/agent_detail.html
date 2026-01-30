@@ -17,7 +17,7 @@
             <div id="status-badge-container"></div>
         </div>
         <p id="agent-subtitle" class="text-secondary font-medium mt-1">
-            <span id="agent-device">🖥️ {{ agent.hostname or agent.id }}</span>
+            <span id="agent-device">🖥️ {{ agent.hostname or agent.agent_id|string }}</span>
             <span class="text-tertiary"> • </span>
             <span id="agent-os">{{ agent.os }}</span>
         </p>
@@ -27,7 +27,7 @@
             <span class="activity-badge-label">Current Activity</span>
             <span id="current-activity" class="activity-badge">Loading...</span>
         </div>
-        <a href="{{ url_for('dashboard.agent_report', agent_id=agent.id) }}" class="btn btn-primary">
+        <a href="{{ url_for('dashboard.agent_report', agent_id=agent.agent_id) }}" class="btn btn-primary">
             📊 Report
         </a>
     </div>
@@ -67,9 +67,9 @@
                 <div class="info-item">
                     <div class="info-label">🆔 Agent ID</div>
                     <div class="info-value font-mono" style="display: flex; align-items: center; gap: 0.5rem;">
-                        <code>{{ agent.id[:12] }}...</code>
+                        <code>{{ (agent.agent_id|string)[:12] }}...</code>
                         <button onclick="copyAgentId()" class="copy-btn" title="Copy full Agent ID">📋</button>
-                        <input type="hidden" id="agent-id-full" value="{{ agent.id }}">
+                        <input type="hidden" id="agent-id-full" value="{{ agent.agent_id }}">
                     </div>
                 </div>
                 <div class="info-item">
@@ -137,25 +137,25 @@
     <!-- Screen Time Metrics -->
     <h3 class="section-title">📊 Today's Screen Time</h3>
     <div class="metrics-grid fade-in">
-        <div class="metric-card success">
-            <div class="metric-icon">🟢</div>
+        <div class="metric-card state-active">
+            <div class="metric-icon">🎯</div>
             <div class="metric-label">Active Time</div>
             <div class="metric-value" id="active-time">--</div>
             <div class="metric-sublabel" id="active-pct">--</div>
         </div>
-        <div class="metric-card warning">
-            <div class="metric-icon">🟡</div>
+        <div class="metric-card state-idle">
+            <div class="metric-icon">💤</div>
             <div class="metric-label">Idle Time</div>
             <div class="metric-value" id="idle-time">--</div>
             <div class="metric-sublabel" id="idle-pct">--</div>
         </div>
-        <div class="metric-card danger">
-            <div class="metric-icon">🔴</div>
+        <div class="metric-card state-locked">
+            <div class="metric-icon">🔒</div>
             <div class="metric-label">Locked Time</div>
             <div class="metric-value" id="locked-time">--</div>
             <div class="metric-sublabel" id="locked-pct">--</div>
         </div>
-        <div class="metric-card">
+        <div class="metric-card state-away">
             <div class="metric-icon">⭕</div>
             <div class="metric-label">Away Time</div>
             <div class="metric-value" id="away-time">--</div>
@@ -549,20 +549,27 @@
         border-bottom: 2px solid var(--border);
     }
 
-    /* Usage Progress Bars */
+    /* Usage Progress Bars - Fixed Alignment */
     .usage-bar-container {
         display: flex;
         align-items: center;
         gap: 0.5rem;
+        justify-content: flex-end;
+        min-width: 120px;
+    }
+
+    .usage-bar-container span {
+        min-width: 40px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
     }
 
     .usage-bar {
-        flex: 1;
+        flex: 0 0 60px;
         height: 6px;
         background: var(--border);
         border-radius: 3px;
         overflow: hidden;
-        min-width: 50px;
     }
 
     .usage-bar-fill {
@@ -803,7 +810,7 @@
 
 {% block extra_js %}
 <script>
-    const AGENT_ID = "{{ agent.id }}";
+    const AGENT_ID = "{{ agent.agent_id }}";
     let reportData = null;
 
     // Tab Navigation
@@ -918,20 +925,23 @@
         return `${Math.floor(diff / 86400)}d ago`;
     }
     function formatTime(seconds) {
-        if (!seconds || seconds < 0) return '0m';
+        if (!seconds || seconds < 0) return '0s';
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
         if (h > 0) return `${h}h ${m}m`;
-        return `${m}m`;
+        if (m > 0) return `${m}m ${s}s`;
+        return `${s}s`;
     }
 
     function formatTimeShort(seconds) {
-        if (!seconds || seconds < 0) return '0';
+        if (!seconds || seconds < 0) return '0s';
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
         if (h > 0) return h + 'h';
         if (m > 0) return m + 'm';
-        return '0';
+        return s + 's';
     }
 
     function getSelectedDate() {
@@ -950,15 +960,48 @@
         }
     }
 
-    // Copy Agent ID to clipboard
+    // Copy Agent ID to clipboard (with fallback for HTTP)
     function copyAgentId() {
         const agentId = document.getElementById('agent-id-full').value;
-        navigator.clipboard.writeText(agentId).then(() => {
-            showToast('Agent ID copied to clipboard!', 'success');
-        }).catch(err => {
-            console.error('Copy failed:', err);
-            showToast('Failed to copy', 'error');
-        });
+
+        // Try modern clipboard API first
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(agentId).then(() => {
+                showToast('Agent ID copied to clipboard!', 'success');
+            }).catch(err => {
+                console.error('Clipboard API failed:', err);
+                fallbackCopy(agentId);
+            });
+        } else {
+            // Fallback for HTTP (non-secure contexts)
+            fallbackCopy(agentId);
+        }
+    }
+
+    // Fallback copy using execCommand (works on HTTP)
+    function fallbackCopy(text) {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+
+        try {
+            const successful = document.execCommand('copy');
+            if (successful) {
+                showToast('Agent ID copied to clipboard!', 'success');
+            } else {
+                showToast('Copy failed - please copy manually', 'error');
+            }
+        } catch (err) {
+            console.error('Fallback copy failed:', err);
+            showToast('Copy failed - please copy manually', 'error');
+        }
+
+        document.body.removeChild(textArea);
     }
 
     // Toast notification helper
@@ -995,8 +1038,24 @@
             document.getElementById('registered-at').textContent = data.agent.registered_at ? formatDateTimeFromUTC(data.agent.registered_at) : '-';
             // first_seen_today is agent-side IST timestamp
             document.getElementById('first-seen-today').textContent = data.agent.first_seen_today ? formatTimeIST(data.agent.first_seen_today) : 'No activity';
-            if (data.agent.last_seen) {
+
+            // FIX: Use last_seen_today for historical views, last_seen for today
+            if (data.agent.is_viewing_today && data.agent.last_seen) {
+                // Viewing today - show relative time
                 document.getElementById('last-seen').innerHTML = `${getRelativeTimeFromUTC(data.agent.last_seen)}<br><small class="text-muted">${formatDateTimeFromUTC(data.agent.last_seen)}</small>`;
+            } else if (data.agent.last_seen_today) {
+                // Viewing historical date - show absolute time for that day
+                document.getElementById('last-seen').innerHTML = `${formatTimeIST(data.agent.last_seen_today)}<br><small class="text-muted">Last activity on selected date</small>`;
+            } else {
+                document.getElementById('last-seen').textContent = 'No activity';
+            }
+
+            // Show total tracked time if available
+            if (data.agent.total_tracked_seconds > 0) {
+                const trackedEl = document.getElementById('total-tracked-time');
+                if (trackedEl) {
+                    trackedEl.textContent = formatTime(data.agent.total_tracked_seconds);
+                }
             }
         }
 
@@ -1009,10 +1068,16 @@
             document.getElementById('current-activity').textContent = data.live_status.current_app;
             const stateEl = document.getElementById('current-state');
             stateEl.textContent = 'Active';
-            stateEl.className = 'badge badge-success';
+            stateEl.className = 'badge badge-state-active';
         } else {
             document.getElementById('live-status-banner').style.display = 'none';
             document.getElementById('current-activity').textContent = 'Offline';
+
+            const stateEl = document.getElementById('current-state');
+            if (stateEl) {
+                stateEl.textContent = 'Offline';
+                stateEl.className = 'badge badge-secondary';
+            }
         }
 
         // Screen time - use actual database values
@@ -1028,7 +1093,7 @@
         document.getElementById('idle-time').textContent = formatTime(idleSeconds);
         document.getElementById('locked-time').textContent = formatTime(lockedSeconds);
         document.getElementById('away-time').textContent = formatTime(awaySeconds);
-        document.getElementById('total-time').textContent = formatTime(activeSeconds);  // Total Productive = Active
+        document.getElementById('total-time').textContent = formatTime(totalTracked);  // Total = Active + Idle + Locked + Away
 
         if (totalTracked > 0) {
             document.getElementById('active-pct').textContent = Math.round((activeSeconds / totalTracked) * 100) + '%';
@@ -1269,9 +1334,9 @@
             data: {
                 labels: data.labels,
                 datasets: [
-                    { label: 'Active', data: data.active, backgroundColor: '#10b981', stack: 'Stack 0', borderRadius: 4 },
-                    { label: 'Idle', data: data.idle, backgroundColor: '#f59e0b', stack: 'Stack 0', borderRadius: 4 },
-                    { label: 'Locked', data: data.locked, backgroundColor: '#ef4444', stack: 'Stack 0', borderRadius: 4 }
+                    { label: 'Active', data: data.active, backgroundColor: '#38bdf8', stack: 'Stack 0', borderRadius: 4 },
+                    { label: 'Idle', data: data.idle, backgroundColor: '#fbbf24', stack: 'Stack 0', borderRadius: 4 },
+                    { label: 'Locked', data: data.locked, backgroundColor: '#64748b', stack: 'Stack 0', borderRadius: 4 }
                 ]
             },
             options: {
@@ -1405,20 +1470,21 @@
                 // Update pulse dot color based on state
                 if (pulseDot) {
                     const stateColors = {
-                        'active': '#22c55e',  // Green
-                        'idle': '#f59e0b',    // Orange
-                        'locked': '#ef4444'   // Red
+                        'active': '#38bdf8',  // Sky Blue
+                        'idle': '#fbbf24',    // Amber
+                        'locked': '#64748b'   // Slate
                     };
-                    pulseDot.style.background = stateColors[data.state] || '#22c55e';
+                    pulseDot.style.background = stateColors[data.state] || '#38bdf8';
+                    pulseDot.style.boxShadow = `0 0 8px ${stateColors[data.state] || '#38bdf8'}`;
                 }
 
                 // Update current state badge
                 const stateEl = document.getElementById('current-state');
                 if (stateEl) {
                     const stateLabels = { 'active': 'Active', 'idle': 'Idle', 'locked': 'Locked' };
-                    const stateClasses = { 'active': 'badge-success', 'idle': 'badge-warning', 'locked': 'badge-danger' };
+                    const stateClasses = { 'active': 'badge-state-active', 'idle': 'badge-state-idle', 'locked': 'badge-state-locked' };
                     stateEl.textContent = stateLabels[data.state] || 'Active';
-                    stateEl.className = `badge ${stateClasses[data.state] || 'badge-success'}`;
+                    stateEl.className = `badge ${stateClasses[data.state] || 'badge-state-active'}`;
                 }
             } else {
                 // Offline or no activity

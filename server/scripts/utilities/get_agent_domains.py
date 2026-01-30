@@ -21,7 +21,7 @@ def get_domain_history_for_agent(agent_id):
     with app.app_context():
         try:
             # Get agent info
-            agent = Agent.query.filter_by(id=agent_id).first()
+            agent = Agent.query.filter_by(agent_id=agent_id).first()
             if not agent:
                 return {}
             

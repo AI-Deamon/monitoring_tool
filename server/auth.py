@@ -16,8 +16,32 @@ from extensions import db
 import logging
 import os
 import secrets
+import re
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# VALIDATION HELPERS
+# ============================================================================
+
+def validate_username(username: str) -> tuple[bool, str]:
+    """Validate username format (alphanumeric, dots, underscores, hyphens only)"""
+    if not username or len(username) < 3:
+        return False, "Username must be at least 3 characters"
+    if len(username) > 50:
+        return False, "Username must be less than 50 characters"
+    if not re.match(r'^[a-zA-Z0-9._-]+$', username):
+        return False, "Username can only contain letters, numbers, dots, underscores, and hyphens"
+    return True, ""
+
+def check_linked_username_unique(linked_username: str, exclude_user_id: int = None) -> bool:
+    """Check if linked_username is already in use by another user"""
+    if not linked_username:
+        return True  # Empty is allowed
+    query = DashboardUser.query.filter_by(linked_username=linked_username)
+    if exclude_user_id:
+        query = query.filter(DashboardUser.id != exclude_user_id)
+    return query.first() is None
 
 # Blueprint
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
@@ -137,7 +161,7 @@ def login_required(f):
             return redirect(url_for('auth.login', next=request.url))
         
         # Load current user
-        user = DashboardUser.query.get(session['user_id'])
+        user = DashboardUser.query.filter_by(id=session['user_id']).first()
         if not user or not user.is_active:
             session.clear()
             flash('Your session has expired. Please log in again.', 'warning')
@@ -312,6 +336,11 @@ def change_password():
         
         if not g.current_user.check_password(current):
             flash('Current password is incorrect.', 'danger')
+            return render_template('auth/change_password.html')
+        
+        # Check if new password is same as current
+        if g.current_user.check_password(new_password):
+            flash('New password cannot be the same as current password.', 'danger')
             return render_template('auth/change_password.html')
         
         if new_password != confirm:

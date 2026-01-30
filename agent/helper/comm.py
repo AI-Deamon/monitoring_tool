@@ -263,3 +263,26 @@ class CoreCommunicator:
         except Exception as e:
             logger.error(f"Failed to send state change: {e}")
             return False
+
+    def send_state_spans(self, spans: list) -> bool:
+        """
+        Queue and send state spans to core.
+        
+        Args:
+            spans: List of span dicts
+            
+        Returns:
+            True if successful
+        """
+        if not spans:
+            return True
+        
+        payload = {
+            'agent_id': self.agent_id,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'spans': spans
+        }
+        
+        self.queue.add(payload, '/screentime_spans')
+        self._flush_queue()
+        return True

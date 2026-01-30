@@ -120,8 +120,8 @@ class HelperConfig:
         
         # Helper settings
         helper = config.get("helper", {})
-        self.sample_interval = helper.get("heartbeat_interval", 30)
-        self.heartbeat_interval = helper.get("heartbeat_interval", 30)
+        self.sample_interval = helper.get("heartbeat_interval", 10)
+        self.heartbeat_interval = helper.get("heartbeat_interval", 10)
         self.domain_interval = helper.get("domain_interval", 60)
         self.inventory_interval = helper.get("inventory_interval", 3600)
         
@@ -134,10 +134,11 @@ class HelperConfig:
         self.enable_inventory = features.get("enable_inventory", True)
         self.enable_app_tracking = features.get("enable_app_tracking", True)
         self.enable_idle_tracking = features.get("enable_idle_tracking", True)
+        self.enable_app_specific_thresholds = features.get("enable_app_specific_thresholds", False)
         
         # Thresholds
         thresholds = config.get("thresholds", {})
-        self.idle_threshold = thresholds.get("idle_seconds", 300)
+        self.idle_threshold = thresholds.get("idle_seconds", 120)
         
         # Dynamic reload settings
         dynamic_reload = config.get("dynamic_reload", {})
@@ -173,6 +174,8 @@ class HelperConfig:
                 current_checksum = hashlib.sha256(f.read()).hexdigest()
             
             if current_checksum == self._last_checksum:
+                # Content unchanged, but update mtime to avoid rechecking
+                self._last_mtime = current_mtime
                 return False
             
             # Config has changed - reload it

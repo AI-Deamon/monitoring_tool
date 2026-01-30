@@ -1,282 +1,419 @@
-# SentinelEdge Server Deployment Guide
-# =====================================
-# Complete setup for a fresh system
+# SentinelEdge Server - Complete Portability & Deployment Guide
 
-## Prerequisites
-
-### 1. System Requirements
-- Python 3.10 or higher
-- PostgreSQL 14 or higher
-- 2GB RAM minimum
-- 10GB disk space
-
-### 2. Required Software
-
-**Windows:**
-```powershell
-# Install Python from python.org
-# Install PostgreSQL from postgresql.org
-# Or use chocolatey:
-choco install python postgresql
-```
-
-**Ubuntu/Debian:**
-```bash
-sudo apt update
-sudo apt install python3.10 python3-pip postgresql postgresql-contrib
-```
+## Overview
+This document provides a complete guide for deploying the SentinelEdge server on any machine with automatic setup, database migrations, and production-ready configuration.
 
 ---
 
-## STEP 1: Database Setup (5 minutes)
+## 🎯 Quick Start Options
 
-### 1.1 Create PostgreSQL Database
-
-**Windows (pgAdmin or psql):**
-```sql
--- Connect as postgres superuser, then run:
-CREATE USER sentinelserver WITH PASSWORD 'sentinel_edge_secure';
-CREATE DATABASE sentinel_edge_v1 OWNER sentinelserver;
-GRANT ALL PRIVILEGES ON DATABASE sentinel_edge_v1 TO sentinelserver;
-```
-
-**Linux:**
+### Option 1: Production Deployment (Recommended)
 ```bash
-sudo -u postgres psql
-CREATE USER sentinelserver WITH PASSWORD 'sentinel_edge_secure';
-CREATE DATABASE sentinel_edge_v1 OWNER sentinelserver;
-GRANT ALL PRIVILEGES ON DATABASE sentinel_edge_v1 TO sentinelserver;
-\q
+python start_production.py
 ```
+- **Auto-detects OS**: Uses Waitress (Windows) or Gunicorn (Linux)
+- **Auto-setup**: Runs all 6 setup steps automatically
+- **Production-ready**: Optimized for performance and stability
 
-### 1.2 Test Connection
+### Option 2: Development Server
 ```bash
-psql -h localhost -U sentinelserver -d sentinel_edge_v1
-# Enter password: sentinel_edge_secure
-# Should connect successfully
+python start_server.py
 ```
+- **Flask dev server**: Good for testing and development
+- **Auto-setup**: Same 6-step verification as production
+- **Hot reload**: Easier debugging
+
+### Option 3: Setup Only (No Server Start)
+```bash
+python start_server.py --no-start
+```
+- **Database setup**: Creates tables, procedures, schema fixes
+- **No server**: Useful for CI/CD or manual server control
 
 ---
 
-## STEP 2: Server Setup (10 minutes)
+## 📦 Deployment Package
 
-### 2.1 Copy Server Files
+### Creating a Deployment Package
 ```bash
-# Copy the entire server folder to new system
-# Location: /opt/sentineledge/server (Linux) or C:\SentinelEdge\server (Windows)
+python create_deploy_zip.py
 ```
 
-### 2.2 Create Virtual Environment
-```bash
-cd server
-python -m venv venv
+**Output**: `sentineledge_server_deploy_YYYYMMDD_HHMMSS.zip`
 
-# Activate:
-# Windows:
-venv\Scripts\activate
-# Linux:
-source venv/bin/activate
-```
+**What's Included:**
+- All Python server files (*.py)
+- Templates and static assets
+- Migration scripts
+- Configuration templates (.env.template)
+- Documentation (QUICKSTART.md, README files)
+- Startup scripts (start_production.py, start_server.py)
 
-### 2.3 Install Dependencies
-```bash
-pip install -r server_requirements.txt
-```
-
-### 2.4 Configure Environment
-Create `.env` file in server folder:
-```bash
-# .env file
-DATABASE_URL=postgresql://sentinelserver:sentinel_edge_secure@localhost:5432/sentinel_edge_v1
-SECRET_KEY=your-secret-key-here-change-this
-HOST=0.0.0.0
-PORT=5050
-LOG_LEVEL=INFO
-
-# Optional: For production
-REGISTRATION_SECRET=your-registration-secret
-```
+**What's Excluded (for security):**
+- Actual .env file (contains secrets)
+- Log files
+- Database backups
+- Python cache files
+- Git repository
 
 ---
 
-## STEP 3: Database Migration (2 minutes)
+## 🔧 The 6-Step Auto-Setup Process
 
-### 3.1 Create Tables
-```bash
-# Method 1: Using Flask (recommended)
-python -c "
-from server_app import create_app
-from extensions import db
-app = create_app()
-with app.app_context():
-    db.create_all()
-    print('Tables created!')
-"
+Every startup automatically runs these critical steps:
 
-# Method 2: Using Alembic migrations
-alembic upgrade head
-```
+### Step 1: Database Connection Check
+- Verifies PostgreSQL is accessible
+- Tests DATABASE_URL from .env
+- Provides troubleshooting hints if failed
 
-### 3.2 Setup Classification Tables
-```bash
-# Run the classification setup SQL
-psql -h localhost -U sentinelserver -d sentinel_edge_v1 -f scripts/setup_classification.sql
-```
+### Step 2: Create Database Tables
+- Runs `db.create_all()` to ensure all tables exist
+- Safe to run multiple times (idempotent)
+
+### Step 3: Install Stored Procedures
+- **Critical for telemetry**: Installs 3 core procedures
+  - `process_screentime_event()`
+  - `process_app_switch_event()`
+  - `process_domain_switch_event()`
+- Uses raw DB connection to avoid SQLAlchemy parsing issues
+- Drops old versions before recreation
+
+### Step 4: Fix Schema Issues
+- Adds missing columns (e.g., `idempotency_key` in `domain_sessions`)
+- Creates missing indices
+- Safe to run multiple times
+
+### Step 5: Create Default Admin User
+- Username: `admin`
+- Password: `changeme123`
+- Only creates if doesn't exist
+- **⚠️ CHANGE PASSWORD IMMEDIATELY!**
+
+### Step 6: Start Server
+- Launches production server (Waitress/Gunicorn) or dev server
+- Displays dashboard URL and credentials
 
 ---
 
-## STEP 4: Start Server (1 minute)
+## 🌐 Production Server Options
 
-### 4.1 Development Mode
-```bash
-python server_main.py
+### Windows: Waitress
+```python
+# Automatically used by start_production.py on Windows
+from waitress import serve
+serve(app, host='0.0.0.0', port=5000, threads=8)
 ```
 
-### 4.2 Production Mode (with Gunicorn)
+**Features:**
+- Pure Python (no C dependencies)
+- Multi-threaded
+- Production-grade performance
+- Auto-installed if missing
+
+### Linux: Gunicorn
 ```bash
-# Linux/Mac:
+# Automatically used by start_production.py on Linux
 gunicorn -c gunicorn_config.py server_main:application
-
-# Windows (use waitress instead):
-pip install waitress
-python -c "from waitress import serve; from server_main import application; serve(application, host='0.0.0.0', port=5050)"
 ```
+
+**Features:**
+- Pre-fork worker model
+- Configurable workers (CPU * 2 + 1)
+- Graceful restarts
+- Request limits and timeouts
+
+**Configuration**: `gunicorn_config.py`
+- Workers: Auto-calculated based on CPU cores
+- Timeout: 120 seconds
+- Max requests: 1000 (prevents memory leaks)
+- Logging: `logs/gunicorn_access.log`, `logs/gunicorn_error.log`
 
 ---
 
-## STEP 5: Verify Installation (1 minute)
+## 📋 Migration Checklist: Moving to New Machine
 
-### 5.1 Check Endpoints
+### Pre-Migration (Old Machine)
 ```bash
-# Health check
-curl http://localhost:5050/
-# Expected: {"status": "ok", "service": "SentinelEdge Server"}
-
-# Dashboard
-# Open browser: http://localhost:5050/dashboard/
-
-# Classification Admin
-# Open browser: http://localhost:5050/admin/classification
+# Optional: Backup database
+python scripts/backup_database.py
 ```
 
-### 5.2 Check Logs
-```bash
-# Windows:
-type logs\server.log
+### New Machine Setup
+1. **Install Prerequisites**
+   ```bash
+   # PostgreSQL 12+
+   # Python 3.8+
+   ```
 
-# Linux:
-tail -f logs/server.log
-```
+2. **Extract Deployment Package**
+   ```bash
+   unzip sentineledge_server_deploy_YYYYMMDD_HHMMSS.zip
+   cd sentineledge_server
+   ```
+
+3. **Configure Environment**
+   ```bash
+   cp .env.template .env
+   # Edit .env with your DATABASE_URL and SECRET_KEY
+   ```
+
+4. **Install Dependencies**
+   ```bash
+   pip install -r server_requirements.txt
+   ```
+
+5. **Start Server**
+   ```bash
+   python start_production.py
+   ```
+
+**That's it!** The auto-setup handles everything else.
 
 ---
 
-## STEP 6: Agent Configuration
+## 🔐 Security Checklist
 
-After server is running, configure agents to connect:
+### Required Actions
+- [ ] Change default admin password (`admin`/`changeme123`)
+- [ ] Set strong `SECRET_KEY` in .env (32+ characters)
+- [ ] Configure `REGISTRATION_SECRET` for production
+- [ ] Review CORS settings in .env
 
-Edit agent config file (`agent/config/config.yaml` or `.env`):
-```yaml
-server_url: http://YOUR_SERVER_IP:5050
-```
-
----
-
-## Quick Start Commands (Copy-Paste)
-
-### Fresh Install - All Commands:
-```bash
-# 1. Clone/copy server files
-cd /path/to/server
-
-# 2. Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux
-# venv\Scripts\activate   # Windows
-
-# 3. Install dependencies
-pip install -r server_requirements.txt
-
-# 4. Create .env file (edit with your values)
-cat > .env << 'EOF'
-DATABASE_URL=postgresql://sentinelserver:sentinel_edge_secure@localhost:5432/sentinel_edge_v1
-SECRET_KEY=change-this-to-random-string
-HOST=0.0.0.0
-PORT=5050
-LOG_LEVEL=INFO
-EOF
-
-# 5. Create database tables
-python -c "from server_app import create_app; from extensions import db; app = create_app(); app.app_context().push(); db.create_all(); print('Done!')"
-
-# 6. Start server
-python server_main.py
-```
+### Optional (Production)
+- [ ] Enable HTTPS (update `gunicorn_config.py`)
+- [ ] Configure firewall rules
+- [ ] Set up SSL certificates
+- [ ] Enable rate limiting
 
 ---
 
-## Troubleshooting
+## 🚨 Troubleshooting
 
-### Database Connection Error
+### Database Connection Failed
 ```
-Check:
-1. PostgreSQL is running: sudo systemctl status postgresql
-2. DATABASE_URL in .env is correct
-3. User has permissions: GRANT ALL ON DATABASE sentinel_edge_v1 TO sentinelserver;
+[1/6] Checking database connection...
+  ❌ Database connection failed: could not connect to server
 ```
+
+**Solutions:**
+1. Verify PostgreSQL is running: `pg_isready`
+2. Check DATABASE_URL in .env
+3. Ensure database exists: `createdb sentineledge`
+4. Test connection: `psql -U postgres -d sentineledge`
+
+### Stored Procedures Failed
+```
+[3/6] Installing stored procedures...
+  ❌ Procedure installation failed
+```
+
+**Solutions:**
+1. Check PostgreSQL version (12+ required)
+2. Verify user has CREATE FUNCTION permission
+3. Run manually: `python start_server.py --no-start`
 
 ### Port Already in Use
-```bash
-# Find process using port 5050
-netstat -ano | findstr :5050  # Windows
-lsof -i :5050                 # Linux
-
-# Kill it or change PORT in .env
+```
+OSError: [Errno 98] Address already in use
 ```
 
-### Module Not Found
-```bash
-# Ensure virtual environment is activated
-# Reinstall dependencies:
-pip install -r server_requirements.txt
+**Solutions:**
+1. Change port in .env: `SERVER_PORT=5001`
+2. Kill existing process: `lsof -ti:5000 | xargs kill -9` (Linux)
+3. Or: `netstat -ano | findstr :5000` (Windows)
+
+### Waitress/Gunicorn Not Found
+```
+ModuleNotFoundError: No module named 'waitress'
+```
+
+**Solutions:**
+- `start_production.py` auto-installs Waitress
+- Manual: `pip install waitress` (Windows) or `pip install gunicorn` (Linux)
+
+---
+
+## 📁 File Structure
+
+```
+server_v3/server/
+├── start_production.py       # Production startup (auto-detects OS)
+├── start_server.py            # Development startup + auto-setup
+├── create_deploy_zip.py       # Deployment package creator
+├── QUICKSTART.md              # Quick reference guide
+├── .env.template              # Environment configuration template
+├── server_requirements.txt    # Python dependencies
+├── gunicorn_config.py         # Gunicorn production config
+├── server_main.py             # Main Flask application
+├── server_app.py              # App factory
+├── templates/                 # Dashboard HTML templates
+├── static/                    # CSS, JS, images
+├── migrations/                # Database migrations
+├── scripts/                   # Utility scripts
+│   ├── backup_database.py
+│   ├── restore_database.py
+│   └── fixes/                 # Schema fix scripts
+└── logs/                      # Server logs (created on first run)
 ```
 
 ---
 
-## Production Checklist
+## 🎓 Advanced Usage
 
-- [ ] Change SECRET_KEY to random string
-- [ ] Set REGISTRATION_SECRET for agent registration security
-- [ ] Configure firewall to allow port 5050
-- [ ] Set up SSL/HTTPS (recommended: nginx reverse proxy)
-- [ ] Configure log rotation
-- [ ] Set up systemd service (Linux) or Windows Service
-- [ ] Regular database backups
+### Running as a Service (Linux)
 
----
-
-## Systemd Service (Linux Production)
-
-Create `/etc/systemd/system/sentineledge.service`:
+**systemd service file** (`/etc/systemd/system/sentineledge.service`):
 ```ini
 [Unit]
 Description=SentinelEdge Server
 After=network.target postgresql.service
 
 [Service]
-User=www-data
+Type=simple
+User=sentineledge
 WorkingDirectory=/opt/sentineledge/server
-Environment="PATH=/opt/sentineledge/server/venv/bin"
-ExecStart=/opt/sentineledge/server/venv/bin/gunicorn -c gunicorn_config.py server_main:application
+Environment="PATH=/opt/sentineledge/venv/bin"
+ExecStart=/opt/sentineledge/venv/bin/python start_production.py
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Enable and start:
+**Commands:**
 ```bash
-sudo systemctl daemon-reload
 sudo systemctl enable sentineledge
 sudo systemctl start sentineledge
 sudo systemctl status sentineledge
 ```
+
+### Custom Port Configuration
+
+**Option 1: Environment Variable**
+```bash
+# In .env
+SERVER_PORT=8080
+```
+
+**Option 2: Gunicorn Config**
+```python
+# In gunicorn_config.py
+bind = "0.0.0.0:8080"
+```
+
+### Database Backup Strategy
+
+**Automated daily backups:**
+```bash
+# Add to crontab
+0 2 * * * cd /opt/sentineledge/server && python scripts/backup_database.py
+```
+
+---
+
+## 📊 Performance Tuning
+
+### Gunicorn Workers
+```python
+# gunicorn_config.py
+workers = multiprocessing.cpu_count() * 2 + 1  # Default
+workers = 4  # Fixed number for predictable performance
+```
+
+### Database Connection Pool
+```python
+# server_config.py
+SQLALCHEMY_POOL_SIZE = 10
+SQLALCHEMY_MAX_OVERFLOW = 20
+```
+
+### Waitress Threads
+```python
+# start_production.py
+serve(app, host='0.0.0.0', port=5000, threads=16)  # Increase for high load
+```
+
+---
+
+## 🔄 Update Procedure
+
+1. **Backup current installation**
+   ```bash
+   python scripts/backup_database.py
+   cp -r /opt/sentineledge /opt/sentineledge.backup
+   ```
+
+2. **Deploy new version**
+   ```bash
+   unzip sentineledge_server_deploy_NEW.zip
+   cp sentineledge_server/* /opt/sentineledge/server/
+   ```
+
+3. **Restart server**
+   ```bash
+   # Auto-setup runs on restart
+   sudo systemctl restart sentineledge
+   ```
+
+---
+
+## 📞 Support
+
+- **Documentation**: See `QUICKSTART.md` for quick reference
+- **Logs**: Check `logs/gunicorn_error.log` or Flask console output
+- **Database**: Use `psql` to inspect tables and procedures
+
+---
+
+## ✅ Success Indicators
+
+After running `python start_production.py`, you should see:
+
+```
+======================================================================
+  SentinelEdge Server - Smart Startup
+  Automatic Setup & Configuration
+======================================================================
+
+[1/6] Checking database connection...
+  ✅ Database connected
+[2/6] Creating/verifying database tables...
+  ✅ All tables created/verified
+[3/6] Installing stored procedures...
+  - Dropping legacy functions...
+  - Creating process_screentime_event...
+  - Creating process_app_switch_event...
+  - Creating process_domain_switch_event...
+  ✅ Stored procedures installed
+[4/6] Fixing schema (adding missing columns)...
+  ✅ Schema fixed
+[5/6] Checking admin user...
+  ✅ Admin user exists
+[6/6] Starting server...
+
+============================================================
+✅ AUTO-SETUP COMPLETE!
+============================================================
+
+🚀 Server starting...
+   Dashboard: http://localhost:5000/dashboard
+   Login: admin / changeme123
+
+⚠️  Press Ctrl+C to stop
+
+✅ OS: Windows detected. Using Waitress for production.
+Serving on http://0.0.0.0:5000
+```
+
+**Test the server:**
+```bash
+curl http://localhost:5000/heartbeat
+# Should return: {"error":"Missing authentication..."}
+# (This confirms the server is running and auth is active)
+```
+
+---
+
+**Last Updated**: 2026-01-29  
+**Version**: 3.0.1

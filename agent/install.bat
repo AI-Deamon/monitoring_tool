@@ -281,6 +281,7 @@ echo [OK] Files copied
 echo.
 echo [INFO] Configuring agent identity...
 
+:: Check for existing agent_id
 if exist "%AGENT_ID_FILE%" (
     set /p AGENT_ID=<"%AGENT_ID_FILE%"
     echo [INFO] Existing agent_id: !AGENT_ID!
@@ -290,51 +291,142 @@ if exist "%AGENT_ID_FILE%" (
     echo [INFO] New agent_id: !AGENT_ID!
 )
 
-:: Generate local key
-for /f %%i in ('powershell -Command "[guid]::NewGuid().ToString()"') do set "LOCAL_KEY=%%i"
+:: ============================================================================
+:: BUG FIX: Preserve local_agent_key for re-registration
+:: The server checks if local_agent_key matches during re-registration (SEC-023)
+:: If we always generate a new key, re-registration will fail with "key mismatch"
+:: ============================================================================
+set "LOCAL_KEY_FILE=%DATA_DIR%\local_key"
+set "LOCAL_KEY="
 
-echo [OK] Identity configured
+:: Priority 1: Check for existing key file
+if exist "%LOCAL_KEY_FILE%" (
+    set /p LOCAL_KEY=<"%LOCAL_KEY_FILE%"
+    echo [INFO] Using existing local_key from key file
+    goto :key_ready
+)
+
+:: Priority 2: Extract from existing config.json
+if exist "%CONFIG_FILE%" (
+    echo [INFO] Checking existing config.json for local_agent_key...
+    for /f "tokens=2 delims=:," %%a in ('findstr /C:"local_agent_key" "%CONFIG_FILE%"') do (
+        set "LOCAL_KEY=%%~a"
+    )
+    :: Clean up the extracted value (remove quotes and spaces)
+    set "LOCAL_KEY=!LOCAL_KEY:"=!"
+    set "LOCAL_KEY=!LOCAL_KEY: =!"
+    if not "!LOCAL_KEY!"=="" (
+        echo [INFO] Using existing local_key from config.json
+        :: Save to key file for future use
+        echo !LOCAL_KEY!>"%LOCAL_KEY_FILE%"
+        goto :key_ready
+    )
+)
+
+:: Priority 3: Generate new key (first-time install only)
+echo [INFO] Generating new local_agent_key (first-time install)
+for /f %%i in ('powershell -Command "[guid]::NewGuid().ToString()"') do set "LOCAL_KEY=%%i"
+echo !LOCAL_KEY!>"%LOCAL_KEY_FILE%"
+
+:key_ready
+echo [OK] Identity configured (agent_id and local_key preserved)
 
 :: ============================================================================
-:: STEP 11: Create Configuration File
+:: STEP 11: Create Configuration File (Schema v2)
 :: ============================================================================
 echo.
-echo [INFO] Creating configuration...
+echo [INFO] Creating configuration (Schema v2)...
 
 for %%A in ("%COMPUTERNAME%") do set "HOSTNAME=%%~A"
 
+:: Validate registration secret is provided
+if "%REGISTRATION_SECRET%"=="" (
+    echo.
+    echo ========================================================================
+    echo   [ERROR] Registration Secret Required
+    echo ========================================================================
+    echo   The registration secret is REQUIRED for agent installation.
+    echo   You must provide the secret from your server administrator.
+    echo.
+    echo   Without the secret, the agent cannot register with the server.
+    echo ========================================================================
+    echo.
+    set /p "REGISTRATION_SECRET=Enter registration secret (REQUIRED): "
+    if "!REGISTRATION_SECRET!"=="" (
+        echo [ERROR] Cannot continue without registration secret.
+        pause
+        exit /b 1
+    )
+)
+
 (
 echo {
-echo   "server_url": "%SERVER_URL%",
-echo   "agent_id": "!AGENT_ID!",
-echo   "local_agent_key": "!LOCAL_KEY!",
-echo   "hostname": "%HOSTNAME%",
-echo   "registration_secret": "%REGISTRATION_SECRET%",
-echo   "heartbeat_interval": 300,
-echo   "telemetry_interval": 60,
-echo   "upload_interval": 300,
-echo   "buffer_max_size_mb": 100,
-echo   "log_level": "INFO",
+echo   "version": 2,
+echo   "agent": {
+echo     "agent_id": "!AGENT_ID!",
+echo     "agent_name": "%HOSTNAME%",
+echo     "local_agent_key": "!LOCAL_KEY!"
+echo   },
+echo   "authentication": {
+echo     "api_key": "",
+echo     "api_key_stored_securely": false,
+echo     "registered": false
+echo   },
+echo   "server": {
+echo     "url": "!SERVER_URL!",
+echo     "registration_secret": "!REGISTRATION_SECRET!",
+echo     "cert_pinning_fingerprint": "",
+echo     "allow_insecure_http": true,
+echo     "skip_manifest_verification": false
+echo   },
 echo   "core": {
-echo     "heartbeat_interval": 300,
-echo     "telemetry_interval": 60,
-echo     "upload_interval": 300
+echo     "listen_port": 48123,
+echo     "aggregation_interval": 60,
+echo     "upload_interval": 60,
+echo     "heartbeat_interval": 60,
+echo     "enable_ingest": true,
+echo     "enable_uploader": true,
+echo     "enable_aggregator": true
 echo   },
 echo   "helper": {
-echo     "collection_interval": 10,
-echo     "heartbeat_interval": 60,
-echo     "domain_check_interval": 30
+echo     "heartbeat_interval": 10,
+echo     "domain_interval": 60,
+echo     "inventory_interval": 3600,
+echo     "features": {
+echo       "capture_window_titles": true,
+echo       "capture_full_urls": false,
+echo       "enable_domains": true,
+echo       "enable_inventory": true,
+echo       "enable_app_tracking": true,
+echo       "enable_idle_tracking": true
+echo     }
 echo   },
-echo   "features": {
-echo     "app_tracking": true,
-echo     "domain_tracking": true,
-echo     "idle_detection": true,
-echo     "inventory": true
-echo   }
+echo   "thresholds": {
+echo     "idle_seconds": 120,
+echo     "app_specific": {}
+echo   },
+echo   "retry": {
+echo     "max_attempts": 5,
+echo     "initial_backoff_seconds": 2,
+echo     "max_backoff_seconds": 300
+echo   },
+echo   "dynamic_reload": {
+echo     "enabled": true,
+echo     "check_interval": 30
+echo   },
+echo   "api_token": ""
 echo }
 ) > "%CONFIG_FILE%"
 
-echo [OK] Configuration created
+:: Verify config was created and contains registration secret
+findstr /C:"registration_secret" "%CONFIG_FILE%" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Config file creation failed - registration_secret missing
+    pause
+    exit /b 1
+)
+
+echo [OK] Configuration created (Schema v2)
 
 :: ============================================================================
 :: STEP 12: Compile Python Files to .pyc

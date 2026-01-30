@@ -20,6 +20,7 @@ from helper.collector import DataCollector
 from helper.comm import CoreCommunicator
 from helper.identity_sync import IdentitySynchronizer
 from helper.state_detector import StateDetector, SystemState
+from helper.performance import get_cpu_throttler, get_memory_enforcer, init_performance_monitoring
 
 
 class SentinelHelper:
@@ -56,12 +57,17 @@ class SentinelHelper:
         # State detector for reliable lock/unlock detection
         self.state_detector = StateDetector(
             idle_threshold_seconds=self.config.idle_threshold,
-            on_state_change=self._on_state_change
+            on_state_change=self._on_state_change,
+            agent_id=self.config.agent_id,
+            data_dir=self.config.state_dir
         )
         self.system_state = SystemState.ACTIVE
         
-        # Link IdleDetector for synchronization (FIX: ensures lock/unlock sync immediately)
+        # Link components for state arbitration
         self.state_detector.idle_detector = self.collector.idle_detector
+        self.collector.idle_detector.authority = self.state_detector.authority
+        self.collector.state_detector = self.state_detector
+        self.state_detector.collector = self.collector # Link for event emission
         
         self.logger.info("="*60)
         self.logger.info("SentinelEdge Helper v2.0 - Enhanced")
@@ -106,7 +112,7 @@ class SentinelHelper:
                 state_detector_state = self.state_detector.get_state()
                 diag.append(f"  State Detector: {state_detector_state.value}")
                 diag.append(f"  State Detector Running: {self.state_detector._running}")
-                diag.append(f"  Is Locked Flag: {self.state_detector._is_locked}")
+                diag.append(f"  Is Locked Flag: {self.state_detector.authority.state == SystemState.LOCKED}")
             except Exception as e:
                 diag.append(f"  State Detector: ERROR - {e}")
             
@@ -123,11 +129,15 @@ class SentinelHelper:
             
             # 4. Idle Detector state
             try:
-                idle_detector = self.collector.idle_detector
-                idle_seconds = idle_detector.get_idle_seconds()
-                current_idle_state = idle_detector.get_current_state()
+                # Get idle seconds from StateDetector (single source of truth)
+                idle_seconds = self.state_detector._get_idle_seconds()
+                current_idle_state = self.state_detector.current_state
+                idle_detector_state = "idle" if self.collector.idle_detector.is_idle() else "active"
+                is_locked = self.collector.idle_detector.is_locked
                 diag.append(f"  Idle Seconds: {idle_seconds:.1f}s")
-                diag.append(f"  Idle State: {current_idle_state}")
+                diag.append(f"  System State: {current_idle_state}")
+                diag.append(f"  IdleDetector State: {idle_detector_state}")
+                diag.append(f"  IdleDetector Locked: {is_locked}")
             except Exception as e:
                 diag.append(f"  Idle Detector: ERROR - {e}")
             
@@ -345,9 +355,16 @@ class SentinelHelper:
         last_domain_check = time.time()
         last_inventory_check = time.time()
         last_connection_check = time.time()
+        last_resource_check = time.time()
         
         consecutive_heartbeat_failures = 0
         max_consecutive_failures = 5
+        
+        # Initialize performance monitoring (CPU throttler + memory enforcer)
+        perf = init_performance_monitoring()
+        cpu_throttler = perf['cpu_throttler']
+        memory_enforcer = perf['memory_enforcer']
+        self.logger.info("[PERF] Performance monitoring active (CPU/Memory limits)")
         
         self.logger.info("Entering main monitoring loop...")
         loop_iteration = 0
@@ -385,7 +402,7 @@ class SentinelHelper:
                 # NOTE: heartbeat_interval is base (e.g. 30s)
                 # Active: 30s
                 # Idle: 60s
-                # Locked: 300s
+                # Locked: 120s
                 
                 # Get last idle state from collector
                 # We can peek at internal state or just use base interval
@@ -403,7 +420,7 @@ class SentinelHelper:
                 if hasattr(self.collector, '_last_idle_state'):
                     state = self.collector._last_idle_state
                     if state == 'locked':
-                        current_interval = 300 # 5 minutes
+                        current_interval = 120 # 2 minutes
                     elif state == 'idle':
                         current_interval = 60 # 1 minute
                 
@@ -426,6 +443,10 @@ class SentinelHelper:
                             self.core_connected = False
                             consecutive_heartbeat_failures = 0
                 
+                # State Span Collection (NEW: Idempotent session tracking)
+                if self.core_connected:
+                    self._send_state_spans()
+                
                 # Domain collection (every heartbeat for active tracking)
                 if now - last_domain_check >= self.config.heartbeat_interval:
                     if self.core_connected:
@@ -436,7 +457,7 @@ class SentinelHelper:
                     last_domain_check = now
                 
                 # Inventory check (every 5 minutes)
-                if now - last_inventory_check >= 300:
+                if now - last_inventory_check >= 120:
                     if self.core_connected:
                         self._check_inventory()
                     last_inventory_check = now
@@ -457,6 +478,32 @@ class SentinelHelper:
                 # This helps catch silent failures
                 if loop_iteration % 60 == 0:
                     self._log_diagnostic_state(loop_iteration, current_interval)
+                
+                # ============================================================
+                # PERF: CPU Throttling & Memory Limit Check (every 30 seconds)
+                # ============================================================
+                if now - last_resource_check >= 30:
+                    # Update CPU limit based on system state
+                    if hasattr(self.collector, '_last_idle_state'):
+                        cpu_throttler.set_state(self.collector._last_idle_state)
+                    
+                    # Check and enforce memory limit
+                    try:
+                        mem_result = memory_enforcer.check_and_enforce()
+                        if mem_result['action_taken']:
+                            self.logger.info(
+                                f"[PERF] Memory: {mem_result['usage_mb']:.1f}MB, "
+                                f"action: {mem_result['action_taken']}"
+                            )
+                    except MemoryError as e:
+                        # Memory limit exceeded with 'restart' action
+                        self.logger.critical(f"[PERF] {e} - requesting restart")
+                        raise  # Will be caught by crash handler
+                    
+                    last_resource_check = now
+                
+                # CPU throttle check (runs on every loop)
+                cpu_throttler.throttle_if_needed()
                 
                 # Sleep briefly
                 time.sleep(1)
@@ -516,14 +563,31 @@ class SentinelHelper:
         except Exception as e:
             self.logger.error(f"Heartbeat error: {e}", exc_info=True)
             return False
+
+    def _send_state_spans(self):
+        """Collect and send completed state spans to core"""
+        try:
+            spans = self.collector.collect_state_spans()
+            if spans:
+                if self.communicator.send_state_spans(spans):
+                    self.logger.info(f"[OK] Sent {len(spans)} state spans to core")
+                else:
+                    self.logger.warning(f"[FAIL] Failed to send {len(spans)} state spans to core")
+        except Exception as e:
+            self.logger.error(f"Error sending state spans: {e}")
     
-    def _on_state_change(self, old_state: SystemState, new_state: SystemState):
+    def _on_state_change(self, old_state: SystemState, new_state: SystemState, duration_seconds: float):
         """
-        Handle state transitions from state detector.
+        Handle state transitions from state detector with duration tracking.
         Sends immediate state-change telemetry to Core via CoreCommunicator.
+        
+        Args:
+            old_state: Previous system state
+            new_state: New system state
+            duration_seconds: Time spent in previous state
         """
         self.system_state = new_state
-        self.logger.info(f"[STATE] Transition: {old_state.value} -> {new_state.value}")
+        self.logger.info(f"[STATE] Transition: {old_state.value} → {new_state.value} (Δ{duration_seconds:.1f}s)")
         
         # Send immediate state change via CoreCommunicator (already has auth)
         try:
@@ -533,6 +597,7 @@ class SentinelHelper:
                 'previous_state': old_state.value,
                 'current_state': new_state.value,
                 'timestamp': datetime.now(timezone.utc).isoformat(),
+                'duration_seconds': int(duration_seconds),  # ✅ ADD THIS
                 'username': os.getlogin()  # Add username context
             }
             
@@ -540,9 +605,12 @@ class SentinelHelper:
             success = self.communicator.send_state_change(payload)
             
             if success:
-                self.logger.info(f"[STATE] State-change telemetry sent: {old_state.value} -> {new_state.value}")
+                self.logger.info(
+                    f"[STATE] State-change sent: {old_state.value} → {new_state.value} "
+                    f"(duration={int(duration_seconds)}s)"
+                )
             else:
-                self.logger.warning(f"[STATE] State-change telemetry failed (will retry on next heartbeat)")
+                self.logger.warning(f"[STATE] State-change failed (will retry on next heartbeat)")
                 
         except Exception as e:
             self.logger.error(f"[STATE] Error sending state-change: {e}", exc_info=True)

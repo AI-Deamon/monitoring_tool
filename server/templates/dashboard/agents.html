@@ -25,17 +25,21 @@
             <thead>
                 <tr>
                     <th class="sortable" onclick="sortTable(0)">Hostname & ID</th>
-                    <th class="sortable" onclick="sortTable(1)">Operating System</th>
-                    <th class="sortable" onclick="sortTable(2)">Current Status</th>
-                    <th class="sortable" onclick="sortTable(3)">Last Activity</th>
-                    <th class="sortable" onclick="sortTable(4)">Screen Time (Today)</th>
-                    <th>Top Application</th>
+                    <th class="sortable" onclick="sortTable(1)">User</th>
+                    <th class="sortable" onclick="sortTable(2)">Status</th>
+                    <th class="sortable" onclick="sortTable(3)">Current Activity</th>
+                    <th class="sortable" onclick="sortTable(4)">Screen Time</th>
+                    <th>Top App</th>
+                    <th>Apps</th>
+                    <th>Domains</th>
+                    <th>Inventory</th>
+                    <th>Last Seen</th>
                     <th class="text-right">Actions</th>
                 </tr>
             </thead>
             <tbody id="agents-body">
                 <tr>
-                    <td colspan="7" class="text-center p-5">
+                    <td colspan="11" class="text-center p-5">
                         <div class="spinner"></div>
                         <p class="mt-2 text-tertiary">Loading fleet data...</p>
                     </td>
@@ -89,7 +93,7 @@
         if (filtered.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="text-center p-5">
+                    <td colspan="11" class="text-center p-5">
                         <div class="text-4xl mb-2">🔍</div>
                         <p class="text-lg font-bold text-secondary">No agents matching your criteria</p>
                         <p class="text-sm text-tertiary">Try adjusting your search or filter</p>
@@ -101,46 +105,60 @@
         filtered.forEach(agent => {
             const tr = document.createElement('tr');
 
-            // Status Badge using new design system classes
-            const statusHtml = agent.is_online
-                ? '<span class="badge badge-success">🟢 Online</span>'
-                : '<span class="badge badge-danger">🔴 Offline</span>';
+            // Status Badge with telemetry stale warning
+            let statusHtml;
+            if (agent.telemetry_stale) {
+                // Online but not sending data - SILENT FAILURE!
+                statusHtml = '<span class="badge badge-warning" title="⚠️ Agent is online but not sending data!">⚠️ Stale</span>';
+            } else if (agent.is_online) {
+                statusHtml = '<span class="badge badge-success">🟢 Online</span>';
+            } else {
+                statusHtml = '<span class="badge badge-danger">🔴 Offline</span>';
+            }
+
+            // Add operational status indicator
+            if (agent.operational_status === 'DEGRADED') {
+                statusHtml += '<br><small class="text-warning">⚠️ Degraded</small>';
+            }
+
+            // Current activity with state icon
+            let currentActivity = '<span class="text-muted">-</span>';
+            if (agent.current_app) {
+                const stateIcon = agent.current_state === 'active' ? '🎯' :
+                    agent.current_state === 'idle' ? '💤' : '🔒';
+                currentActivity = `<span class="current-app">${stateIcon} ${agent.current_app}</span>`;
+            }
 
             // Relative time (IST)
             const lastSeenText = agent.last_seen
                 ? getRelativeTimeIST(agent.last_seen)
-                : 'Never Seen';
+                : 'Never';
 
-            // Screen time (Today)
+            // Screen time with breakdown
             const screenTime = formatTime(agent.total_screen_seconds || 0);
+            const screenTimeTitle = `Active: ${formatTime(agent.active_seconds || 0)}, Idle: ${formatTime(agent.idle_seconds || 0)}, Locked: ${formatTime(agent.locked_seconds || 0)}`;
 
             tr.innerHTML = `
                 <td>
-                    <div class="flex items-center gap-2">
-                        <div class="brand-icon" style="font-size: 1.2rem;">🖥️</div>
-                        <div>
-                            <div class="font-bold text-primary">${agent.hostname || 'Unknown'}</div>
-                            <div class="text-xs font-mono text-tertiary">${agent.agent_id}</div>
-                        </div>
-                    </div>
+                    <a href="/dashboard/agent/${agent.agent_id}" class="agent-link">
+                        <strong>${agent.hostname || 'Unknown'}</strong>
+                    </a>
+                    <br><small class="text-muted font-mono">${agent.agent_id.slice(0, 12)}...</small>
                 </td>
-                <td>
-                    <div class="text-sm">${agent.os || 'Unknown OS'}</div>
-                    <div class="text-xs text-tertiary">${agent.username || 'System'}</div>
-                </td>
+                <td>${agent.username || '-'}</td>
                 <td>${statusHtml}</td>
+                <td>${currentActivity}</td>
                 <td>
-                    <div class="text-sm font-medium" title="${agent.last_seen || ''}">${lastSeenText}</div>
+                    <span title="${screenTimeTitle}">${screenTime}</span>
                 </td>
-                <td>
-                    <div class="font-mono font-bold text-sm text-secondary">${screenTime}</div>
-                </td>
-                <td>
-                    <span class="current-app" style="font-size: 0.75rem;">${agent.top_app || 'None'}</span>
-                </td>
+                <td>${agent.top_app || '-'}</td>
+                <td>${agent.total_apps_used || 0}</td>
+                <td>${agent.domains_visited || 0}</td>
+                <td>${agent.installed_apps || 0}</td>
+                <td><span title="${agent.last_seen || ''}">${lastSeenText}</span></td>
                 <td class="text-right">
                     <a href="/dashboard/agent/${agent.agent_id}" class="btn btn-sm btn-primary">
-                        View Details
+                        View
                     </a>
                 </td>
             `;

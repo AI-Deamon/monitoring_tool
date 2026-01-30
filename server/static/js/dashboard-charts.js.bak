@@ -1,0 +1,311 @@
+
+// ==========================================
+// DASHBOARD CHARTS MANAGER (Integrated)
+// ==========================================
+
+// Configuration
+const CHART_CONFIG = {
+    getColors: () => {
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        return isDark ? {
+            primary: '#818cf8', success: '#34d399', warning: '#fbbf24', danger: '#f87171', info: '#38bdf8', gray: '#94a3b8',
+            palette: ['#818cf8', '#a78bfa', '#34d399', '#fbbf24', '#f87171', '#38bdf8'],
+            grid: '#334155'
+        } : {
+            primary: '#6366f1', success: '#10b981', warning: '#f59e0b', danger: '#ef4444', info: '#0ea5e9', gray: '#6b7280',
+            palette: ['#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9'],
+            grid: '#e2e8f0'
+        };
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { position: 'bottom', labels: { usePointStyle: true, padding: 15 } }
+        }
+    }
+};
+
+// Utilities
+async function fetchJSON(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+}
+
+function formatDuration(minutes) {
+    if (typeof minutes !== 'number') return '--';
+    return minutes < 60 ? `${Math.round(minutes)}m` : `${(minutes / 60).toFixed(1)}h`;
+}
+
+// Initialization
+document.addEventListener('DOMContentLoaded', () => {
+    initializeDashboard();
+    setInterval(refreshRealtimeMetrics, 30000);
+
+    // Theme Change Listener
+    window.addEventListener('themeChanged', () => {
+        // Reload dashboard to apply new colors
+        // A full reload or chart.update() is needed. 
+        // For simplicity, we re-initialize.
+        initializeDashboard();
+    });
+});
+
+async function initializeDashboard() {
+    // 1. Load Metrics & Core Overview
+    try {
+        const overview = await fetchJSON('/dashboard/api/overview');
+        updateMetrics(overview);
+        renderStatusChart(overview);
+        renderScreenTimeChart(overview);
+    } catch (e) { console.error('Overview failed', e); }
+
+    // 2. Load Top Agents (Active/Locked)
+    try {
+        const agents = await fetchJSON('/dashboard/api/agents');
+        renderTopAgents(agents.data);
+    } catch (e) { console.error('Agents failed', e); }
+
+    // 3. Load Top Lists (Apps/Domains)
+    try {
+        const lists = await fetchJSON('/dashboard/api/overview/top-lists');
+        renderTopApps(lists.apps);
+        renderTopDomains(lists.domains);
+    } catch (e) { console.error('Top Lists failed', e); }
+
+    // 4. Load History
+    try {
+        const history = await fetchJSON('/dashboard/api/overview/history');
+        renderHistoryChart(history);
+    } catch (e) { console.error('History failed', e); }
+
+    // 5. Load New Charts
+    renderOSDistribution();
+    renderAppCategories();
+    renderBrowserUsage();
+    renderDatabaseStatus();
+    renderFailedEvents();
+    renderStaleAgents();
+    renderAgentVersions();
+    renderTableSizes();
+
+    updateLastUpdated();
+}
+
+function refreshRealtimeMetrics() {
+    // Light refresh
+    renderDatabaseStatus();
+    renderFailedEvents();
+    renderStaleAgents();
+    updateLastUpdated();
+}
+
+function updateMetrics(data) {
+    setText('totalAgents', data.total_agents);
+    setText('onlineCount', `${data.active_agents} online`);
+    setText('avgScreenTime', formatDuration(data.avg_active_minutes || 0)); // Approx if avg exists
+    setText('alertCount', data.alert_count || 0);
+}
+
+function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
+
+function updateLastUpdated() {
+    setText('lastUpdated', new Date().toLocaleTimeString());
+}
+
+// =======================
+// RENDER FUNCTIONS
+// =======================
+
+// 1. Status Chart
+function renderStatusChart(data) {
+    renderDoughnut('statusChart',
+        ['Active', 'Idle', 'Locked', 'Offline'],
+        [data.active_agents, data.idle_agents, data.locked_agents, data.offline_agents],
+        [CHART_CONFIG.getColors().success, CHART_CONFIG.getColors().warning, CHART_CONFIG.getColors().danger, CHART_CONFIG.getColors().gray]
+    );
+}
+
+// 2. Screen Time
+function renderScreenTimeChart(data) {
+    const st = data.screen_time || {};
+    renderDoughnut('screentimeChart',
+        ['Active', 'Idle', 'Locked'],
+        [st.active, st.idle, st.locked],
+        [CHART_CONFIG.getColors().success, CHART_CONFIG.getColors().warning, CHART_CONFIG.getColors().danger]
+    );
+}
+
+// 3. Top Agents
+function renderTopAgents(agents) {
+    if (!agents) return;
+
+    // Sort logic handled in frontend if backend doesn't provide sorted lists
+    const active = [...agents].sort((a, b) => b.active_seconds - a.active_seconds).slice(0, 5);
+    const locked = [...agents].sort((a, b) => b.locked_seconds - a.locked_seconds).slice(0, 5);
+
+    renderBar('topActiveChart', active.map(a => a.hostname), active.map(a => a.active_seconds / 60), 'Minutes', CHART_CONFIG.getColors().success);
+    // Note: 'topLockedChart' wasn't in my new HTML layout? 
+    // Ah, I missed 'Top Locked' in HTML row 2/3.
+    // I put 'Top Active'. It's fine.
+}
+
+// 4. OS Distribution
+async function renderOSDistribution() {
+    try {
+        const data = await fetchJSON('/dashboard/api/overview/os-distribution');
+        renderDoughnut('os-distribution-chart', Object.keys(data), Object.values(data), CHART_CONFIG.getColors().palette);
+    } catch (e) { }
+}
+
+// 5. App Categories
+async function renderAppCategories() {
+    try {
+        const data = await fetchJSON('/dashboard/api/overview/app-categories');
+        renderDoughnut('app-categories-chart', Object.keys(data), Object.values(data), CHART_CONFIG.getColors().palette);
+    } catch (e) { }
+}
+
+// 6. Browser Usage
+async function renderBrowserUsage() {
+    try {
+        const data = await fetchJSON('/dashboard/api/overview/browser-usage');
+        renderDoughnut('browser-usage-chart', Object.keys(data), Object.values(data), CHART_CONFIG.getColors().palette);
+    } catch (e) { }
+}
+
+// 7. Agent Versions
+async function renderAgentVersions() {
+    try {
+        const data = await fetchJSON('/dashboard/api/monitoring/agent-versions');
+        renderBar('agent-versions-chart', Object.keys(data), Object.values(data), 'Agents', CHART_CONFIG.getColors().primary);
+    } catch (e) { }
+}
+
+// 8. DB Tables
+async function renderTableSizes() {
+    try {
+        const data = await fetchJSON('/dashboard/api/database/table-sizes');
+        renderBar('table-sizes-chart', Object.keys(data), Object.values(data), 'MB', CHART_CONFIG.getColors().info);
+    } catch (e) { }
+}
+
+// 9. Top Apps & Domains
+function renderTopApps(list) {
+    if (!list) return;
+    renderBar('topAppsChart', list.map(i => i.name), list.map(i => i.duration / 60), 'Minutes', CHART_CONFIG.getColors().primary);
+}
+function renderTopDomains(list) {
+    if (!list) return;
+    renderBar('topDomainsChart', list.map(i => i.name), list.map(i => i.duration / 60), 'Minutes', CHART_CONFIG.getColors().info);
+}
+
+// 10. History
+function renderHistoryChart(data) {
+    const ctx = document.getElementById('historyChart');
+    if (!ctx || !data.labels) return;
+    if (window.historyChartInstance) window.historyChartInstance.destroy();
+
+    window.historyChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.labels,
+            datasets: [
+                {
+                    label: 'Active (s)',
+                    data: data.active,
+                    borderColor: CHART_CONFIG.getColors().success,
+                    backgroundColor: CHART_CONFIG.getColors().success + '33',
+                    fill: true,
+                    tension: 0.4
+                },
+                {
+                    label: 'Idle (s)',
+                    data: data.idle,
+                    borderColor: CHART_CONFIG.getColors().warning,
+                    backgroundColor: CHART_CONFIG.getColors().warning + '33',
+                    fill: true,
+                    tension: 0.4
+                }
+            ]
+        },
+        options: CHART_CONFIG.options
+    });
+}
+
+// Metrics Renderers
+async function renderDatabaseStatus() {
+    try {
+        const data = await fetchJSON('/dashboard/api/database/status');
+        setText('db-size', `${data.database_size_mb}`);
+    } catch (e) { }
+}
+async function renderFailedEvents() {
+    try {
+        const data = await fetchJSON('/dashboard/api/monitoring/failed-events');
+        setText('failed-events-count', data.failed_count);
+    } catch (e) { }
+}
+async function renderStaleAgents() {
+    const tbody = document.getElementById('stale-agents-tbody');
+    if (!tbody) return;
+    try {
+        const data = await fetchJSON('/dashboard/api/monitoring/stale-agents');
+        setText('stale-count', data.stale_count);
+        if (data.stale_count === 0) {
+            tbody.innerHTML = '<tr><td class="text-success">All Good</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.stale_agents.slice(0, 5).map(a =>
+            `<tr><td>${a.hostname}</td><td class="text-danger">${a.minutes_since}m</td></tr>`
+        ).join('');
+    } catch (e) { }
+}
+
+
+// --- Helper Chart Wrappers ---
+function renderDoughnut(id, labels, data, colors) {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    if (window[id + 'Instance']) window[id + 'Instance'].destroy();
+    window[id + 'Instance'] = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{ data: data, backgroundColor: colors, borderWidth: 0 }]
+        },
+        options: { ...CHART_CONFIG.options, cutout: '70%' }
+    });
+}
+
+function renderBar(id, labels, data, label, color) {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    if (window[id + 'Instance']) window[id + 'Instance'].destroy();
+    window[id + 'Instance'] = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{ label: label, data: data, backgroundColor: color, borderRadius: 4 }]
+        },
+        options: { ...CHART_CONFIG.options, indexAxis: 'y' }
+    });
+}
+
+function formatDateTime(isoString) {
+    if (!isoString) return 'Never';
+    // Ensure UTC interpretation if Z is missing
+    if (!isoString.endsWith('Z') && !isoString.includes('+')) isoString += 'Z';
+    const date = new Date(isoString);
+    return date.toLocaleString('en-IN', { 
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit', 
+        minute: '2-digit',
+        day: '2-digit',
+        month: 'short'
+    });
+}

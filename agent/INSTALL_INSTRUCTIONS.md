@@ -37,4 +37,46 @@ Right-click `uninstall.bat` → Run as Administrator
 
 ---
 
+## ⚠️ Antivirus Exclusions (Recommended)
+
+To ensure optimal performance and prevent false positives, add these exclusions to your antivirus software:
+
+### Folders to Exclude:
+```
+C:\ProgramData\SentinelEdge\
+C:\Program Files\SentinelEdge\
+```
+
+### Processes to Exclude:
+```
+pythonw.exe       (Helper process)
+python.exe        (Core service)
+nssm.exe          (Service manager)
+```
+
+### Why This Is Important:
+- Antivirus real-time scanning can cause high CPU usage
+- May interfere with browser history reading (domain tracking)
+- Can slow down app inventory collection
+
+---
+
+## Performance Notes
+
+The agent is designed to be lightweight:
+
+| State | CPU Usage | Memory |
+|-------|-----------|--------|
+| Active | < 5% | < 100 MB |
+| Idle | < 2% | < 100 MB |
+| Locked | < 1% | < 80 MB |
+
+If you notice high CPU/memory usage, check:
+1. Antivirus exclusions configured?
+2. Multiple browser tabs with history access?
+3. Large app inventory (1000+ apps)?
+
+---
+
 **Questions?** Contact the IT team.
+

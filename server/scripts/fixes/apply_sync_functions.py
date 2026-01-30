@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from sqlalchemy import text
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from server_app import create_app
 from extensions import db
@@ -42,7 +42,7 @@ def apply_patch():
                 INSERT INTO screen_time (
                     agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated
                 ) VALUES (
-                    p_agent_id, v_date, p_active_total, p_idle_total, p_locked_total, NOW()
+                    p_agent_id::UUID, v_date, p_active_total, p_idle_total, p_locked_total, NOW()
                 )
                 ON CONFLICT (agent_id, date) DO UPDATE SET
                     -- Use GREATEST to prevent regression if agent restarts
@@ -58,7 +58,7 @@ def apply_patch():
             $$ LANGUAGE plpgsql;
         """))
         
-        # process_app_switch_event
+        # process_app_switch_event (ROBUST VERSION)
         db.session.execute(text("""
             CREATE OR REPLACE FUNCTION process_app_switch_event(
                 p_agent_id VARCHAR,
@@ -73,21 +73,45 @@ def apply_patch():
             ) RETURNS TABLE(status text, message text) AS $$
             DECLARE
                 v_date DATE;
+                v_clamped_seconds FLOAT;
             BEGIN
                 v_date := p_session_start::DATE;
                 
+                IF p_app IS NULL OR p_app = '' THEN
+                    RETURN QUERY SELECT 'skipped'::TEXT, 'NULL or empty app name'::TEXT;
+                    RETURN;
+                END IF;
+
+                IF p_total_seconds < 0 THEN
+                    RETURN QUERY SELECT 'error'::TEXT, 'Negative duration rejected'::TEXT;
+                    RETURN;
+                END IF;
+
+                IF p_total_seconds > 28800 THEN
+                    RETURN QUERY SELECT 'skipped'::TEXT, 
+                        format('Excessive duration rejected (%s hours)', round((p_total_seconds/3600.0)::numeric, 1))::TEXT;
+                    RETURN;
+                END IF;
+                
+                v_clamped_seconds := LEAST(p_total_seconds, 28800);
+                
                 -- 1. Insert into app_sessions (History)
-                INSERT INTO app_sessions (
-                    agent_id, app, window_title, start_time, end_time, duration_seconds, created_at
-                ) VALUES (
-                    p_agent_id, p_app, p_window_title, p_session_start, p_session_end, p_total_seconds, NOW()
-                );
+                BEGIN
+                    INSERT INTO app_sessions (
+                        agent_id, app, window_title, start_time, end_time, duration_seconds, created_at
+                    ) VALUES (
+                        p_agent_id::UUID, p_app, p_window_title, p_session_start, p_session_end, v_clamped_seconds, NOW()
+                    );
+                EXCEPTION WHEN unique_violation THEN
+                    RETURN QUERY SELECT 'skipped'::text, 'Duplicate session ignored'::text;
+                    RETURN;
+                END;
                 
                 -- 2. Upsert into app_usage (Daily Aggregation)
                 INSERT INTO app_usage (
                     agent_id, date, app, duration_seconds, session_count, last_updated
                 ) VALUES (
-                    p_agent_id, v_date, p_app, p_total_seconds::INTEGER, 1, NOW()
+                    p_agent_id::UUID, v_date, p_app, v_clamped_seconds::INTEGER, 1, NOW()
                 )
                 ON CONFLICT (agent_id, date, app) DO UPDATE SET
                     duration_seconds = app_usage.duration_seconds + EXCLUDED.duration_seconds,
@@ -122,14 +146,14 @@ def apply_patch():
                 INSERT INTO domain_sessions (
                     agent_id, domain, browser, url, start_time, end_time, duration_seconds, created_at
                 ) VALUES (
-                    p_agent_id, p_domain, p_browser, p_url, p_session_start, p_session_end, p_total_seconds, NOW()
+                    p_agent_id::UUID, p_domain, p_browser, p_url, p_session_start, p_session_end, p_total_seconds, NOW()
                 );
                 
                 -- 2. Upsert into domain_usage (Daily Aggregation)
                 INSERT INTO domain_usage (
                     agent_id, date, domain, browser, duration_seconds, session_count, last_updated
                 ) VALUES (
-                    p_agent_id, v_date, p_domain, p_browser, p_total_seconds::INTEGER, 1, NOW()
+                    p_agent_id::UUID, v_date, p_domain, p_browser, p_total_seconds::INTEGER, 1, NOW()
                 )
                 ON CONFLICT (agent_id, date, domain) DO UPDATE SET
                     duration_seconds = domain_usage.duration_seconds + EXCLUDED.duration_seconds,

@@ -45,6 +45,28 @@
     --border: #e2e8f0;
     --border-strong: #cbd5e1;
     --divider: #f1f5f9;
+
+    /* ==================== STATE SPECIFIC COLORS ==================== */
+    /* Modern, premium palette for activity tracking */
+    --state-active: #38bdf8;
+    /* Sky 400 */
+    --state-active-bg: #f0f9ff;
+    /* Sky 50 */
+
+    --state-idle: #fbbf24;
+    /* Amber 400 */
+    --state-idle-bg: #fffbeb;
+    /* Amber 50 */
+
+    --state-locked: #64748b;
+    /* Slate 500 */
+    --state-locked-bg: #f8fafc;
+    /* Slate 50 */
+
+    --state-away: #334155;
+    /* Slate 700 */
+    --state-away-bg: #f1f5f9;
+    /* Slate 100 */
 }
 
 /* ==================== DARK MODE ==================== */
@@ -67,6 +89,12 @@
     --warning-light: rgba(245, 158, 11, 0.15);
     --danger-light: rgba(239, 68, 68, 0.15);
     --info-light: rgba(6, 182, 212, 0.15);
+
+    /* Dark Mode State Adjustments */
+    --state-active-bg: rgba(56, 189, 248, 0.15);
+    --state-idle-bg: rgba(251, 191, 36, 0.15);
+    --state-locked-bg: rgba(100, 116, 139, 0.15);
+    --state-away-bg: rgba(51, 65, 85, 0.15);
 }
 
 /* Shadows, Spacing, Radius, Transitions - Shared between themes */
@@ -670,6 +698,79 @@ h6 {
 
 .metric-card.primary .metric-value {
     color: var(--brand-primary);
+}
+
+/* ==================== STATE VARIANTS ==================== */
+
+/* Active State */
+.metric-card.state-active::before,
+.metric-card.active::before {
+    background: var(--state-active);
+}
+
+.metric-card.state-active .metric-icon,
+.metric-card.active .metric-icon {
+    background: var(--state-active-bg);
+    color: var(--state-active);
+}
+
+.metric-card.state-active .metric-value,
+.metric-card.active .metric-value {
+    color: var(--state-active);
+}
+
+/* Idle State */
+.metric-card.state-idle::before,
+.metric-card.warning::before,
+.metric-card.idle::before {
+    background: var(--state-idle);
+}
+
+.metric-card.state-idle .metric-icon,
+.metric-card.warning .metric-icon,
+.metric-card.idle .metric-icon {
+    background: var(--state-idle-bg);
+    color: var(--state-idle);
+}
+
+.metric-card.state-idle .metric-value,
+.metric-card.warning .metric-value,
+.metric-card.idle .metric-value {
+    color: var(--state-idle);
+}
+
+/* Locked State */
+.metric-card.state-locked::before,
+.metric-card.locked::before {
+    background: var(--state-locked);
+}
+
+.metric-card.state-locked .metric-icon,
+.metric-card.locked .metric-icon {
+    background: var(--state-locked-bg);
+    color: var(--state-locked);
+}
+
+.metric-card.state-locked .metric-value,
+.metric-card.locked .metric-value {
+    color: var(--state-locked);
+}
+
+/* Away State */
+.metric-card.state-away::before,
+.metric-card.away::before {
+    background: var(--state-away);
+}
+
+.metric-card.state-away .metric-icon,
+.metric-card.away .metric-icon {
+    background: var(--state-away-bg);
+    color: var(--state-away);
+}
+
+.metric-card.state-away .metric-value,
+.metric-card.away .metric-value {
+    color: var(--state-away);
 }
 
 /* Metric Icon */
@@ -1649,6 +1750,42 @@ main.container {
     font-weight: 600;
 }
 
+/* State-Specific Badges */
+.badge-state-active {
+    background: var(--state-active-bg);
+    color: var(--state-active);
+}
+
+.badge-success {
+    background: var(--state-active-bg);
+    color: var(--state-active);
+}
+
+.badge-warning {
+    background: var(--state-idle-bg);
+    color: var(--state-idle);
+}
+
+.badge-danger {
+    background: var(--state-locked-bg);
+    color: var(--state-locked);
+}
+
+.badge-state-idle {
+    background: var(--state-idle-bg);
+    color: var(--state-idle);
+}
+
+.badge-state-locked {
+    background: var(--state-locked-bg);
+    color: var(--state-locked);
+}
+
+.badge-state-away {
+    background: var(--state-away-bg);
+    color: var(--state-away);
+}
+
 /* Inventory Controls */
 .inventory-controls {
     display: flex;
@@ -1880,22 +2017,46 @@ main.container {
 
 /* Column width distribution - ALL 6 columns visible */
 #inventory-table th:nth-child(1),
-#inventory-table td:nth-child(1) { width: 20% !important; }   /* Name */
+#inventory-table td:nth-child(1) {
+    width: 20% !important;
+}
+
+/* Name */
 
 #inventory-table th:nth-child(2),
-#inventory-table td:nth-child(2) { width: 8% !important; }    /* Version */
+#inventory-table td:nth-child(2) {
+    width: 8% !important;
+}
+
+/* Version */
 
 #inventory-table th:nth-child(3),
-#inventory-table td:nth-child(3) { width: 15% !important; }   /* Publisher */
+#inventory-table td:nth-child(3) {
+    width: 15% !important;
+}
+
+/* Publisher */
 
 #inventory-table th:nth-child(4),
-#inventory-table td:nth-child(4) { width: 32% !important; }   /* Install Location */
+#inventory-table td:nth-child(4) {
+    width: 32% !important;
+}
+
+/* Install Location */
 
 #inventory-table th:nth-child(5),
-#inventory-table td:nth-child(5) { width: 12% !important; }   /* Install Date */
+#inventory-table td:nth-child(5) {
+    width: 12% !important;
+}
+
+/* Install Date */
 
 #inventory-table th:nth-child(6),
-#inventory-table td:nth-child(6) { width: 13% !important; }   /* Source */
+#inventory-table td:nth-child(6) {
+    width: 13% !important;
+}
+
+/* Source */
 
 /* Force headers to wrap if needed */
 #inventory-table th {
@@ -1956,21 +2117,49 @@ main.container {
 
 /* Responsive adjustments - STILL show all 6 columns */
 @media (max-width: 1400px) {
-    #inventory-table td { font-size: 0.7rem !important; }
-    #inventory-table th { font-size: 0.6rem !important; }
-    #inventory-table td:nth-child(4) { font-size: 0.55rem !important; }
+    #inventory-table td {
+        font-size: 0.7rem !important;
+    }
+
+    #inventory-table th {
+        font-size: 0.6rem !important;
+    }
+
+    #inventory-table td:nth-child(4) {
+        font-size: 0.55rem !important;
+    }
 }
 
 @media (max-width: 1200px) {
-    #inventory-table td { font-size: 0.65rem !important; padding: 0.3rem 0.2rem !important; }
-    #inventory-table th { font-size: 0.55rem !important; padding: 0.4rem 0.2rem !important; }
-    #inventory-table td:nth-child(4) { font-size: 0.5rem !important; }
+    #inventory-table td {
+        font-size: 0.65rem !important;
+        padding: 0.3rem 0.2rem !important;
+    }
+
+    #inventory-table th {
+        font-size: 0.55rem !important;
+        padding: 0.4rem 0.2rem !important;
+    }
+
+    #inventory-table td:nth-child(4) {
+        font-size: 0.5rem !important;
+    }
 }
 
 @media (max-width: 1024px) {
-    #inventory-table td { font-size: 0.6rem !important; padding: 0.25rem 0.15rem !important; }
-    #inventory-table th { font-size: 0.5rem !important; padding: 0.35rem 0.15rem !important; }
-    #inventory-table td:nth-child(4) { font-size: 0.45rem !important; }
+    #inventory-table td {
+        font-size: 0.6rem !important;
+        padding: 0.25rem 0.15rem !important;
+    }
+
+    #inventory-table th {
+        font-size: 0.5rem !important;
+        padding: 0.35rem 0.15rem !important;
+    }
+
+    #inventory-table td:nth-child(4) {
+        font-size: 0.45rem !important;
+    }
 }
 
 /* ==================== USER MENU DROPDOWN ==================== */

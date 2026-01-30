@@ -57,15 +57,28 @@ class WindowTracker:
         # State persistence
         self._state_file = state_file or Path(r'C:\ProgramData\SentinelEdge\window_state.json')
         self.duration_lock = threading.Lock()  # Protect cumulative_app_usage updates
+        
+        # FIX: Initialize Windows APIs BEFORE _load_state() which may call _do_initial_sample()
+        # This prevents "'WindowTracker' object has no attribute 'user32'" errors
+        try:
+            self.user32 = ctypes.windll.user32
+            self.kernel32 = ctypes.windll.kernel32
+            self.psapi = ctypes.windll.psapi
+            self._win32_available = True
+        except (AttributeError, OSError) as e:
+            # Non-Windows or ctypes failure - set to None and handle gracefully
+            logger.error(f"[WINDOW] Failed to load Windows APIs: {e}")
+            self.user32 = None
+            self.kernel32 = None
+            self.psapi = None
+            self._win32_available = False
+        
+        # Now safe to load state (which may call _do_initial_sample)
         self._load_state()
         
-        # Windows APIs
-        self.user32 = ctypes.windll.user32
-        self.kernel32 = ctypes.windll.kernel32
-        self.psapi = ctypes.windll.psapi
-        
-        # Initial sample to set current app
-        self._do_initial_sample()
+        # Initial sample to set current app (only if APIs available)
+        if self._win32_available:
+            self._do_initial_sample()
         
         logger.debug("[WINDOW] Enhanced WindowTracker initialized")
         
@@ -149,6 +162,10 @@ class WindowTracker:
         FIX #10: Get foreground window with timeout protection.
         If GetForegroundWindow() hangs, return None after timeout.
         """
+        # Guard: Check if Windows APIs are available
+        if not self._win32_available or not self.user32:
+            return None
+        
         result = [None]
         error = [None]
 

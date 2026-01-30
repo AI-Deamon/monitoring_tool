@@ -20,7 +20,7 @@ def check_agent_domain_data(agent_id):
     with app.app_context():
         try:
             # Get agent info
-            agent = Agent.query.filter_by(id=agent_id).first()
+            agent = Agent.query.filter_by(agent_id=agent_id).first()
             if not agent:
                 print(f"Agent {agent_id} not found")
                 return

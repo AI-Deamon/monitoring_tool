@@ -1,0 +1,13 @@
+SentinelEdge Agent
+Version: 2.4.0
+Build Date: 20260106
+
+Installation:
+  1. Extract all files
+  2. Right-click install.bat, Run as Administrator
+  3. Enter server URL and registration secret
+
+Requirements:
+  - Windows 10/11 (x64)
+  - Administrator privileges
+  - Network access to server

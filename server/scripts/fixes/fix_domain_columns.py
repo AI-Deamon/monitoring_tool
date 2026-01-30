@@ -4,7 +4,8 @@ Run this script on your server to add the missing columns.
 """
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from extensions import db
 from server_app import create_app

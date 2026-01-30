@@ -14,7 +14,7 @@ workers = int(os.getenv("GUNICORN_WORKERS", multiprocessing.cpu_count() * 2 + 1)
 worker_class = "sync"  # Use 'gevent' for async if needed
 worker_connections = 1000
 timeout = 120  # 2 minutes for slow database queries
-keepalive = 5
+keepalive = 60
 
 # Logging
 accesslog = "logs/gunicorn_access.log"

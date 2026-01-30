@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from sqlalchemy import text
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from server_app import create_app
 from extensions import db

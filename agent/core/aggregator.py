@@ -98,51 +98,51 @@ class HeartbeatAggregator:
     # DO NOT RE-ADD THIS METHOD.
     
     def _process_screentime(self, agent_id: str, heartbeats: List[Dict]):
-        """Process incremental screentime deltas from heartbeats"""
+        """
+        Process cumulative screentime from heartbeats.
+        
+        CRITICAL: Helper sends CUMULATIVE totals (10, 20, 30, 40, 50, 60).
+        We must take the LATEST value (60), NOT sum them (210).
+        
+        The server uses GREATEST() to handle cumulative daily totals.
+        """
         if not heartbeats:
             return
         
-        # Sum deltas from ALL heartbeats in the batch (incremental model)
-        total_delta_active = 0
-        total_delta_idle = 0
-        total_delta_locked = 0
-        latest_timestamp = None
-        username = 'unknown'
-        current_state = 'active'
+        # Take LATEST cumulative values from the batch
+        # (Helper sends cumulative totals, not incremental deltas)
+        latest_hb = heartbeats[-1]
+        hb = latest_hb['data']
+        screentime = hb.get('screentime', {})
         
-        for hb_record in heartbeats:
-            hb = hb_record['data']
-            screentime = hb.get('screentime', {})
-            
-            # Sum up deltas
-            total_delta_active += screentime.get('delta_active_seconds', 0)
-            total_delta_idle += screentime.get('delta_idle_seconds', 0)
-            total_delta_locked += screentime.get('delta_locked_seconds', 0)
-            
-            # Keep latest values
-            latest_timestamp = hb.get('timestamp')
-            username = hb.get('username', 'unknown')
-            
-            # FIX: Prioritize system_state (from StateDetector) over idle.state
-            # StateDetector uses Windows Session events for instant lock detection
-            system_state = hb.get('system_state')
-            idle_state = hb.get('idle', {}).get('state', 'active')
-            current_state = system_state if system_state else idle_state
+        # Extract cumulative totals from latest heartbeat
+        cumulative_active = screentime.get('delta_active_seconds', 0)
+        cumulative_idle = screentime.get('delta_idle_seconds', 0)
+        cumulative_locked = screentime.get('delta_locked_seconds', 0)
+        
+        # Get metadata from latest heartbeat
+        latest_timestamp = hb.get('timestamp')
+        username = hb.get('username', 'unknown')
+        
+        # FIX: Prioritize system_state (from StateDetector) over idle.state
+        system_state = hb.get('system_state')
+        idle_state = hb.get('idle', {}).get('state', 'active')
+        current_state = system_state if system_state else idle_state
         
         # Only store if there's actual time to report
-        if total_delta_active == 0 and total_delta_idle == 0 and total_delta_locked == 0:
+        if cumulative_active == 0 and cumulative_idle == 0 and cumulative_locked == 0:
             return
         
-        # Create event for uploader with DELTA values
-        # buffer.store_merged_event handles screentime events specially
+        # Create event for uploader with CUMULATIVE values
+        # Server will use GREATEST() to ensure monotonic updates
         event = {
             'agent_id': agent_id,
             'username': username,
             'type': 'screentime',
             'timestamp': latest_timestamp,
-            'delta_active_seconds': total_delta_active,
-            'delta_idle_seconds': total_delta_idle,
-            'delta_locked_seconds': total_delta_locked,
+            'delta_active_seconds': cumulative_active,
+            'delta_idle_seconds': cumulative_idle,
+            'delta_locked_seconds': cumulative_locked,
             'current_state': current_state
         }
         

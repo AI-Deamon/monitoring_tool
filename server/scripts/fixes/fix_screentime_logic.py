@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from sqlalchemy import text
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from server_app import create_app
 from extensions import db
@@ -45,7 +45,7 @@ BEGIN
     INSERT INTO screen_time (
         agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated
     ) VALUES (
-        p_agent_id, v_date, p_active_total, p_idle_total, p_locked_total, NOW()
+        p_agent_id::UUID, v_date, p_active_total, p_idle_total, p_locked_total, NOW()
     )
     ON CONFLICT (agent_id, date) DO UPDATE SET
         -- Replace with new total from agent using GREATEST (Source of Truth)

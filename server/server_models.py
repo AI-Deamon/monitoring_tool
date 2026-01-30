@@ -1,5 +1,6 @@
 from datetime import datetime
 from extensions import db
+from sqlalchemy.dialects import postgresql
 
 class Agent(db.Model):
     """
@@ -18,7 +19,8 @@ class Agent(db.Model):
     """
     __tablename__ = 'agents'
     
-    id = db.Column(db.String(128), primary_key=True)  # agent_id from client
+    id = db.Column(db.Integer, primary_key=True)  # Auto-increment ID
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), unique=True, nullable=False, index=True)  # agent_id from client
     agent_name = db.Column(db.String(255), nullable=True)  # Custom display name
     hostname = db.Column(db.String(255), nullable=True)
     
@@ -36,7 +38,8 @@ class Agent(db.Model):
     api_key = db.Column(db.String(128), nullable=True)  # New API key (sk_live_...)
     status = db.Column(db.String(50), default='active')  # active, inactive, suspended
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    last_seen = db.Column(db.DateTime, nullable=True)
+    last_seen = db.Column(db.DateTime, nullable=True)  # Any authenticated request
+    last_telemetry_time = db.Column(db.DateTime, nullable=True)  # Actual telemetry data received
     
     # ================================================================
     # OPERATIONAL STATUS - Helper monitoring and degraded mode
@@ -72,7 +75,8 @@ class Agent(db.Model):
 
     def to_dict(self):
         return {
-            'agent_id': self.id,
+            'agent_id': str(self.agent_id), # Actual UUID
+            'internal_id': self.id,        # Primary key (integer)
             'agent_name': self.agent_name,  # Custom display name
             'hostname': self.hostname,
             'os': self.os,
@@ -104,7 +108,7 @@ class AgentCurrentStatus(db.Model):
     """
     __tablename__ = 'agent_current_status'
     
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), primary_key=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), primary_key=True)
     username = db.Column(db.String(255), nullable=True)
     current_app = db.Column(db.String(255), nullable=True)
     window_title = db.Column(db.Text, nullable=True)
@@ -160,14 +164,15 @@ class ScreenTime(db.Model):
     __tablename__ = 'screen_time'
     
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     username = db.Column(db.String(255), nullable=True)
     date = db.Column(db.Date, nullable=False)
-    active_seconds = db.Column(db.Integer, default=0)
-    idle_seconds = db.Column(db.Integer, default=0)
-    locked_seconds = db.Column(db.Integer, default=0)
-    away_seconds = db.Column(db.Integer, default=0)  # Prolonged locked (> 2 hours)
+    active_seconds = db.Column(db.Float, default=0.0)
+    idle_seconds = db.Column(db.Float, default=0.0)
+    locked_seconds = db.Column(db.Float, default=0.0)
+    away_seconds = db.Column(db.Float, default=0.0)  # Prolonged locked (> 2 hours)
     last_updated = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     __table_args__ = (db.UniqueConstraint('agent_id', 'date', name='uq_screen_time_agent_date'),)
 
@@ -188,7 +193,7 @@ class AppUsage(db.Model):
     __tablename__ = 'app_usage'
     
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     username = db.Column(db.String(255), nullable=True)
     date = db.Column(db.Date, nullable=False)
     app = db.Column(db.String(255), nullable=False)
@@ -213,7 +218,7 @@ class AppSession(db.Model):
     __tablename__ = 'app_sessions'
 
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     username = db.Column(db.String(255), nullable=True)
     app = db.Column(db.String(255), nullable=False)
     window_title = db.Column(db.Text, nullable=True)
@@ -238,7 +243,7 @@ class DomainUsage(db.Model):
     __tablename__ = 'domain_usage'
     
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     username = db.Column(db.String(255), nullable=True)
     date = db.Column(db.Date, nullable=False)
     domain = db.Column(db.String(255), nullable=False)
@@ -265,7 +270,7 @@ class DomainSession(db.Model):
     __tablename__ = 'domain_sessions'
     
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     username = db.Column(db.String(255), nullable=True)
     domain = db.Column(db.String(255), nullable=False)
     browser = db.Column(db.String(50), nullable=True)
@@ -300,7 +305,7 @@ class AppInventory(db.Model):
     __tablename__ = 'app_inventory'
     
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     name = db.Column(db.String(255), nullable=False)
     version = db.Column(db.String(100), nullable=True)
     publisher = db.Column(db.String(255), nullable=True)
@@ -327,7 +332,7 @@ class AppInventoryChange(db.Model):
     __tablename__ = 'app_inventory_changes'
     
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     change_type = db.Column(db.String(20), nullable=False)  # installed, uninstalled, updated
     app_name = db.Column(db.String(255), nullable=False)
@@ -348,7 +353,7 @@ class StateChange(db.Model):
     __tablename__ = 'state_changes'
     
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     username = db.Column(db.String(255), nullable=True)
     previous_state = db.Column(db.String(50), nullable=False)  # active, idle, locked
     current_state = db.Column(db.String(50), nullable=False)
@@ -372,7 +377,7 @@ class DomainVisit(db.Model):
     __tablename__ = 'domain_visits'
     
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     username = db.Column(db.String(255), nullable=True)
     domain = db.Column(db.String(255), nullable=False)
     url = db.Column(db.Text, nullable=True)
@@ -499,6 +504,91 @@ SYSTEM_APPS_FILTER = {
 }
 
 # ============================================================================
+# SYSTEM INVENTORY APPS TO EXCLUDE FROM REPORTS
+# These are Windows system apps that clutter the inventory
+# ============================================================================
+SYSTEM_INVENTORY_FILTER_PATTERNS = [
+    'Microsoft.Windows.',          # Windows system components
+    'MicrosoftWindows.',          # Alternate naming
+    'Windows.',                   # Generic Windows apps
+    'HERUNTERLADEN',              # German KB downloads
+    'KB',                         # Knowledge Base updates
+    'Update for',                 # Update packages
+    'Security Update',            # Security updates
+    'Hotfix',                     # Hotfixes
+    'Python 3.',                  # Python components (will be consolidated)
+]
+
+# Python component patterns to consolidate
+PYTHON_COMPONENT_PATTERNS = [
+    'Add to Path',
+    'Core Interpreter',
+    'Development Libraries', 
+    'Documentation',
+    'Executables',
+    'pip',
+    'Standard Library',
+    'Tcl/Tk',
+    'Test Suite',
+    'Utility Scripts',
+    'py launcher',
+]
+
+
+def is_system_inventory_app(name: str) -> bool:
+    """Check if the app is a system app that should be filtered from inventory."""
+    if not name:
+        return False
+    name_lower = name.lower()
+    for pattern in SYSTEM_INVENTORY_FILTER_PATTERNS:
+        if pattern.lower() in name_lower:
+            return True
+    return False
+
+
+def consolidate_python_versions(apps: list) -> list:
+    """
+    Consolidate multiple Python component entries into single Python version entries.
+    e.g., 'Python 3.11.9 Core Interpreter', 'Python 3.11.9 Documentation' -> 'Python 3.11.9'
+    """
+    import re
+    
+    python_versions = {}
+    other_apps = []
+    
+    for app in apps:
+        name = app.get('name', '')
+        
+        # Check if it's a Python entry
+        python_match = re.match(r'^Python (\d+\.\d+(?:\.\d+)?)', name)
+        if python_match:
+            version = python_match.group(1)
+            # Check if it's a component entry (not the base install)
+            is_component = any(comp.lower() in name.lower() for comp in PYTHON_COMPONENT_PATTERNS)
+            
+            if version not in python_versions:
+                python_versions[version] = {
+                    'name': f'Python {version}',
+                    'version': version,
+                    'publisher': 'Python Software Foundation',
+                    'source': app.get('source', 'Registry-HKLM'),
+                    'install_date': app.get('install_date'),
+                }
+            
+            # Keep the install location from the base install
+            if not is_component and app.get('install_location'):
+                python_versions[version]['install_location'] = app.get('install_location')
+        else:
+            other_apps.append(app)
+    
+    # Add consolidated Python entries to list
+    for version_data in python_versions.values():
+        other_apps.append(version_data)
+    
+    return other_apps
+
+
+# ============================================================================
 # INTERNAL/SYSTEM DOMAINS TO EXCLUDE FROM REPORTS
 # These are browser internal pages, not real websites
 # ============================================================================
@@ -534,7 +624,7 @@ class RawEvent(db.Model):
     __tablename__ = 'raw_events'
     
     id = db.Column(db.Integer, primary_key=True)
-    agent_id = db.Column(db.String(128), db.ForeignKey('agents.id'), nullable=False, index=True)
+    agent_id = db.Column(postgresql.UUID(as_uuid=True), db.ForeignKey('agents.agent_id'), nullable=False, index=True)
     event_type = db.Column(db.String(50), nullable=False)
     sequence = db.Column(db.Integer, nullable=True)  # From agent (if available)
     payload = db.Column(db.Text, nullable=False)  # JSON string

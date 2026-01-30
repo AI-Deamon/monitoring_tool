@@ -22,6 +22,13 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
     # ================================================================
+    # DISABLE TEMPLATE CACHING FOR DEVELOPMENT
+    # ================================================================
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
+    app.jinja_env.auto_reload = True
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+    
+    # ================================================================
     # ISSUE-001 FIX: Enforce strong SECRET_KEY in production
     # ================================================================
     flask_env = os.getenv('FLASK_ENV', 'production')
@@ -105,8 +112,8 @@ def create_app():
         setup_db_event_listeners(app)
         
         # Register Blueprints
-        from server_api import bp as api_bp, register_root_endpoint
-        from server_telemetry import bp as telemetry_bp, register_root_telemetry_endpoints
+        from server_api import bp as api_bp, register_root_endpoint, telemetry_bp
+        from server_telemetry import bp as telemetry_bp_v1, register_root_telemetry_endpoints
         from server_dashboard import bp as dash_bp
         from admin_classification import admin_classification_bp
         from server_integrity import bp as integrity_bp, register_integrity_endpoints
@@ -116,8 +123,10 @@ def create_app():
         # ================================================================
         from auth import auth_bp, DashboardUser, create_default_admin
 
+        # Register Blueprints
         app.register_blueprint(api_bp, url_prefix='/api/v1')
-        app.register_blueprint(telemetry_bp, url_prefix='/api/v1/telemetry')
+        app.register_blueprint(telemetry_bp_v1, url_prefix='/api/v1/telemetry')
+        app.register_blueprint(telemetry_bp)  # 🔴 REQUIRED: No prefix for /telemetry/event
         app.register_blueprint(dash_bp, url_prefix='/dashboard')
         app.register_blueprint(admin_classification_bp)  # Admin classification UI
         app.register_blueprint(auth_bp)  # Auth routes at /auth/*
@@ -127,6 +136,27 @@ def create_app():
         register_root_endpoint(app)
         register_root_telemetry_endpoints(app)
         register_integrity_endpoints(app)
+        
+        # ================================================================
+        # SEC-026: Register anomaly detection endpoints
+        # ================================================================
+        try:
+            from anomaly_detector import register_anomaly_endpoints
+            register_anomaly_endpoints(app, db)
+            logger.info("[SECURITY] Anomaly detection endpoints registered")
+        except ImportError as e:
+            logger.warning(f"[SECURITY] Anomaly detection not available: {e}")
+        
+        # ================================================================
+        # AUTO-UPDATE: Register update endpoints (OPTIONAL)
+        # Existing agents work without this - backwards compatible
+        # ================================================================
+        try:
+            from server_updates import updates_bp
+            app.register_blueprint(updates_bp)
+            logger.info("[UPDATES] Auto-update endpoints registered at /api/v1/updates/*")
+        except ImportError as e:
+            logger.debug(f"[UPDATES] Auto-update module not available: {e}")
 
         # Ensure models are loaded
         import server_models

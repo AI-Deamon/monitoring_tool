@@ -138,8 +138,8 @@ def verify_api_key(api_key: str, agent_id: str) -> server_models.Agent:
         return None
     
     try:
-        # Find agent by ID
-        agent = server_models.Agent.query.filter_by(id=agent_id).first()
+        # Find agent by UUID
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
         
         if not agent:
             logger.warning(f"[AUTH] Agent not found: {agent_id}")
@@ -242,7 +242,7 @@ def require_auth(fn):
                 final_agent_id = agent_id or token_agent_id
                 logger.debug(f"[AUTH] JWT verified, using agent_id: {final_agent_id}")
                 
-                agent = server_models.Agent.query.filter_by(id=final_agent_id).first()
+                agent = server_models.Agent.query.filter_by(agent_id=final_agent_id).first()
                 if agent:
                     # Update last_seen
                     try:
@@ -260,7 +260,7 @@ def require_auth(fn):
             # If JWT verification fails, try matching token directly against stored api_token
             if not payload and agent_id:
                 logger.debug(f"[AUTH] JWT verification failed, trying direct token match for agent: {agent_id}")
-                agent = server_models.Agent.query.filter_by(id=agent_id).first()
+                agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
                 if agent and agent.api_token == token:
                     logger.info(f"[AUTH] Direct token match successful for agent: {agent_id}")
                     # Update last_seen
@@ -283,7 +283,7 @@ def require_auth(fn):
             
             # Update last_seen
             try:
-                agent = server_models.Agent.query.filter_by(id=agent_id).first()
+                agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
                 if agent:
                     agent.last_seen = datetime.utcnow()
                     db.session.commit()

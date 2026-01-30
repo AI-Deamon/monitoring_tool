@@ -51,9 +51,9 @@ CONFIG_SCHEMA_V2 = {
         "required": True,
         "fields": {
             "listen_port": {"type": int, "required": True, "default": 48123, "min": 1024, "max": 65535},
-            "aggregation_interval": {"type": int, "required": True, "default": 300, "min": 10},
+            "aggregation_interval": {"type": int, "required": True, "default": 60, "min": 10},
             "upload_interval": {"type": int, "required": True, "default": 60, "min": 10},
-            "heartbeat_interval": {"type": int, "required": True, "default": 300, "min": 30},
+            "heartbeat_interval": {"type": int, "required": True, "default": 60, "min": 10},
             "enable_ingest": {"type": bool, "required": True, "default": True},
             "enable_uploader": {"type": bool, "required": True, "default": True},
             "enable_aggregator": {"type": bool, "required": True, "default": True}
@@ -63,7 +63,7 @@ CONFIG_SCHEMA_V2 = {
         "type": dict,
         "required": True,
         "fields": {
-            "heartbeat_interval": {"type": int, "required": True, "default": 30, "min": 10},
+            "heartbeat_interval": {"type": int, "required": True, "default": 10, "min": 5},
             "domain_interval": {"type": int, "required": True, "default": 60, "min": 10},
             "inventory_interval": {"type": int, "required": True, "default": 3600, "min": 60},
             "features": {
@@ -75,7 +75,8 @@ CONFIG_SCHEMA_V2 = {
                     "enable_domains": {"type": bool, "required": True, "default": True},
                     "enable_inventory": {"type": bool, "required": True, "default": True},
                     "enable_app_tracking": {"type": bool, "required": True, "default": True},
-                    "enable_idle_tracking": {"type": bool, "required": True, "default": True}
+                    "enable_idle_tracking": {"type": bool, "required": True, "default": True},
+                    "enable_app_specific_thresholds": {"type": bool, "required": False, "default": False}
                 }
             }
         }
@@ -84,7 +85,7 @@ CONFIG_SCHEMA_V2 = {
         "type": dict,
         "required": True,
         "fields": {
-            "idle_seconds": {"type": int, "required": True, "default": 300, "min": 60},
+            "idle_seconds": {"type": int, "required": True, "default": 120, "min": 30},
             # EDGE CASE FIX: App-specific idle thresholds
             # Keys are lowercase app names (e.g., "vlc.exe", "teams.exe")
             # Values are idle threshold in seconds
@@ -286,9 +287,20 @@ class ConfigMigrator:
         if "local_agent_key" in old_config:
             new_config["agent"]["local_agent_key"] = old_config["local_agent_key"]
         
+        # Migrate agent_name (custom display name)
+        if "agent_name" in old_config:
+            new_config["agent"]["agent_name"] = old_config["agent_name"]
+        elif "hostname" in old_config:
+            # Fallback to hostname if no agent_name
+            new_config["agent"]["agent_name"] = old_config["hostname"]
+        
         # Migrate server settings
         if "server_url" in old_config:
             new_config["server"]["url"] = old_config["server_url"]
+        
+        # SEC-002: Migrate registration_secret from root level
+        if "registration_secret" in old_config:
+            new_config["server"]["registration_secret"] = old_config["registration_secret"]
         
         if "server_cert_fingerprint" in old_config:
             new_config["server"]["cert_pinning_fingerprint"] = old_config["server_cert_fingerprint"]
@@ -302,10 +314,10 @@ class ConfigMigrator:
         # Migrate intervals
         intervals = old_config.get("intervals", {})
         if intervals:
-            new_config["core"]["aggregation_interval"] = intervals.get("aggregation_seconds", 300)
+            new_config["core"]["aggregation_interval"] = intervals.get("aggregation_seconds", 60)
             new_config["core"]["upload_interval"] = intervals.get("upload_batch_seconds", 60)
-            new_config["core"]["heartbeat_interval"] = intervals.get("heartbeat_seconds", 300)
-            new_config["helper"]["heartbeat_interval"] = intervals.get("sample_seconds", 30)
+            new_config["core"]["heartbeat_interval"] = intervals.get("heartbeat_seconds", 60)
+            new_config["helper"]["heartbeat_interval"] = intervals.get("sample_seconds", 10)
             new_config["helper"]["inventory_interval"] = intervals.get("app_inventory_seconds", 3600)
         
         # Migrate features
@@ -327,7 +339,7 @@ class ConfigMigrator:
         # Migrate thresholds
         thresholds = old_config.get("thresholds", {})
         if thresholds:
-            new_config["thresholds"]["idle_seconds"] = thresholds.get("idle_seconds", 300)
+            new_config["thresholds"]["idle_seconds"] = thresholds.get("idle_seconds", 120)
         
         # Migrate retry settings
         retry = old_config.get("retry", {})

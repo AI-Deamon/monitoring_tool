@@ -22,7 +22,7 @@ import logging
 from pathlib import Path
 from sqlalchemy import text
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from server_app import create_app
 from extensions import db
@@ -78,7 +78,7 @@ def apply_fix():
                     INSERT INTO app_sessions (
                         agent_id, app, window_title, start_time, end_time, duration_seconds, created_at
                     ) VALUES (
-                        p_agent_id, p_app, p_window_title, p_session_start, p_session_end, p_total_seconds, NOW()
+                        p_agent_id::UUID, p_app, p_window_title, p_session_start, p_session_end, p_total_seconds, NOW()
                     );
                     v_inserted := TRUE;
                 EXCEPTION WHEN unique_violation THEN
@@ -92,7 +92,7 @@ def apply_fix():
                     INSERT INTO app_usage (
                         agent_id, date, app, duration_seconds, session_count, last_updated
                     ) VALUES (
-                        p_agent_id, v_date, p_app, p_total_seconds::INTEGER, 1, NOW()
+                        p_agent_id::UUID, v_date, p_app, p_total_seconds::INTEGER, 1, NOW()
                     )
                     ON CONFLICT (agent_id, date, app) DO UPDATE SET
                         duration_seconds = app_usage.duration_seconds + EXCLUDED.duration_seconds,
@@ -133,7 +133,7 @@ def apply_fix():
                     INSERT INTO domain_sessions (
                         agent_id, domain, browser, url, start_time, end_time, duration_seconds, created_at
                     ) VALUES (
-                        p_agent_id, p_domain, p_browser, p_url, p_session_start, p_session_end, p_total_seconds, NOW()
+                        p_agent_id::UUID, p_domain, p_browser, p_url, p_session_start, p_session_end, p_total_seconds, NOW()
                     );
                     v_inserted := TRUE;
                 EXCEPTION WHEN unique_violation THEN
@@ -147,7 +147,7 @@ def apply_fix():
                     INSERT INTO domain_usage (
                         agent_id, date, domain, browser, duration_seconds, session_count, last_updated
                     ) VALUES (
-                        p_agent_id, v_date, p_domain, p_browser, p_total_seconds::INTEGER, 1, NOW()
+                        p_agent_id::UUID, v_date, p_domain, p_browser, p_total_seconds::INTEGER, 1, NOW()
                     )
                     ON CONFLICT (agent_id, date, domain) DO UPDATE SET
                         duration_seconds = domain_usage.duration_seconds + EXCLUDED.duration_seconds,

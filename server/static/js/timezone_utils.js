@@ -193,24 +193,30 @@ function getRelativeTimeIST(dateStr) {
 
 /**
  * Helper for duration formatting (NOT timezone-related)
+ * Shows seconds when time is under 1 minute
  */
 function formatTime(seconds) {
-    if (!seconds || seconds < 0) return '0h 0m';
+    if (!seconds || seconds < 0) return '0s';
 
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
 
-    return `${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${secs}s`;
+    return `${secs}s`;
 }
 
 function formatTimeShort(seconds) {
-    if (!seconds || seconds < 0) return '0m';
+    if (!seconds || seconds < 0) return '0s';
 
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
 
     if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
+    if (minutes > 0) return `${minutes}m`;
+    return `${secs}s`;
 }
 
 // Console log to confirm loading

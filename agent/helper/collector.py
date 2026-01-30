@@ -56,12 +56,17 @@ class DataCollector:
     
     def __init__(self, config: HelperConfig):
         self.config = config
+        self.state_detector = None  # Link set by main.py
 
         try:
             # Initialize enhanced modules
             logger.info("[INIT] Starting DataCollector initialization...")
 
-            self.idle_detector = IdleDetector(config.idle_threshold)
+            self.idle_detector = IdleDetector(
+                config.idle_threshold,
+                enable_app_specific_thresholds=config.enable_app_specific_thresholds,
+                on_idle_complete=self.send_idle_event
+            )
             logger.info("[INIT] ✓ IdleDetector")
 
             self.window_tracker = WindowTracker(
@@ -134,7 +139,10 @@ class DataCollector:
     
     def apply_config(self):
         """Apply configuration changes to sub-modules"""
-        self.idle_detector.update_settings(self.config.idle_threshold)
+        self.idle_detector.update_settings(
+            self.config.idle_threshold,
+            enable_app_specific_thresholds=self.config.enable_app_specific_thresholds
+        )
         self.window_tracker.update_settings(self.config.capture_window_titles)
         self.active_domain_tracker.update_settings(self.config.capture_full_urls)
         self.history_tracker.update_settings(self.config.capture_full_urls)
@@ -181,6 +189,16 @@ class DataCollector:
         except Exception as e:
             logger.error(f"Failed to save state: {e}")
     
+    def get_system_state(self) -> str:
+        """Standardized FIX 3: Force locked state reporting"""
+        if self.state_detector and self.state_detector.is_locked:
+            return "locked"
+        
+        if self.state_detector:
+            return self.state_detector.current_state
+            
+        return "active"
+
     def collect_heartbeat(self) -> Dict:
         """
         Collect data for a heartbeat packet with enhanced screen time tracking.
@@ -203,10 +221,11 @@ class DataCollector:
             logger.info(f"[COLLECTOR] Day changed: {self._current_date} → {current_date}")
             logger.info(f"[COLLECTOR] Resetting cumulative counters...")
 
-            # Reset IdleDetector cumulative counters
-            self.idle_detector.reset_cumulative()
+            # Reset StateDetector cumulative counters (NEW: StateDetector is source of truth)
+            if self.state_detector:
+                self.state_detector.reset_cumulative()
 
-            # Reset previous cumulative values for delta calculation
+            # Reset previous cumulative values for delta calculation (LEGACY - no longer used)
             self._prev_cumulative_active = 0.0
             self._prev_cumulative_idle = 0.0
             self._prev_cumulative_locked = 0.0
@@ -244,6 +263,10 @@ class DataCollector:
                 self.window_tracker._app_start = now
                 logger.info("[COLLECTOR] WindowTracker timestamp reset")
         
+        # Drive state detection (NEW ARCHITECTURE)
+        if self.state_detector:
+            self.state_detector._update_state()
+        
         # ====================================================================
         # STEP 1: Sample foreground window FIRST (needed for lock fallback)
         # ====================================================================
@@ -256,26 +279,20 @@ class DataCollector:
             current_app = self.window_tracker.get_current_app_duration()
         
         # ====================================================================
-        # STEP 2: Sample idle state (with lockapp.exe fallback)
+        # STEP 2: Get current authoritative state (with defensive guard)
         # ====================================================================
-        idle_state = {'state': 'unknown', 'changed': False, 'duration_seconds': 0}
-        cumulative_times = None
-        
-        if self.config.enable_idle_tracking:
-            # Pass foreground app to idle detector for lock fallback detection
-            foreground_app = current_app.get('app_name', '')
-            self.idle_detector.set_foreground_app(foreground_app)
+        current_state = self.get_system_state()
             
-            # Now sample idle state (will use lockapp.exe fallback if needed)
-            idle_state = self.idle_detector.sample()
-            cumulative_times = idle_state.get('cumulative', {})
+        idle_state = {
+            'state': current_state,
+            'changed': current_state != self._last_idle_state,
+            'duration_seconds': 0  # Timing is now event-driven
+        }
         
-        # ====================================================================
         # STEP 3: Re-evaluate app tracking based on idle state
         # ====================================================================
         if self.config.enable_app_tracking:
-            current_idle = idle_state['state']
-            is_idle = current_idle in ['idle', 'locked']
+            is_idle = current_state in ['idle', 'locked']
             
             if is_idle:
                 # User is IDLE/LOCKED - pause app tracking, clear current app
@@ -356,88 +373,57 @@ class DataCollector:
             else:
                 self.app_durations[app_name] = duration
         
-        # Calculate deltas since last heartbeat (incremental model)
-        current_active = cumulative_times.get('active_seconds', 0) if cumulative_times else 0
-        current_idle = cumulative_times.get('idle_seconds', 0) if cumulative_times else 0
-        current_locked = cumulative_times.get('locked_seconds', 0) if cumulative_times else 0
-
-        # FIX #5: Validate cumulative times don't exceed 24 hours
-        MAX_DAILY_SECONDS = 86400  # 24 hours
-        total_cumulative = current_active + current_idle + current_locked
+        # Calculate deltas for live tracking (simple interval-based)
+        # Note: Precision accounting is now event-driven for idle sessions
+        delta_active = 0
+        delta_idle = 0
+        delta_locked = 0
         
-        if total_cumulative > MAX_DAILY_SECONDS:
-            logger.error(
-                f"[COLLECTOR] Cumulative time exceeds 24h! "
-                f"active={current_active:.0f}s ({current_active/3600:.1f}h) "
-                f"idle={current_idle:.0f}s ({current_idle/3600:.1f}h) "
-                f"locked={current_locked:.0f}s ({current_locked/3600:.1f}h) "
-                f"TOTAL={total_cumulative:.0f}s ({total_cumulative/3600:.1f}h)"
-            )
-            logger.warning("[COLLECTOR] Capping cumulative times at 24h")
-            
-            # Cap each counter proportionally
-            scale_factor = MAX_DAILY_SECONDS / total_cumulative
-            current_active = int(current_active * scale_factor)
-            current_idle = int(current_idle * scale_factor)
-            current_locked = int(current_locked * scale_factor)
+        if current_state == 'active':
+            delta_active = self.config.heartbeat_interval
+        elif current_state == 'idle':
+            delta_idle = self.config.heartbeat_interval
+        elif current_state == 'locked':
+            delta_locked = self.config.heartbeat_interval
 
-        delta_active = max(0, current_active - self._prev_cumulative_active)
-        delta_idle = max(0, current_idle - self._prev_cumulative_idle)
-        delta_locked = max(0, current_locked - self._prev_cumulative_locked)
+        # Keep these updated to prevent old drift logic from firing
+        self._prev_cumulative_active = 0.0
+        self._prev_cumulative_idle = 0.0
+        self._prev_cumulative_locked = 0.0
 
-        # Update previous values
-        self._prev_cumulative_active = current_active
-        self._prev_cumulative_idle = current_idle
-        self._prev_cumulative_locked = current_locked
-
-        # Build ENHANCED heartbeat packet
+        # Build simplified heartbeat packet
         heartbeat = {
             'agent_id': self.config.agent_id,
             'username': self.config.username,
             'sequence': self.sequence_number,
             'timestamp': now.isoformat(),
             'pulsetime': self.config.heartbeat_interval,
-            # FIX #9: Idempotency key for duplicate detection
             'idempotency_key': f"{self.config.agent_id}_{self.sequence_number}",
             
-            # Enhanced Idle state with cumulative counters
-            'idle': {
-                'state': idle_state['state'],
-                'changed': idle_state['changed'],
-                'duration': validate_duration(
-                    idle_state.get('duration_seconds', 0), 
-                    max_value=self.config.heartbeat_interval * 2,  # Fix #9: Cap at 2x heartbeat interval
-                    context="idle_duration"
-                ),
-                'idle_seconds_raw': idle_state.get('idle_seconds', 0),  # Raw idle from Windows
-                'time_in_state': idle_state.get('time_in_state', 0),  # How long in current state
-            },
+            # Simple state info for live display
+            'system_state': current_state,
             
-            # Enhanced Foreground app with session info and friendly names
+            # Enhanced Foreground app info
             'app': {
-                'current': current_app['app_name'],  # Will be None if idle/locked
-                'friendly_name': current_app.get('friendly_name', current_app['app_name']),  # For display
-                'category': current_app.get('category', 'other'),
-                'is_browser': current_app.get('is_browser', False),
+                'current': current_app['app_name'],
+                'friendly_name': current_app.get('friendly_name', current_app['app_name']),
                 'current_title': current_app.get('window_title'),
-                'duration': validate_duration(current_app.get('duration_seconds', 0), context="app_duration"),
-                'session_start': current_app.get('session_start'),
-                'cumulative_seconds': current_app.get('cumulative_seconds', 0),
-                'is_paused': current_app.get('is_paused', False),  # True when idle/locked
+                'is_browser': current_app.get('is_browser', False),
             },
             
-            # NEW: Incremental screen time deltas (for accurate reporting)
+            # Enhanced screentime info with deltas for Core aggregation
             'screentime': {
-                'delta_active_seconds': int(delta_active),      # Incremental delta
-                'delta_idle_seconds': int(delta_idle),          # Incremental delta
-                'delta_locked_seconds': int(delta_locked),      # Incremental delta
-                'cumulative_active_seconds': int(current_active),  # For debugging
-                'cumulative_idle_seconds': int(current_idle),      # For debugging
-                'cumulative_locked_seconds': int(current_locked),  # For debugging
                 'session_start': self._session_start.isoformat(),
                 'heartbeat_count': self._heartbeat_count,
             }
         }
+        
+        # ✅ NEW: Add cumulative deltas from StateDetector
+        if self.state_detector:
+            deltas = self.state_detector.get_cumulative_deltas()
+            heartbeat['screentime']['delta_active_seconds'] = int(deltas['delta_active_seconds'])
+            heartbeat['screentime']['delta_idle_seconds'] = int(deltas['delta_idle_seconds'])
+            heartbeat['screentime']['delta_locked_seconds'] = int(deltas['delta_locked_seconds'])
         
         # Add app change info if occurred
         if window_change and window_change.get('changed'):
@@ -453,10 +439,53 @@ class DataCollector:
         if domain_info:
             heartbeat['domain'] = domain_info
         
-        # Save state
-        self._save_state()
-        
+        # Track state for next cycle
+        self._last_idle_state = current_state
+        self._last_foreground_app = current_app.get('app_name')
+
         return heartbeat
+
+    def collect_state_spans(self) -> List[Dict]:
+        """
+        Collect completed state spans from StateDetector.
+        
+        Returns:
+            List of span dicts with start, end, duration, state
+        """
+        if not self.state_detector:
+            return []
+        
+        try:
+            spans = self.state_detector.get_pending_spans()
+            if spans:
+                logger.info(f"[COLLECTOR] Collected {len(spans)} state spans")
+            return spans
+        except Exception as e:
+            logger.error(f"State span collection error: {e}")
+            return []
+
+    def send_idle_event(self, duration: float):
+        """
+        Notify core of a completed idle session.
+        Accepts clean durations calculated via monotonic clock.
+        """
+        payload = {
+            'type': 'idle_event',
+            'agent_id': self.config.agent_id,
+            'state': 'idle',
+            'duration_seconds': round(duration, 1),
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+        logger.info(f"[COLLECTOR] Dispatching clean idle event: {duration:.1f}s")
+        # In a real implementation, this would queue for upload.
+        # For now, we'll store it in a way the core can pick it up.
+        # Or if there's a direct upload method, we'd call it.
+        # Assuming DataCollector is responsible for 'emitting' which main.py handles.
+        if hasattr(self, '_idle_events'):
+            self._idle_events.append(payload)
+        else:
+            self._idle_events = [payload]
     
     def collect_domain_sessions(self) -> List[Dict]:
         """

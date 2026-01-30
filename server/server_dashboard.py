@@ -73,7 +73,7 @@ def agents_list():
 @login_required
 def agent_detail(agent_id):
     """Render agent detail page. Note: agent_id might be UUID or string."""
-    agent = server_models.Agent.query.get(agent_id)
+    agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
     if not agent:
         return render_template('dashboard/404.html', message=f"Agent {agent_id} not found"), 404
     
@@ -98,7 +98,7 @@ def agent_report(agent_id):
     - CSV export for all data
     - Charts for visual analysis
     """
-    agent = server_models.Agent.query.get(agent_id)
+    agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
     if not agent:
         return render_template('dashboard/404.html', message=f"Agent {agent_id} not found"), 404
     return render_template('dashboard/agent_report.html', agent_id=agent_id, agent=agent)
@@ -117,7 +117,7 @@ def agent_report_v2(agent_id):
     - Clean typography
     - Print-optimized CSS
     """
-    agent = server_models.Agent.query.get(agent_id)
+    agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
     if not agent:
         return render_template('dashboard/404.html', message=f"Agent {agent_id} not found"), 404
     return render_template('dashboard/agent_report_v2.html', agent_id=agent_id, agent=agent)
@@ -218,6 +218,48 @@ def api_overview():
             desc('total')
         ).first()
         
+        # 6. Top 5 Agents by Idle Time (Selected Date)
+        top_idle_agents = db.session.query(
+            server_models.Agent.hostname,
+            server_models.ScreenTime.idle_seconds
+        ).join(
+            server_models.ScreenTime,
+            server_models.Agent.agent_id == server_models.ScreenTime.agent_id
+        ).filter(
+            server_models.ScreenTime.date == target_date,
+            server_models.ScreenTime.idle_seconds > 0
+        ).order_by(
+            desc(server_models.ScreenTime.idle_seconds)
+        ).limit(5).all()
+        
+        # 7. Top 5 Agents by Active Time (Selected Date)
+        top_active_agents = db.session.query(
+            server_models.Agent.hostname,
+            server_models.ScreenTime.active_seconds
+        ).join(
+            server_models.ScreenTime,
+            server_models.Agent.agent_id == server_models.ScreenTime.agent_id
+        ).filter(
+            server_models.ScreenTime.date == target_date,
+            server_models.ScreenTime.active_seconds > 0
+        ).order_by(
+            desc(server_models.ScreenTime.active_seconds)
+        ).limit(5).all()
+        
+        # 8. Top 5 Agents by Locked Time (Selected Date)
+        top_locked_agents = db.session.query(
+            server_models.Agent.hostname,
+            server_models.ScreenTime.locked_seconds
+        ).join(
+            server_models.ScreenTime,
+            server_models.Agent.agent_id == server_models.ScreenTime.agent_id
+        ).filter(
+            server_models.ScreenTime.date == target_date,
+            server_models.ScreenTime.locked_seconds > 0
+        ).order_by(
+            desc(server_models.ScreenTime.locked_seconds)
+        ).limit(5).all()
+        
         return jsonify({
             'total_agents': total_agents,
             'active_agents': active_agents,
@@ -238,7 +280,19 @@ def api_overview():
             'top_domain': {
                 'name': top_domain[0] if top_domain else 'N/A',
                 'duration': int(top_domain[1]) if top_domain else 0
-            }
+            },
+            'top_idle_agents': [
+                {'hostname': agent[0], 'idle_seconds': int(agent[1])}
+                for agent in top_idle_agents
+            ],
+            'top_active_agents': [
+                {'hostname': agent[0], 'active_seconds': int(agent[1])}
+                for agent in top_active_agents
+            ],
+            'top_locked_agents': [
+                {'hostname': agent[0], 'locked_seconds': int(agent[1])}
+                for agent in top_locked_agents
+            ]
         }), 200
     
     except Exception as e:
@@ -324,7 +378,7 @@ def api_agents():
             
             if linked_agent_ids:
                 agents = server_models.Agent.query.filter(
-                    server_models.Agent.id.in_(linked_agent_ids)
+                    server_models.Agent.agent_id.in_(linked_agent_ids)
                 ).all()
             else:
                 agents = []
@@ -409,7 +463,7 @@ def api_agents():
             is_online = agent.last_seen and agent.last_seen >= five_min_ago
             
             # Screen time - From screen_time table (AGENT'S DAILY TOTALS - SOURCE OF TRUTH)
-            screen_data = screen_time_map.get(agent.id, {'active': 0, 'idle': 0, 'locked': 0})
+            screen_data = screen_time_map.get(agent.agent_id, {'active': 0, 'idle': 0, 'locked': 0})
             active_seconds = screen_data['active']
             idle_seconds = screen_data['idle']
             locked_seconds = screen_data['locked']
@@ -417,26 +471,36 @@ def api_agents():
             
 
             # App usage
-            app_data = app_map.get(agent.id, {})
+            app_data = app_map.get(agent.agent_id, {})
             top_app = app_data.get('top_app')
             top_app_duration = app_data.get('top_app_duration', 0)
             total_apps_used = app_data.get('total_apps', 0)
             
             # Domain usage
-            domain_data = domain_map.get(agent.id, {})
+            domain_data = domain_map.get(agent.agent_id, {})
             domains_visited = domain_data.get('count', 0)
             
             # Inventory
-            installed_apps = inv_map.get(agent.id, 0)
+            installed_apps = inv_map.get(agent.agent_id, 0)
             
-            # Live status
-            live = live_map.get(agent.id)
-            current_app = live.current_app if live else None
-            current_state = live.current_state if live else 'offline'
-            username = live.username if live else None
+            # Live status - ONLY use if agent is actually online
+            # FIX: Offline agents were showing stale "active" state
+            live = live_map.get(agent.agent_id)
+            if is_online and live:
+                # Agent is online - use live data
+                current_app = live.current_app
+                # Double-check: if live.last_seen is stale, override to offline
+                live_is_stale = live.last_seen and (datetime.utcnow() - live.last_seen).total_seconds() > 300
+                current_state = 'offline' if live_is_stale else (live.current_state or 'active')
+                username = live.username
+            else:
+                # Agent is offline - don't use stale live data
+                current_app = None
+                current_state = 'offline'
+                username = live.username if live else None
 
             result.append({
-                'agent_id': agent.id,
+                'agent_id': str(agent.agent_id),
                 'hostname': agent.hostname or 'Unknown',
                 'os': agent.os,
                 'username': username,
@@ -444,6 +508,16 @@ def api_agents():
                 'is_online': is_online,
                 'first_seen': agent.created_at.isoformat() if agent.created_at else None,
                 'last_seen': agent.last_seen.isoformat() if agent.last_seen else None,
+                
+                # NEW: Telemetry tracking for silent failure detection
+                'last_telemetry_time': agent.last_telemetry_time.isoformat() if agent.last_telemetry_time else None,
+                'operational_status': agent.operational_status or 'NORMAL',
+                'status_reason': agent.status_reason,
+                # Flag agents that are "online" but haven't sent telemetry in 10+ minutes
+                'telemetry_stale': is_online and (
+                    not agent.last_telemetry_time or 
+                    (datetime.utcnow() - agent.last_telemetry_time).total_seconds() > 600
+                ),
                 
                 # Screen Time
                 'active_seconds': active_seconds,
@@ -481,10 +555,24 @@ def api_agent_screentime(agent_id):
     try:
         start_date = datetime.utcnow().date() - timedelta(days=6)
         
+        # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         records = server_models.ScreenTime.query.filter(
             server_models.ScreenTime.agent_id == agent_id,
             server_models.ScreenTime.date >= start_date
         ).order_by(server_models.ScreenTime.date).all()
+        
+        if not records:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    records = server_models.ScreenTime.query.filter(
+                        server_models.ScreenTime.agent_id == agent.agent_id,
+                        server_models.ScreenTime.date >= start_date
+                    ).order_by(server_models.ScreenTime.date).all()
+            except ValueError:
+                pass
         
         data = {
             'labels': [],
@@ -529,10 +617,24 @@ def api_agent_apps(agent_id):
             target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
         
         # Get completed app usage from app_usage table
+        # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         apps = server_models.AppUsage.query.filter_by(
             agent_id=agent_id,
             date=target_date
         ).order_by(desc(server_models.AppUsage.duration_seconds)).limit(20).all()
+        
+        if not apps:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    apps = server_models.AppUsage.query.filter_by(
+                        agent_id=agent.agent_id,
+                        date=target_date
+                    ).order_by(desc(server_models.AppUsage.duration_seconds)).limit(20).all()
+            except ValueError:
+                pass
         
         total_completed = sum(a.duration_seconds for a in apps) or 0
         
@@ -548,6 +650,16 @@ def api_agent_apps(agent_id):
         # Get ongoing session from agent_current_status
         ongoing = None
         live_status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent_id).first()
+        
+        if not live_status:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    live_status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent.agent_id).first()
+            except ValueError:
+                pass
         
         if live_status and live_status.current_app:
             # Only count as ongoing if last_seen is recent (within 2 minutes)
@@ -612,10 +724,24 @@ def api_agent_domains(agent_id):
             target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
             
         # Get completed domain usage
+        # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         domains = server_models.DomainUsage.query.filter_by(
             agent_id=agent_id,
             date=target_date
         ).order_by(desc(server_models.DomainUsage.duration_seconds)).limit(20).all()
+        
+        if not domains:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    domains = server_models.DomainUsage.query.filter_by(
+                        agent_id=agent.agent_id,
+                        date=target_date
+                    ).order_by(desc(server_models.DomainUsage.duration_seconds)).limit(20).all()
+            except ValueError:
+                pass
         
         total_completed = sum(d.duration_seconds for d in domains) or 0
         
@@ -630,6 +756,16 @@ def api_agent_domains(agent_id):
         # Get ongoing domain from agent_current_status
         ongoing = None
         live_status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent_id).first()
+        
+        if not live_status:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    live_status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent.agent_id).first()
+            except ValueError:
+                pass
         
         if live_status and live_status.current_domain:
             # Only count as ongoing if last_seen is recent (within 2 minutes)
@@ -671,9 +807,22 @@ def api_agent_domains(agent_id):
 def api_agent_inventory(agent_id):
     """Get application inventory."""
     try:
+        # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         apps = server_models.AppInventory.query.filter_by(
             agent_id=agent_id
         ).order_by(server_models.AppInventory.name).all()
+        
+        if not apps:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    apps = server_models.AppInventory.query.filter_by(
+                        agent_id=agent.agent_id
+                    ).order_by(server_models.AppInventory.name).all()
+            except ValueError:
+                pass
         
         result = [a.to_dict() for a in apps]
         return jsonify({'data': result}), 200
@@ -719,7 +868,28 @@ def api_agent_full_report(agent_id):
         # ================================================================
         # 1. AGENT INFO
         # ================================================================
-        agent = server_models.Agent.query.get(agent_id)
+        # Try to find agent by UUID first, then by numeric ID (for backwards compatibility)
+        import uuid
+        try:
+            # Check if agent_id is a valid UUID
+            uuid.UUID(agent_id)
+            agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        except ValueError:
+            # If not a valid UUID, try numeric ID
+            try:
+                agent_id_num = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=agent_id_num).first()
+            except ValueError:
+                agent = None
+        
+        if not agent:
+            try:
+                # Try to parse as numeric ID
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+            except ValueError:
+                pass
+                
         if not agent:
             return jsonify({'error': 'Agent not found'}), 404
         
@@ -728,28 +898,52 @@ def api_agent_full_report(agent_id):
         # Try to find username from various sources
         username = None
         
+        # Use resolved agent UUID for all subsequent queries
+        resolved_agent_id = str(agent.agent_id)
+        
         # Source 1: Live Status
-        live_status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent_id).first()
+        live_status = server_models.AgentCurrentStatus.query.filter_by(agent_id=resolved_agent_id).first()
         if live_status and live_status.username:
             username = live_status.username
             
         # Source 2: Screen Time record (if live status didn't have it)
         if not username:
-            st_rec = server_models.ScreenTime.query.filter_by(agent_id=agent_id).order_by(desc(server_models.ScreenTime.date)).first()
+            st_rec = server_models.ScreenTime.query.filter_by(agent_id=resolved_agent_id).order_by(desc(server_models.ScreenTime.date)).first()
             if st_rec and st_rec.username:
                 username = st_rec.username
         
         # Find first activity today (earliest app session start)
         first_session_today = server_models.AppSession.query.filter(
-            server_models.AppSession.agent_id == agent_id,
+            server_models.AppSession.agent_id == resolved_agent_id,
             server_models.AppSession.start_time >= start_dt,
             server_models.AppSession.start_time <= end_dt
         ).order_by(server_models.AppSession.start_time.asc()).first()
         
         first_seen_today = first_session_today.start_time.isoformat() if first_session_today else None
+        
+        # Find last activity today (latest app session)
+        last_session_today = server_models.AppSession.query.filter(
+            server_models.AppSession.agent_id == resolved_agent_id,
+            server_models.AppSession.start_time >= start_dt,
+            server_models.AppSession.start_time <= end_dt
+        ).order_by(server_models.AppSession.start_time.desc()).first()
+        
+        last_seen_today = None
+        total_tracked_seconds = 0
+        if last_session_today:
+            if last_session_today.end_time:
+                last_seen_today = last_session_today.end_time.isoformat()
+            else:
+                last_seen_today = last_session_today.start_time.isoformat()
+        
+        # Calculate total tracked time (last - first)
+        if first_session_today and last_session_today:
+            first_ts = first_session_today.start_time
+            last_ts = last_session_today.end_time or last_session_today.start_time
+            total_tracked_seconds = max(0, int((last_ts - first_ts).total_seconds()))
                 
         agent_info = {
-            'agent_id': agent.id,
+            'agent_id': str(agent.agent_id),
             'hostname': agent.hostname or 'Unknown',
             'os': agent.os,
             'version': agent.version,
@@ -759,30 +953,51 @@ def api_agent_full_report(agent_id):
             'registered_at': agent.created_at.isoformat() if agent.created_at else None,
             'first_seen': agent.created_at.isoformat() if agent.created_at else None,
             'first_seen_today': first_seen_today,
-            'last_seen': agent.last_seen.isoformat() if agent.last_seen else None
+            'last_seen_today': last_seen_today,
+            'total_tracked_seconds': total_tracked_seconds,
+            'last_seen': agent.last_seen.isoformat() if agent.last_seen else None,
+            'is_viewing_today': target_date == datetime.utcnow().date()
         }
         
         # ================================================================
         # 2. LIVE STATUS (from AgentCurrentStatus)
+        # FIX: Only show live data if agent is actually online
         # ================================================================
         live_data = None
-        if live_status:
+        if live_status and is_online:
+            # Check if live data is stale (last_seen > 5 min ago)
+            live_is_stale = live_status.last_seen and \
+                            (datetime.utcnow() - live_status.last_seen).total_seconds() > 300
+            
             friendly = server_models.get_friendly_app_name(live_status.current_app)
             live_data = {
-                'current_app': friendly,
-                'current_app_exe': live_status.current_app,
-                'window_title': live_status.window_title,
-                'current_state': live_status.current_state,
+                'current_app': friendly if not live_is_stale else None,
+                'current_app_exe': live_status.current_app if not live_is_stale else None,
+                'window_title': live_status.window_title if not live_is_stale else None,
+                'current_state': 'offline' if live_is_stale else (live_status.current_state or 'offline'),
                 'session_start': live_status.session_start.isoformat() if live_status.session_start else None,
-                'duration_seconds': live_status.duration_seconds,
-                'last_seen': live_status.last_seen.isoformat() if live_status.last_seen else None
+                'duration_seconds': live_status.duration_seconds if not live_is_stale else 0,
+                'last_seen': live_status.last_seen.isoformat() if live_status.last_seen else None,
+                'is_stale': live_is_stale
+            }
+        elif live_status:
+            # Agent offline but has historical data
+            live_data = {
+                'current_app': None,
+                'current_app_exe': None,
+                'window_title': None,
+                'current_state': 'offline',
+                'session_start': None,
+                'duration_seconds': 0,
+                'last_seen': live_status.last_seen.isoformat() if live_status.last_seen else None,
+                'is_stale': True
             }
         
         # ================================================================
         # 3. SCREEN TIME - From screen_time table (AGENT'S DAILY TOTALS - SOURCE OF TRUTH)
         # ================================================================
         screen_time = server_models.ScreenTime.query.filter_by(
-            agent_id=agent_id,
+            agent_id=resolved_agent_id,
             date=target_date
         ).first()
         
@@ -807,7 +1022,7 @@ def api_agent_full_report(agent_id):
         # 4. APP USAGE (Daily aggregation) - FILTERED
         # ================================================================
         app_usage = server_models.AppUsage.query.filter_by(
-            agent_id=agent_id,
+            agent_id=resolved_agent_id,
             date=target_date
         ).order_by(desc(server_models.AppUsage.duration_seconds)).all()
         
@@ -826,7 +1041,7 @@ def api_agent_full_report(agent_id):
         # 5. APP SESSIONS (Detailed history) - FILTERED
         # ================================================================
         app_sessions = server_models.AppSession.query.filter(
-            server_models.AppSession.agent_id == agent_id,
+            server_models.AppSession.agent_id == resolved_agent_id,
             server_models.AppSession.start_time >= start_dt,
             server_models.AppSession.start_time <= end_dt
         ).order_by(desc(server_models.AppSession.start_time)).limit(200).all()
@@ -845,7 +1060,7 @@ def api_agent_full_report(agent_id):
         # 6. DOMAIN USAGE (Daily aggregation) - FILTERED + CLASSIFIED
         # ================================================================
         domain_usage = server_models.DomainUsage.query.filter_by(
-            agent_id=agent_id,
+            agent_id=resolved_agent_id,
             date=target_date
         ).order_by(desc(server_models.DomainUsage.duration_seconds)).all()
         
@@ -900,7 +1115,7 @@ def api_agent_full_report(agent_id):
         # 7. DOMAIN VISITS (Raw history) - FILTERED
         # ================================================================
         domain_visits = server_models.DomainVisit.query.filter(
-            server_models.DomainVisit.agent_id == agent_id,
+            server_models.DomainVisit.agent_id == resolved_agent_id,
             server_models.DomainVisit.visited_at >= start_dt,
             server_models.DomainVisit.visited_at <= end_dt
         ).order_by(desc(server_models.DomainVisit.visited_at)).limit(200).all()
@@ -915,13 +1130,14 @@ def api_agent_full_report(agent_id):
         } for v in filtered_visits[:100]]
         
         # ================================================================
-        # 8. APP INVENTORY
+        # 8. APP INVENTORY - FILTERED & CONSOLIDATED
         # ================================================================
         inventory = server_models.AppInventory.query.filter_by(
-            agent_id=agent_id
+            agent_id=resolved_agent_id
         ).order_by(server_models.AppInventory.name).all()
         
-        inventory_data = [{
+        # Convert to list of dicts and filter system apps
+        raw_inventory_data = [{
             'name': a.name,
             'version': a.version,
             'publisher': a.publisher,
@@ -929,13 +1145,16 @@ def api_agent_full_report(agent_id):
             'install_date': a.install_date.isoformat() if a.install_date else None,
             'source': a.source,
             'last_seen': a.last_seen.isoformat() if a.last_seen else None
-        } for a in inventory]
+        } for a in inventory if not server_models.is_system_inventory_app(a.name)]
+        
+        # Consolidate Python versions (e.g., merge "Python 3.11.9 Core Interpreter" into "Python 3.11.9")
+        inventory_data = server_models.consolidate_python_versions(raw_inventory_data)
         
         # ================================================================
         # 9. INVENTORY CHANGES (Audit history)
         # ================================================================
         inv_changes = server_models.AppInventoryChange.query.filter(
-            server_models.AppInventoryChange.agent_id == agent_id,
+            server_models.AppInventoryChange.agent_id == resolved_agent_id,
             server_models.AppInventoryChange.timestamp >= start_dt,
             server_models.AppInventoryChange.timestamp <= end_dt
         ).order_by(desc(server_models.AppInventoryChange.timestamp)).all()
@@ -1005,11 +1224,26 @@ def api_agent_activity_timeline(agent_id):
             end_dt = datetime.combine(target_date, datetime.max.time())
 
         # Aggregate sessions by hour
+        # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         sessions = server_models.AppSession.query.filter(
             server_models.AppSession.agent_id == agent_id,
             server_models.AppSession.start_time >= start_dt,
             server_models.AppSession.start_time <= end_dt
         ).all()
+        
+        if not sessions:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    sessions = server_models.AppSession.query.filter(
+                        server_models.AppSession.agent_id == agent.agent_id,
+                        server_models.AppSession.start_time >= start_dt,
+                        server_models.AppSession.start_time <= end_dt
+                    ).all()
+            except ValueError:
+                pass
         
         timeline = {} # {hour: {app: duration}}
         
@@ -1069,6 +1303,7 @@ def api_agent_domain_visits(agent_id):
         end_dt = datetime.combine(target_date, datetime.max.time())
         
         # Get unique domains visited today (no duplicates, just list)
+        # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         visits = db.session.query(
             server_models.DomainVisit.domain,
             server_models.DomainVisit.browser,
@@ -1083,6 +1318,29 @@ def api_agent_domain_visits(agent_id):
         ).order_by(
             desc('last_visited')
         ).limit(50).all()
+        
+        if not visits:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    visits = db.session.query(
+                        server_models.DomainVisit.domain,
+                        server_models.DomainVisit.browser,
+                        func.max(server_models.DomainVisit.visited_at).label('last_visited')
+                    ).filter(
+                        server_models.DomainVisit.agent_id == agent.agent_id,
+                        server_models.DomainVisit.visited_at >= start_dt,
+                        server_models.DomainVisit.visited_at <= end_dt
+                    ).group_by(
+                        server_models.DomainVisit.domain,
+                        server_models.DomainVisit.browser
+                    ).order_by(
+                        desc('last_visited')
+                    ).limit(50).all()
+            except ValueError:
+                pass
         
         result = [{
             'domain': v.domain,
@@ -1112,6 +1370,7 @@ def api_agent_app_sessions(agent_id):
         start_dt = datetime.combine(target_date, datetime.min.time())
         end_dt = datetime.combine(target_date, datetime.max.time())
         
+        # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         sessions = server_models.AppSession.query.filter(
             server_models.AppSession.agent_id == agent_id,
             server_models.AppSession.start_time >= start_dt,
@@ -1120,6 +1379,23 @@ def api_agent_app_sessions(agent_id):
             server_models.AppSession.app,
             server_models.AppSession.start_time
         ).all()
+        
+        if not sessions:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    sessions = server_models.AppSession.query.filter(
+                        server_models.AppSession.agent_id == agent.agent_id,
+                        server_models.AppSession.start_time >= start_dt,
+                        server_models.AppSession.start_time <= end_dt
+                    ).order_by(
+                        server_models.AppSession.app,
+                        server_models.AppSession.start_time
+                    ).all()
+            except ValueError:
+                pass
         
         # Group by app
         app_groups = {}
@@ -1162,13 +1438,24 @@ def api_agent_today(agent_id):
         today = datetime.utcnow().date()
         
         # 1. Agent Info
-        agent = server_models.Agent.query.get(agent_id)
+        # Try to find agent by UUID first, then by numeric ID (for backwards compatibility)
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        
+        if not agent:
+            try:
+                # Try to parse as numeric ID
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+            except ValueError:
+                pass
+                
         if not agent:
             return jsonify({'error': 'Agent not found'}), 404
         
         # 2. Screen Time
+        # Use agent.agent_id (UUID) instead of agent_id parameter
         screen_time = server_models.ScreenTime.query.filter_by(
-            agent_id=agent_id,
+            agent_id=agent.agent_id,
             date=today
         ).first()
         
@@ -1178,7 +1465,7 @@ def api_agent_today(agent_id):
         
         # 3. App Usage (with friendly names)
         apps = server_models.AppUsage.query.filter_by(
-            agent_id=agent_id,
+            agent_id=agent.agent_id,
             date=today
         ).order_by(desc(server_models.AppUsage.duration_seconds)).limit(20).all()
         
@@ -1192,7 +1479,7 @@ def api_agent_today(agent_id):
         
         # 4. Domains Used (Column A - with duration)
         domains_used = server_models.DomainUsage.query.filter_by(
-            agent_id=agent_id,
+            agent_id=agent.agent_id,
             date=today
         ).order_by(desc(server_models.DomainUsage.duration_seconds)).limit(20).all()
         
@@ -1212,7 +1499,7 @@ def api_agent_today(agent_id):
             server_models.DomainVisit.browser,
             func.max(server_models.DomainVisit.visited_at).label('last_visited')
         ).filter(
-            server_models.DomainVisit.agent_id == agent_id,
+            server_models.DomainVisit.agent_id == agent.agent_id,
             server_models.DomainVisit.visited_at >= start_dt,
             server_models.DomainVisit.visited_at <= end_dt
         ).group_by(
@@ -1228,7 +1515,7 @@ def api_agent_today(agent_id):
         } for v in sites_opened]
         
         # 6. ONGOING SESSION from agent_current_status
-        live_status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent_id).first()
+        live_status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent.agent_id).first()
         ongoing = None
         
         if live_status and live_status.last_seen:
@@ -1296,9 +1583,28 @@ def get_agent_current_activity(agent_id):
     """
     try:
         # Get live status from agent_current_status table
-        live_status = server_models.AgentCurrentStatus.query.filter_by(
-            agent_id=agent_id
-        ).first()
+        # Try to find by UUID first, then by numeric ID (for backwards compatibility)
+        import uuid
+        try:
+            # Check if agent_id is a valid UUID
+            uuid.UUID(agent_id)
+            live_status = server_models.AgentCurrentStatus.query.filter_by(
+                agent_id=agent_id
+            ).first()
+        except ValueError:
+            live_status = None
+        
+        if not live_status:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    live_status = server_models.AgentCurrentStatus.query.filter_by(
+                        agent_id=agent.agent_id
+                    ).first()
+            except ValueError:
+                pass
         
         if not live_status or not live_status.last_seen:
             return jsonify({
@@ -1352,6 +1658,7 @@ def get_agent_recent_activities(agent_id):
         date_end = datetime.combine(target_date, datetime.max.time())
         
         # Get recent app sessions
+        # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         sessions = server_models.AppSession.query.filter(
             server_models.AppSession.agent_id == agent_id,
             server_models.AppSession.start_time >= date_start,
@@ -1359,6 +1666,22 @@ def get_agent_recent_activities(agent_id):
         ).order_by(
             desc(server_models.AppSession.start_time)
         ).limit(limit).all()
+        
+        if not sessions:
+            try:
+                # Try to parse as numeric ID to get UUID first
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+                if agent:
+                    sessions = server_models.AppSession.query.filter(
+                        server_models.AppSession.agent_id == agent.agent_id,
+                        server_models.AppSession.start_time >= date_start,
+                        server_models.AppSession.start_time <= date_end
+                    ).order_by(
+                        desc(server_models.AppSession.start_time)
+                    ).limit(limit).all()
+            except ValueError:
+                pass
         
         # Filter out system apps
         filtered = [s for s in sessions if not server_models.is_system_app(s.app)]
@@ -1384,3 +1707,496 @@ def get_agent_recent_activities(agent_id):
         logger.error(f"Error fetching recent activities: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+# ============================================================================
+# NEW CHART API ENDPOINTS (Dashboard Enhancement)
+# ============================================================================
+
+@bp.route('/api/overview/productivity-score', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_productivity_score():
+    """
+    Calculate fleet-wide productivity score.
+    Formula: (active_seconds / total_monitored_seconds) * 100
+    """
+    try:
+        date_str = request.args.get('date')
+        if date_str:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        else:
+            target_date = datetime.utcnow().date()
+        
+        # Get total screen time for the date
+        totals = db.session.query(
+            func.sum(server_models.ScreenTime.active_seconds),
+            func.sum(server_models.ScreenTime.idle_seconds),
+            func.sum(server_models.ScreenTime.locked_seconds)
+        ).filter(
+            server_models.ScreenTime.date == target_date
+        ).first()
+        
+        active = float(totals[0] or 0)
+        idle = float(totals[1] or 0)
+        locked = float(totals[2] or 0)
+        
+        total = active + idle + locked
+        score = round((active / total) * 100, 1) if total > 0 else 0
+        
+        return jsonify({
+            'score': score,
+            'target': 70,
+            'activeMinutes': int(active / 60),
+            'totalMinutes': int(total / 60)
+        })
+    except Exception as e:
+        logger.error(f"Productivity score error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/overview/category-breakdown', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_category_breakdown():
+    """
+    Get application usage by category.
+    Categories: productivity, communication, browsing, development, other
+    """
+    try:
+        date_str = request.args.get('date')
+        if date_str:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        else:
+            target_date = datetime.utcnow().date()
+        
+        # Initialize categories
+        breakdown = {
+            'productivity': 0,
+            'communication': 0,
+            'browsing': 0,
+            'development': 0,
+            'other': 0
+        }
+        
+        # Get all app usage for the date
+        usage = server_models.AppUsage.query.filter(
+            server_models.AppUsage.date == target_date
+        ).all()
+        
+        for u in usage:
+            app_name = u.app.lower() if u.app else ''
+            duration = u.duration_seconds or 0
+            
+            # Simple categorization based on app name
+            if any(x in app_name for x in ['excel', 'word', 'powerpoint', 'outlook', 'teams', 'office']):
+                breakdown['productivity'] += duration
+            elif any(x in app_name for x in ['slack', 'discord', 'zoom', 'skype', 'telegram', 'whatsapp']):
+                breakdown['communication'] += duration
+            elif any(x in app_name for x in ['chrome', 'firefox', 'edge', 'safari', 'browser']):
+                breakdown['browsing'] += duration
+            elif any(x in app_name for x in ['code', 'visual studio', 'pycharm', 'intellij', 'sublime', 'vim', 'terminal', 'git']):
+                breakdown['development'] += duration
+            else:
+                breakdown['other'] += duration
+        
+        # Convert to minutes
+        for key in breakdown:
+            breakdown[key] = int(breakdown[key] / 60)
+        
+        return jsonify(breakdown)
+    except Exception as e:
+        logger.error(f"Category breakdown error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/overview/idle-analysis', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_idle_analysis():
+    """
+    Get hourly breakdown of active/idle/locked states for the fleet.
+    Returns 24 data points (one per hour).
+    """
+    try:
+        date_str = request.args.get('date')
+        if date_str:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        else:
+            target_date = datetime.utcnow().date()
+        
+        # Initialize hourly data
+        labels = [f"{h:02d}:00" for h in range(24)]
+        active = [0] * 24
+        idle = [0] * 24
+        locked = [0] * 24
+        
+        # Get app sessions for the date to determine hourly states
+        date_start = datetime.combine(target_date, datetime.min.time())
+        date_end = datetime.combine(target_date, datetime.max.time())
+        
+        sessions = server_models.AppSession.query.filter(
+            server_models.AppSession.start_time >= date_start,
+            server_models.AppSession.start_time <= date_end
+        ).all()
+        
+        for session in sessions:
+            if session.start_time:
+                hour = session.start_time.hour
+                duration = session.duration_seconds or 0
+                state = getattr(session, 'system_state', 'active') or 'active'
+                
+                if state == 'active':
+                    active[hour] += duration
+                elif state == 'idle':
+                    idle[hour] += duration
+                elif state == 'locked':
+                    locked[hour] += duration
+        
+        # Convert to minutes
+        active = [int(x / 60) for x in active]
+        idle = [int(x / 60) for x in idle]
+        locked = [int(x / 60) for x in locked]
+        
+        return jsonify({
+            'labels': labels,
+            'active': active,
+            'idle': idle,
+            'locked': locked
+        })
+    except Exception as e:
+        logger.error(f"Idle analysis error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/overview/activity-heatmap', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_activity_heatmap():
+    """
+    Get activity heatmap data (7 days x 24 hours).
+    Returns count of active agents per hour per day.
+    """
+    try:
+        days = int(request.args.get('days', 7))
+        days = min(days, 30)  # Cap at 30 days
+        
+        end_date = datetime.utcnow().date()
+        start_date = end_date - timedelta(days=days - 1)
+        
+        # Initialize 7x24 grid (rows = days starting from start_date)
+        data = [[0 for _ in range(24)] for _ in range(days)]
+        
+        # Get hourly activity counts
+        for day_offset in range(days):
+            current_date = start_date + timedelta(days=day_offset)
+            date_start = datetime.combine(current_date, datetime.min.time())
+            date_end = datetime.combine(current_date, datetime.max.time())
+            
+            # Count active sessions per hour
+            hourly_counts = db.session.query(
+                func.extract('hour', server_models.AppSession.start_time).label('hour'),
+                func.count(func.distinct(server_models.AppSession.agent_id)).label('count')
+            ).filter(
+                server_models.AppSession.start_time >= date_start,
+                server_models.AppSession.start_time <= date_end
+            ).group_by(
+                func.extract('hour', server_models.AppSession.start_time)
+            ).all()
+            
+            for row in hourly_counts:
+                hour = int(row.hour)
+                data[day_offset][hour] = row.count
+        
+        max_value = max(max(row) for row in data) if data else 1
+        
+        return jsonify({
+            'data': data,
+            'maxValue': max_value,
+            'startDate': start_date.isoformat(),
+            'endDate': end_date.isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Activity heatmap error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# NEW CHART API ENDPOINTS (8 New Charts)
+# ============================================================================
+
+@bp.route('/api/overview/os-distribution', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_os_distribution():
+    """Get OS distribution across all agents."""
+    try:
+        results = db.session.query(
+            server_models.Agent.os,
+            server_models.Agent.windowsedition,
+            func.count(server_models.Agent.id).label('count')
+        ).group_by(
+            server_models.Agent.os, 
+            server_models.Agent.windowsedition
+        ).all()
+        
+        distribution = {}
+        for os, edition, count in results:
+            if os and edition:
+                label = f"{os} {edition}"
+            elif os:
+                label = os
+            else:
+                label = "Unknown"
+            distribution[label] = count
+        
+        return jsonify(distribution)
+    except Exception as e:
+        logger.error(f"OS distribution error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/overview/app-categories', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_app_categories():
+    """Get application usage by category."""
+    try:
+        date_str = request.args.get('date')
+        if date_str:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        else:
+            target_date = datetime.utcnow().date()
+        
+        categories = {
+            'productivity': 0,
+            'communication': 0,
+            'browsing': 0,
+            'development': 0,
+            'other': 0
+        }
+        
+        usage = server_models.AppUsage.query.filter(
+            server_models.AppUsage.date == target_date
+        ).all()
+        
+        for u in usage:
+            app_name = (u.app or '').lower()
+            duration = u.duration_seconds or 0
+            
+            if any(x in app_name for x in ['excel', 'word', 'powerpoint', 'outlook', 'teams', 'office', 'onenote']):
+                categories['productivity'] += duration
+            elif any(x in app_name for x in ['slack', 'discord', 'zoom', 'skype', 'telegram', 'whatsapp', 'teams']):
+                categories['communication'] += duration
+            elif any(x in app_name for x in ['chrome', 'firefox', 'edge', 'safari', 'browser', 'msedge', 'brave']):
+                categories['browsing'] += duration
+            elif any(x in app_name for x in ['code', 'visual studio', 'pycharm', 'intellij', 'sublime', 'vim', 'terminal', 'git', 'idea', 'devenv']):
+                categories['development'] += duration
+            else:
+                categories['other'] += duration
+        
+        return jsonify(categories)
+    except Exception as e:
+        logger.error(f"App categories error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/overview/browser-usage', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_browser_usage():
+    """Get browser usage distribution."""
+    try:
+        date_str = request.args.get('date')
+        if date_str:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        else:
+            target_date = datetime.utcnow().date()
+        
+        results = db.session.query(
+            server_models.DomainUsage.browser,
+            func.sum(server_models.DomainUsage.duration_seconds).label('total')
+        ).filter(
+            server_models.DomainUsage.date == target_date,
+            server_models.DomainUsage.browser.isnot(None)
+        ).group_by(
+            server_models.DomainUsage.browser
+        ).all()
+        
+        browser_map = {
+            'chrome': 'Google Chrome',
+            'edge': 'Microsoft Edge',
+            'firefox': 'Mozilla Firefox',
+            'brave': 'Brave Browser',
+            'opera': 'Opera'
+        }
+        
+        usage = {}
+        for browser, duration in results:
+            if browser:
+                display_name = browser_map.get(browser.lower(), browser.title())
+                usage[display_name] = int(duration or 0)
+        
+        return jsonify(usage)
+    except Exception as e:
+        logger.error(f"Browser usage error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/database/status', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_database_status():
+    """Get database health metrics."""
+    try:
+        from sqlalchemy import text
+        
+        result = db.session.execute(text("""
+            SELECT 
+                pg_database_size(current_database()) as db_size_bytes,
+                (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()) as connections
+        """))
+        row = result.fetchone()
+        
+        cache_result = db.session.execute(text("""
+            SELECT 
+                CASE 
+                    WHEN (blks_read + blks_hit) = 0 THEN 100.0
+                    ELSE round(100.0 * blks_hit / (blks_read + blks_hit), 2)
+                END as cache_hit_ratio
+            FROM pg_stat_database 
+            WHERE datname = current_database()
+        """))
+        cache_row = cache_result.fetchone()
+        
+        return jsonify({
+            'database_size_bytes': int(row[0]) if row else 0,
+            'database_size_mb': round((row[0] or 0) / 1024 / 1024, 2),
+            'active_connections': int(row[1]) if row else 0,
+            'cache_hit_ratio': float(cache_row[0]) if cache_row else 0.0
+        })
+    except Exception as e:
+        logger.error(f"Database status error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/monitoring/failed-events', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_failed_events():
+    """Get count of failed events in last 24 hours."""
+    try:
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        
+        # Check if RawEvent model exists and has error field
+        if hasattr(server_models, 'RawEvent'):
+            failed_count = db.session.query(server_models.RawEvent).filter(
+                server_models.RawEvent.processed == False,
+                server_models.RawEvent.error.isnot(None),
+                server_models.RawEvent.received_at >= cutoff
+            ).count()
+        else:
+            failed_count = 0
+        
+        return jsonify({
+            'failed_count': failed_count,
+            'recent_errors': []
+        })
+    except Exception as e:
+        logger.error(f"Failed events error: {e}")
+        return jsonify({'failed_count': 0, 'recent_errors': []})
+
+
+@bp.route('/api/monitoring/stale-agents', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_stale_agents():
+    """Get agents with no recent activity (>5 minutes)."""
+    try:
+        cutoff = datetime.utcnow() - timedelta(minutes=5)
+        
+        stale = db.session.query(
+            server_models.Agent.id,
+            server_models.Agent.hostname,
+            server_models.Agent.last_seen
+        ).filter(
+            server_models.Agent.last_seen < cutoff
+        ).order_by(
+            server_models.Agent.last_seen.asc()
+        ).limit(20).all()
+        
+        stale_agents = []
+        for agent_id, hostname, last_seen in stale:
+            if last_seen:
+                minutes_since = int((datetime.utcnow() - last_seen).total_seconds() / 60)
+            else:
+                minutes_since = 999
+            
+            stale_agents.append({
+                'agent_id': agent_id[:8] + '...' if agent_id else 'Unknown',
+                'hostname': hostname or 'Unknown',
+                'last_seen': last_seen.isoformat() if last_seen else None,
+                'minutes_since': minutes_since
+            })
+        
+        return jsonify({
+            'stale_count': len(stale_agents),
+            'stale_agents': stale_agents
+        })
+    except Exception as e:
+        logger.error(f"Stale agents error: {e}")
+        return jsonify({'stale_count': 0, 'stale_agents': []})
+
+
+@bp.route('/api/monitoring/agent-versions', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_agent_versions():
+    """Get agent version distribution."""
+    try:
+        results = db.session.query(
+            server_models.Agent.version,
+            func.count(server_models.Agent.id).label('count')
+        ).group_by(
+            server_models.Agent.version
+        ).order_by(
+            func.count(server_models.Agent.id).desc()
+        ).all()
+        
+        versions = {}
+        for version, count in results:
+            versions[version or 'Unknown'] = count
+        
+        return jsonify(versions)
+    except Exception as e:
+        logger.error(f"Agent versions error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/database/table-sizes', methods=['GET'])
+@login_required
+@api_rate_limit
+def api_table_sizes():
+    """Get size of each table in database."""
+    try:
+        from sqlalchemy import text
+        
+        result = db.session.execute(text("""
+            SELECT 
+                tablename,
+                pg_total_relation_size('public.'||quote_ident(tablename)) as size_bytes
+            FROM pg_tables
+            WHERE schemaname = 'public'
+            ORDER BY pg_total_relation_size('public.'||quote_ident(tablename)) DESC
+            LIMIT 10
+        """))
+        
+        tables = {}
+        for row in result:
+            table_name = row[0]
+            size_mb = round(row[1] / 1024 / 1024, 2)
+            tables[table_name] = size_mb
+        
+        return jsonify(tables)
+    except Exception as e:
+        logger.error(f"Table sizes error: {e}")
+        return jsonify({'error': str(e)}), 500

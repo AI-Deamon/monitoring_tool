@@ -30,6 +30,36 @@ def init_database(app):
             logger.error(f"Database init failed: {e}")
             raise
 
+def apply_startup_fixes(app):
+    """Run self-healing scripts on startup."""
+    from scripts.fixes.ensure_procedures_correct import apply_fixes as fix_procedures
+    # Import other fixes dynamically or path-based if needed, but procedures are critical
+    
+    with app.app_context():
+        try:
+            logger.info("[STARTUP] Running self-healing scripts...")
+            
+            # 1. Fix Stored Procedures (Round function error)
+            fix_procedures()
+            
+            # 2. Add Indexes (Performance) - SKIPPED for clean startup
+            # Use subprocess for scripts that are standalone
+            # import subprocess
+            # subprocess.run([sys.executable, 'scripts/fixes/add_indexes.py'], check=False)
+            # logger.info("✓ Indexes verified")
+            
+            # 3. Apply Sync Functions - SKIPPED for clean startup
+            # subprocess.run([sys.executable, 'scripts/fixes/apply_sync_functions.py'], check=False)
+            # logger.info("✓ Sync functions verified")
+            
+            # 4. Fix Collation - SKIPPED for clean startup
+            # subprocess.run([sys.executable, 'scripts/fixes/fix_collation.py'], check=False)
+
+            logger.info("[STARTUP] Self-healing complete.")
+        except Exception as e:
+            logger.error(f"[STARTUP] Fix scripts failed (non-critical): {e}")
+
+
 def sync_screen_time_background(app):
     """
     Background task: Sync ALL data every 5 minutes.
@@ -39,7 +69,7 @@ def sync_screen_time_background(app):
     """
     while True:
         try:
-            time.sleep(300)  # Wait 5 minutes
+            time.sleep(60)  # Wait 1 minute (Optimized for shift)
             with app.app_context():
                 from sqlalchemy import text
                 
@@ -71,7 +101,7 @@ def cleanup_background(app):
     Runs every hour to clean up old raw events and sessions.
     """
     import server_models
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     
     while True:
         try:
@@ -83,13 +113,22 @@ def cleanup_background(app):
                 # PART 1: PURGE OLD DATA
                 # ================================================================
                 # Purge old raw events (30 days retention)
-                cutoff_30d = datetime.utcnow() - timedelta(days=30)
+                # Use timezone-aware UTC time
+                cutoff_30d = datetime.now(timezone.utc) - timedelta(days=30)
+                # Ensure we compare against offset-naive if DB is naive, or aware if aware.
+                # Usually naive UTC is stored in Postgres TIMESTAMP WITHOUT TIME ZONE
+                # So we might need to strip tzinfo if DB columns are naive. 
+                # Ideally, we should migrate to TIMESTAMP WITH TIME ZONE, but for now:
+                cutoff_30d = cutoff_30d.replace(tzinfo=None)
+
                 purged_raw = db.session.query(server_models.RawEvent).filter(
                     server_models.RawEvent.received_at < cutoff_30d
                 ).delete(synchronize_session='fetch')
                 
                 # Purge old app sessions (90 days retention)
-                cutoff_90d = datetime.utcnow() - timedelta(days=90)
+                cutoff_90d = datetime.now(timezone.utc) - timedelta(days=90)
+                cutoff_90d = cutoff_90d.replace(tzinfo=None) # Strip timezone for naive DB columns
+                
                 purged_sessions = 0
                 if hasattr(server_models, 'AppSession'):
                     purged_sessions = db.session.query(server_models.AppSession).filter(
@@ -181,6 +220,7 @@ def create_application():
         }), 200
     
     init_database(app)
+    apply_startup_fixes(app)
     
     # Start background sync thread
     sync_thread = threading.Thread(
@@ -190,7 +230,7 @@ def create_application():
         name='ScreenTimeSyncThread'
     )
     sync_thread.start()
-    logger.info("Background sync thread started (runs every 5 minutes)")
+    logger.info("Background sync thread started (runs every 1 minute)")
     
     # FIX 3: Start cleanup thread (hourly)
     cleanup_thread = threading.Thread(

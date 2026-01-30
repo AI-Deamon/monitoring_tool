@@ -13,40 +13,57 @@ import threading
 
 from .config import CoreConfig
 from .buffer import BufferDB
+import collections
 
 # Try to import ZoneInfo (Python 3.9+), fallback to pytz
+_ZONEINFO_AVAILABLE = False
+_PYTZ_AVAILABLE = False
+
 try:
     from zoneinfo import ZoneInfo
     _ZONEINFO_AVAILABLE = True
 except ImportError:
-    _ZONEINFO_AVAILABLE = False
-    try:
-        import pytz
-        _PYTZ_AVAILABLE = True
-    except ImportError:
-        _PYTZ_AVAILABLE = False
+    pass
+
+# Also try pytz as a fallback option
+try:
+    import pytz
+    _PYTZ_AVAILABLE = True
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
 
 def get_ist_now() -> datetime:
     """Get current time in IST timezone with robust fallback."""
-    try:
-        # Method 1: Try ZoneInfo (Python 3.9+)
-        if _ZONEINFO_AVAILABLE:
+    from datetime import timedelta
+    
+    # Method 1: Try ZoneInfo (Python 3.9+)
+    if _ZONEINFO_AVAILABLE:
+        try:
             return datetime.now(ZoneInfo("Asia/Kolkata"))
-        
-        # Method 2: Try pytz
-        if _PYTZ_AVAILABLE:
-            ist = pytz.timezone('Asia/Kolkata')
-            return datetime.now(ist)
-        
-        # Method 3: Manual UTC+5:30 offset (always accurate for India)
-        from datetime import timedelta
+        except Exception:
+            try:
+                # Try alternate timezone name
+                return datetime.now(ZoneInfo("Asia/Calcutta"))
+            except Exception:
+                pass
+    
+    # Method 2: Try pytz with multiple timezone names
+    if _PYTZ_AVAILABLE:
+        for tz_name in ['Asia/Kolkata', 'Asia/Calcutta']:
+            try:
+                ist = pytz.timezone(tz_name)
+                return datetime.now(ist)
+            except Exception:
+                continue
+    
+    # Method 3: Manual UTC+5:30 offset (ALWAYS works - no library needed)
+    try:
         utc_now = datetime.now(timezone.utc)
         ist_offset = timezone(timedelta(hours=5, minutes=30))
         return utc_now.astimezone(ist_offset)
-        
     except Exception as e:
         logger.error(f"[LIVE] Failed to get IST time: {e}, using UTC")
         # Last resort: Use UTC and log error
@@ -74,12 +91,12 @@ def validate_duration(value, default=0, max_value=86400, context="duration") -> 
 
 class LiveTelemetryTracker:
     """
-    Tracks live agent state and sends updates every 30 seconds.
+    Tracks live agent state and sends updates every 10 seconds.
     
     Key Features:
     - Tracks DAILY cumulative totals for screen time (Active/Idle/Locked).
     - Persists state locally to survive restarts.
-    - Sends current app duration every 30s.
+    - Sends current app duration every 10s.
     - Immediately sends app/domain switches.
     """
     
@@ -91,6 +108,9 @@ class LiveTelemetryTracker:
         # Load persisted state
         self.current_state = self._load_state()
         
+        # Offline Buffer (for critical events like switches)
+        self.offline_buffer = collections.deque(maxlen=500)
+        
         # ✅ NEW: Check for agent downtime (Bug #3)
         if 'last_heartbeat_time' in self.current_state:
             try:
@@ -98,7 +118,7 @@ class LiveTelemetryTracker:
                 now = datetime.now(timezone.utc)
                 downtime_seconds = (now - last_time).total_seconds()
 
-                if downtime_seconds > 300:  # More than 5 minutes
+                if downtime_seconds > 120:  # More than 2 minutes
                     downtime_minutes = downtime_seconds / 60
                     logger.warning(f"[LIVE] ⚠️  AGENT DOWNTIME DETECTED: {downtime_minutes:.1f} minutes")
                     logger.warning(f"[LIVE] Last heartbeat: {last_time.isoformat()}")
@@ -139,7 +159,7 @@ class LiveTelemetryTracker:
         self.last_state_change_time = datetime.now(timezone.utc)
             
         # Update interval
-        self.update_interval = 30  # Send updates every 30 seconds
+        self.update_interval = 10  # Send updates every 10 seconds
         self.last_update_time = time.time()
         
         # Statistics
@@ -202,11 +222,15 @@ class LiveTelemetryTracker:
                 self.current_state['username'] = username
             
             # --- DAILY SCREEN TIME TRACKING ---
-            current_idle_state = idle_data.get('state', 'active')
+            # 🔧 CRITICAL FIX: Use system_state from StateDetector (authoritative source)
+            # idle.state is ONLY for idle transition events, NOT for time accounting
+            system_state = heartbeat.get('system_state', 'active')
+            idle_state_fallback = idle_data.get('state', 'active')
+            current_idle_state = system_state if system_state else idle_state_fallback
             
             # ✅ FIXED: Validate duration value (Bug #7 - Type mismatch)
-            raw_heartbeat_interval = heartbeat.get('pulsetime', 30)
-            heartbeat_interval = validate_duration(raw_heartbeat_interval, default=30, max_value=60, context="heartbeat_interval")
+            raw_heartbeat_interval = heartbeat.get('pulsetime', 10)
+            heartbeat_interval = validate_duration(raw_heartbeat_interval, default=10, max_value=180, context="heartbeat_interval")
             
             # Note: domain_data validation moved to line ~310 where it's actually defined
 
@@ -220,16 +244,16 @@ class LiveTelemetryTracker:
                     last_time = datetime.fromisoformat(self.current_state['last_state_heartbeat_time'])
                     actual_elapsed = (now - last_time).total_seconds()
                     
-                    # Sanity check: Cap at 60s to prevent huge jumps after downtime
-                    if 10 <= actual_elapsed <= 60:
+                    # Sanity check: Cap at 180s to support Helper's adaptive polling (120s during lock)
+                    if 10 <= actual_elapsed <= 180:
                         heartbeat_interval = actual_elapsed
                         logger.debug(f"[LIVE] Using actual elapsed time: {actual_elapsed:.1f}s")
                     else:
-                        logger.debug(f"[LIVE] Elapsed time out of range ({actual_elapsed:.1f}s), using default 30s")
-                        heartbeat_interval = 30
+                        logger.debug(f"[LIVE] Elapsed time out of range ({actual_elapsed:.1f}s), using default 10s")
+                        heartbeat_interval = 10
                 except Exception as e:
                     logger.debug(f"[LIVE] Could not calculate elapsed time: {e}")
-                    heartbeat_interval = 30
+                    heartbeat_interval = 10
             
             # Update timestamp for next calculation
             self.current_state['last_state_heartbeat_time'] = now.isoformat()
@@ -258,12 +282,12 @@ class LiveTelemetryTracker:
             elif current_idle_state == 'locked':
                 self.current_state['locked_seconds'] += heartbeat_interval
             
-            # Detect state changes (active <-> idle <-> locked)
+            # Detect state changes (active ↔ idle ↔ locked)
             previous_state = self.current_state.get('last_idle_state', 'active')
             if previous_state != current_idle_state:
-                # User state changed! Send event to server
-                self._send_state_change_event(now, previous_state, current_idle_state)
-                logger.debug(f"[LIVE] State changed: {previous_state} → {current_idle_state}")
+                # ✅ DISABLED: Helper's StateDetector is authoritative - don't duplicate
+                # self._send_state_change_event(now, previous_state, current_idle_state)
+                logger.debug(f"[LIVE] State changed: {previous_state} → {current_idle_state} (Helper handles)")
             
             self.current_state['last_idle_state'] = current_idle_state
             
@@ -355,25 +379,101 @@ class LiveTelemetryTracker:
             logger.error(f"Error processing heartbeat: {e}", exc_info=True)
     
     def _send_request(self, endpoint: str, data: Dict) -> bool:
-        """Send request to server"""
+        """
+        Send request to server with offline buffering support.
+        
+        Buffering Strategy:
+        - Critical events (switches): ALWAYS buffer
+        - Periodic updates (screentime): DO NOT buffer (next update has better data)
+        """
         try:
+            # 1. Try to flush buffer if we think we are online
+            if self.server_available and self.offline_buffer:
+                self._flush_buffer()
+
+            success = False
             if self.uploader and hasattr(self.uploader, '_make_request'):
                 response = self.uploader._make_request(endpoint, data)
                 if response:
+                    success = True
                     if self.offline_mode:
-                        logger.info("[LIVE] Server available")
-                    self.server_available = True
-                    self.offline_mode = False
+                        logger.info("[LIVE] Server available - Reconnected")
+                        self.server_available = True
+                        self.offline_mode = False
+                        # Flush buffer immediately on reconnection
+                        self._flush_buffer()
                     return True
             
+            # If we reach here, request failed
             if not self.offline_mode:
-                logger.info("[LIVE] Server unavailable")
+                logger.warning(f"[LIVE] Connection lost. Buffering events...")
                 self.offline_mode = True
+                self.server_available = False
+            
+            # 2. Buffer critical events
+            # We only buffer events that represent a distinct state change (switches)
+            # Periodic updates are cumulative, so we can skip them to avoid spam
+            should_buffer = endpoint in ['/telemetry/app-switch', '/telemetry/domain-switch']
+            
+            if should_buffer:
+                logger.debug(f"[LIVE] Buffering event: {endpoint}")
+                self.offline_buffer.append({
+                    'endpoint': endpoint,
+                    'data': data,
+                    'timestamp': time.time()
+                })
+            
             return False
+            
         except Exception as e:
             if not self.offline_mode:
-                logger.debug(f"[LIVE] Request failed: {e}")
+                logger.error(f"[LIVE] Request failed: {e}")
+                self.offline_mode = True
+                self.server_available = False
+            
+            # Buffer only critical events
+            if endpoint in ['/telemetry/app-switch', '/telemetry/domain-switch']:
+                 self.offline_buffer.append({
+                    'endpoint': endpoint,
+                    'data': data,
+                    'timestamp': time.time()
+                })
             return False
+
+    def _flush_buffer(self):
+        """Flush buffered offline events."""
+        if not self.offline_buffer:
+            return
+
+        logger.info(f"[LIVE] Flushing {len(self.offline_buffer)} buffered events...")
+        
+        # Process buffer
+        # We start from the oldest event
+        while self.offline_buffer:
+            item = self.offline_buffer[0] # Peek
+            
+            try:
+                if self.uploader and hasattr(self.uploader, '_make_request'):
+                    # Add a flag to indicate this is a buffered event (optional)
+                    data = item['data']
+                    data['_buffered'] = True
+                    
+                    response = self.uploader._make_request(item['endpoint'], data)
+                    
+                    if response:
+                        # Success - remove from buffer
+                        self.offline_buffer.popleft()
+                    else:
+                        # Failed again - stop flushing and wait for next opportunity
+                        logger.debug("[LIVE] Flush interrupted - connection unstable")
+                        self.server_available = False
+                        self.offline_mode = True
+                        break
+            except Exception as e:
+                logger.error(f"[LIVE] Error flushing buffer: {e}")
+                break
+                
+        logger.info(f"[LIVE] Buffer flush complete. Remaining: {len(self.offline_buffer)}")
     
     def _send_periodic_update(self, timestamp: datetime):
         """Send periodic update with DAILY TOTALS"""

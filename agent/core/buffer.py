@@ -65,13 +65,13 @@ class BufferDB:
                 isolation_level='DEFERRED',  # Explicit transactions
                 check_same_thread=False
             )
-            # Performance PRAGMAs
+            # Performance PRAGMAs - optimized for low memory
             self._local.conn.execute("PRAGMA journal_mode=WAL")        # Write-ahead logging
             self._local.conn.execute("PRAGMA busy_timeout=5000")       # 5s busy timeout
             self._local.conn.execute("PRAGMA synchronous=NORMAL")      # Balanced durability
-            self._local.conn.execute("PRAGMA cache_size=-8000")        # 8MB cache (negative = KB)
+            self._local.conn.execute("PRAGMA cache_size=-2000")        # 2MB cache (reduced from 8MB)
             self._local.conn.execute("PRAGMA temp_store=MEMORY")       # Temp tables in memory
-            self._local.conn.execute("PRAGMA mmap_size=67108864")      # 64MB memory-mapped I/O
+            self._local.conn.execute("PRAGMA mmap_size=16777216")      # 16MB memory-mapped I/O (reduced from 64MB)
             self._local.conn.execute("PRAGMA page_size=4096")          # 4KB pages (optimal)
             self._local.conn_created = current_time
         
@@ -132,10 +132,20 @@ class BufferDB:
                 deleted_domains = cursor.rowcount
                 total_deleted += deleted_domains
 
+                # Delete old state spans (older than 7 days)
+                cursor.execute('''
+                    DELETE FROM state_spans 
+                    WHERE uploaded = 1 
+                    AND start_time < datetime('now', '-7 days')
+                ''')
+                deleted_spans = cursor.rowcount
+                total_deleted += deleted_spans
+
             logger.warning(
                 f"[BUFFER] Emergency cleanup: "
                 f"Deleted {deleted_hb} heartbeats, {deleted_events} events, "
-                f"{deleted_domains} domain sessions (total: {total_deleted} rows)"
+                f"{deleted_domains} domain sessions, {deleted_spans} spans "
+                f"(total: {total_deleted} rows)"
             )
 
             # Run VACUUM to reclaim disk space
@@ -164,6 +174,7 @@ class BufferDB:
                 'merged_events', 
                 'domain_visits',
                 'domain_active_sessions',
+                'state_spans',
                 'inventory_snapshots',
                 'upload_batches',
                 'state'
@@ -185,6 +196,7 @@ class BufferDB:
                 'heartbeats': ['agent_id', 'sequence', 'timestamp', 'payload', 'received_at', 'processed'],
                 'merged_events': ['agent_id', 'username', 'event_type', 'start_time', 'end_time', 'duration_seconds', 'state_data', 'heartbeat_count', 'uploaded'],
                 'domain_active_sessions': ['agent_id', 'domain', 'browser', 'url', 'title', 'start_time', 'end_time', 'duration_seconds', 'uploaded'],
+                'state_spans': ['span_id', 'state', 'start_time', 'end_time', 'duration_seconds', 'uploaded'],
             }
             
             for table, columns in required_columns.items():
@@ -327,6 +339,27 @@ class BufferDB:
         ''')
         conn.execute('''
             CREATE INDEX IF NOT EXISTS idx_domain_sessions_domain ON domain_active_sessions (domain, start_time)
+        ''')
+        
+        # State spans (NEW - Idempotent screen time tracking)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS state_spans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                span_id TEXT UNIQUE NOT NULL,
+                agent_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                duration_seconds INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                uploaded INTEGER DEFAULT 0
+            )
+        ''')
+        conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_state_spans_uploaded ON state_spans (uploaded)
+        ''')
+        conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_state_spans_time ON state_spans (start_time)
         ''')
         
         # Inventory snapshots
@@ -683,6 +716,62 @@ class BufferDB:
             placeholders = ','.join('?' * len(ids))
             conn.execute(f'''
                 UPDATE domain_active_sessions SET uploaded = 1
+                WHERE id IN ({placeholders})
+            ''', ids)
+
+    # ========================================================================
+    #   STATE SPANS (NEW - Idempotent screen time tracking)
+    # ========================================================================
+
+    def store_state_span(self, span: Dict) -> bool:
+        """Store state span with idempotency check"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # Use INSERT OR IGNORE for span_id idempotency
+                cursor.execute('''
+                    INSERT OR IGNORE INTO state_spans (
+                        span_id, agent_id, state, start_time, end_time,
+                        duration_seconds, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    span.get('span_id'),
+                    span.get('agent_id'),
+                    span.get('state'),
+                    span.get('start_time'),
+                    span.get('end_time'),
+                    span.get('duration_seconds'),
+                    span.get('created_at')
+                ))
+                return True
+        except Exception as e:
+            logger.error(f"[BUFFER] Error storing state span: {e}")
+            return False
+
+    def get_unuploaded_state_spans(self, limit: int = 500) -> List[Dict]:
+        """Get unuploaded state spans"""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT * FROM state_spans
+                WHERE uploaded = 0
+                ORDER BY id ASC
+                LIMIT ?
+            ''', (limit,))
+            
+            return [dict(row) for row in cursor.fetchall()]
+
+    def mark_state_spans_uploaded(self, ids: List[int]):
+        """Mark state spans as uploaded"""
+        if not ids:
+            return
+        
+        with self._get_connection() as conn:
+            placeholders = ','.join('?' * len(ids))
+            conn.execute(f'''
+                UPDATE state_spans SET uploaded = 1
                 WHERE id IN ({placeholders})
             ''', ids)
     

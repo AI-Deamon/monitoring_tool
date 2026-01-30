@@ -22,7 +22,7 @@ def delete_agent(agent_id):
     with app.app_context():
         try:
             # Check if agent exists
-            agent = Agent.query.filter_by(id=agent_id).first()
+            agent = Agent.query.filter_by(agent_id=agent_id).first()
             if not agent:
                 print(f"Agent {agent_id} not found in database")
                 return False

@@ -13,12 +13,28 @@ import json
 import hashlib
 import logging
 import math
+import re
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from pathlib import Path
 from dataclasses import dataclass, asdict
 
 logger = logging.getLogger(__name__)
+
+# FIX: GUID-to-friendly-name mapping for Store apps that report package IDs
+GUID_TO_FRIENDLY_NAME = {
+    '1527c705-839a-4832-9118-54d4bd6a0c89': 'File Picker',
+    'c5e2524a-ea46-4f67-841f-6a9465d9d515': 'File Explorer',
+    'e2a4f912-2574-4a75-9bb0-0d023378592b': 'App Resolver UX',
+    'f46d4000-fd22-4db4-ac8e-4e1ddde828fe': 'Add Folders Dialog',
+}
+
+# GUID Publisher mapping
+GUID_TO_PUBLISHER = {
+    'CE36AF3D-FF94-43EB-9908-7EC8FD1D29FB': 'PaddyXu',
+    'ED346674-0FA1-4272-85CE-3187C9C86E26': 'HP Inc.',
+    'EB51A5DA-0E72-4863-82E4-EA21C1F8DFE3': 'Intel Corporation',
+}
 
 
 @dataclass
@@ -85,6 +101,9 @@ $ProgressPreference = 'SilentlyContinue'
 $VerbosePreference = 'SilentlyContinue'
 $WarningPreference = 'SilentlyContinue'
 
+# FIX: Increase output width to prevent path truncation
+$PSDefaultParameterValues['Out-String:Width'] = 4096
+
 $AllApps = @()
 
 # METHOD 1: System-wide apps (HKLM)
@@ -104,7 +123,18 @@ foreach ($path in $paths) {
                                @{N='DisplayVersion';E={$_.DisplayVersion}},
                                @{N='Publisher';E={$_.Publisher}},
                                @{N='InstallLocation';E={$_.InstallLocation}},
-                               @{N='InstallDate';E={$_.InstallDate}},
+                               @{N='InstallDate';E={
+                                   $rawDate = $_.InstallDate
+                                   if ($rawDate -and $rawDate -match '^\d{8}$') {
+                                       # Convert YYYYMMDD to YYYY-MM-DD
+                                       $year = $rawDate.Substring(0,4)
+                                       $month = $rawDate.Substring(4,2)
+                                       $day = $rawDate.Substring(6,2)
+                                       "$year-$month-$day"
+                                   } else {
+                                       $rawDate
+                                   }
+                               }},
                                @{N='Source';E={'Registry-HKLM'}}
         if ($items) { $AllApps += $items }
     }
@@ -120,29 +150,84 @@ foreach ($path in $userPaths) {
                                @{N='DisplayVersion';E={$_.DisplayVersion}},
                                @{N='Publisher';E={$_.Publisher}},
                                @{N='InstallLocation';E={$_.InstallLocation}},
-                               @{N='InstallDate';E={$_.InstallDate}},
+                               @{N='InstallDate';E={
+                                   $rawDate = $_.InstallDate
+                                   if ($rawDate -and $rawDate -match '^\d{8}$') {
+                                       # Convert YYYYMMDD to YYYY-MM-DD
+                                       $year = $rawDate.Substring(0,4)
+                                       $month = $rawDate.Substring(4,2)
+                                       $day = $rawDate.Substring(6,2)
+                                       "$year-$month-$day"
+                                   } else {
+                                       $rawDate
+                                   }
+                               }},
                                @{N='Source';E={'Registry-HKCU'}}
         if ($items) { $AllApps += $items }
     }
 }
 
-# METHOD 3: Microsoft Store Apps (FIXED - current user only)
+# METHOD 3: Microsoft Store Apps (FIXED - with install date retrieval)
+# System noise apps to filter out
+$SystemNoise = @(
+    'Microsoft.AAD.BrokerPlugin',
+    'Microsoft.AccountsControl',
+    'Microsoft.AsyncTextService',
+    'Microsoft.BioEnrollment',
+    'Microsoft.CredDialogHost',
+    'Microsoft.ECApp',
+    'Microsoft.LockApp',
+    'Microsoft.Win32WebViewHost',
+    'Microsoft.XboxGameCallableUI',
+    'Microsoft.Services.Store.Engagement',
+    'Microsoft.VCLibs.*',
+    'Microsoft.NET.Native.*',
+    'Microsoft.UI.Xaml.*',
+    'Microsoft.WindowsAppRuntime.*'
+)
+
 try {
-    # Don't use -AllUsers (fails without admin)
     $storeApps = Get-AppxPackage -ErrorAction Stop |
                  Where-Object { 
-                     # Less aggressive filtering - only exclude core Windows components
+                     $name = $_.Name
+                     # Exclude Windows core components and system noise
                      $_.Name -notmatch '^Microsoft\.Windows\.' -and
-                     $_.Name -notmatch '^Microsoft\.VCLibs' -and
-                     $_.Name -notmatch '^Microsoft\.NET\.' -and
-                     $_.Name -notmatch '^Microsoft\.UI\.Xaml'
+                     -not ($SystemNoise | Where-Object { $name -like $_ })
                  } |
-                 Select-Object @{N='DisplayName';E={$_.Name}},
-                               @{N='DisplayVersion';E={$_.Version}},
-                               @{N='Publisher';E={$_.Publisher}},
-                               @{N='InstallLocation';E={$_.InstallLocation}},
-                               @{N='InstallDate';E={$null}},
-                               @{N='Source';E={'MicrosoftStore'}}
+                 ForEach-Object {
+                     $pkg = $_
+                     $installDate = $null
+                     
+                     # FIX: Get install date from registry
+                     $regPath = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages\$($pkg.PackageFullName)"
+                     if (Test-Path $regPath) {
+                         try {
+                             $installTime = (Get-ItemProperty $regPath -ErrorAction SilentlyContinue).InstallTime
+                             if ($installTime) {
+                                $installDate = [DateTime]::FromFileTime($installTime).ToString('yyyy-MM-dd')
+                             }
+                         } catch {}
+                     }
+                     
+                     # Fallback: Use InstallLocation folder creation date
+                     if (-not $installDate -and $pkg.InstallLocation -and (Test-Path $pkg.InstallLocation)) {
+                         try {
+                             $installDate = (Get-Item $pkg.InstallLocation).CreationTime.ToString('yyyy-MM-dd')
+                         } catch {}
+                     }
+                     
+                     # Get full install location path (not truncated)
+                     $fullPath = $pkg.InstallLocation
+                     
+                     [PSCustomObject]@{
+                         DisplayName = $pkg.Name
+                         DisplayVersion = $pkg.Version
+                         Publisher = $pkg.Publisher
+                         InstallLocation = $fullPath
+                         InstallDate = $installDate
+                         Source = 'MicrosoftStore'
+                     }
+                 }
     
     if ($storeApps) { $AllApps += $storeApps }
 } catch {
@@ -152,7 +237,7 @@ try {
 # Deduplicate by DisplayName
 $AllApps = $AllApps | Group-Object DisplayName | ForEach-Object { $_.Group[0] }
 
-# Output clean JSON
+# Output clean JSON with full width
 $AllApps | ConvertTo-Json -Compress -Depth 10
 '''
         
@@ -247,14 +332,34 @@ $AllApps | ConvertTo-Json -Compress -Depth 10
                 try:
                     # Support both old 'Name' and new 'DisplayName' keys
                     name = app_data.get('DisplayName') or app_data.get('Name') or ''
+                    name = name.strip()
+                    
+                    # FIX: Normalize GUID names to friendly names
+                    name_lower = name.lower()
+                    if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', name_lower):
+                        friendly = GUID_TO_FRIENDLY_NAME.get(name_lower)
+                        if friendly:
+                            logger.debug(f"[INVENTORY] Mapped GUID {name} → {friendly}")
+                            name = friendly
+                        else:
+                            logger.debug(f"[INVENTORY] Unknown GUID app: {name}")
+                            name = f"System App ({name[:8]}...)"
+                    
                     version = app_data.get('DisplayVersion') or app_data.get('Version') or 'Unknown'
                     publisher = app_data.get('Publisher') or 'Unknown'
+                    
+                    # FIX: Normalize GUID publishers to company names
+                    publisher_upper = publisher.upper() if publisher else ''
+                    if publisher_upper in GUID_TO_PUBLISHER:
+                        publisher = GUID_TO_PUBLISHER[publisher_upper]
+                        logger.debug(f"[INVENTORY] Mapped publisher GUID to {publisher}")
+                    
                     install_location = app_data.get('InstallLocation')
                     install_date = app_data.get('InstallDate')
                     source = app_data.get('Source')  # Registry-HKLM, Registry-HKCU, MicrosoftStore
                     
                     app = Application(
-                        name=name.strip(),
+                        name=name,
                         version=version,
                         publisher=publisher,
                         install_location=install_location,
@@ -262,6 +367,11 @@ $AllApps | ConvertTo-Json -Compress -Depth 10
                         source=source
                     )
                     if app.name:
+                        # Diagnostic logging for missing data
+                        if not install_location:
+                            logger.debug(f"[INVENTORY] {name}: No install location")
+                        if not install_date:
+                            logger.debug(f"[INVENTORY] {name}: No install date")
                         apps.append(app)
                 except Exception as e:
                     continue
@@ -409,7 +519,19 @@ $AllApps | ConvertTo-Json -Compress -Depth 10
         else:
             logger.info(f"[INVENTORY] Updated inventory: {len(apps)} apps")
         
+        # Debug: Log sample of first app with all fields
+        if result['apps']:
+            sample = result['apps'][0]
+            logger.info(f"[INVENTORY] Sample app JSON:")
+            logger.info(f"  Name: {sample.get('name')}")
+            logger.info(f"  Version: {sample.get('version')}")
+            logger.info(f"  Publisher: {sample.get('publisher')}")
+            logger.info(f"  Location: {sample.get('install_location')}")
+            logger.info(f"  Date: {sample.get('install_date')}")
+            logger.info(f"  Source: {sample.get('source')}")
+        
         return result  # CRITICAL: Return the inventory data!
+
         
     def _validate_field(self, field_name: str, field_value: str) -> bool:
         """Validate individual field values"""
@@ -511,184 +633,32 @@ $AllApps | ConvertTo-Json -Compress -Depth 10
         validated_name = re.sub(r'\s+', ' ', validated_name)  # Replace multiple spaces with single space
         validated_name = validated_name[:100]  # Limit length
         
-        # Validate other fields
-        for field in ['version', 'publisher', 'install_location']:
+        # Validate other fields (FIXED: Added install_date and source)
+        for field in ['version', 'publisher', 'install_location', 'install_date', 'source']:
             if field in app_data:
                 value = app_data[field]
-                if field and not self._validate_field(field, value):
+                
+                # Metadata fields - don't validate, just preserve
+                if field in ['install_date', 'source', 'install_location']:
+                    # Keep original value or None (not empty string)
+                    validated_data[field] = value if value else None
+                # Validate other string fields
+                elif value and not self._validate_field(field, str(value)):
                     validated_data[field] = f"[INVALID]{value}"
                 else:
-                    validated_data[field] = value
+                    validated_data[field] = value if value else None
             else:
-                validated_data[field] = ""
+                # Use None for metadata fields, "Unknown" for required fields
+                validated_data[field] = None if field in ['install_date', 'source', 'install_location'] else "Unknown"
         
-        # Create validated app object
+        # Create validated app object (FIXED: use validated_data for ALL fields)
         validated_app = Application(
             name=validated_name,
-            version=validated_data.get('version', 'Unknown'),
-            publisher=validated_data.get('publisher', 'Unknown'),
-            install_location=validated_data.get('install_location', 'Unknown'),
-            source=app_data.get('source', 'Unknown'),
-            install_date=app_data.get('install_date', 'Unknown')
-        )
-        
-        return validated_app
-    
-    def _normalize_publisher(self, publisher: str) -> str:
-        """Normalize publisher name"""
-        if not publisher:
-            return "Unknown"
-        
-        # Convert to title case for display
-        normalized = publisher.title().strip()
-        
-        # Remove common artifacts
-        artifacts_to_remove = [' Corporation', ' Corp.', ' Inc.', ' LLC', ' Ltd.']
-        for artifact in artifacts_to_remove:
-            normalized = normalized.replace(artifact, '')
-        
-        # Limit length
-        return normalized[:50]
-    
-    def _validate_and_normalize(self, inventory: Dict) -> Dict:
-        """Validate and normalize all app data"""
-        if not inventory or 'apps' not in inventory:
-            return inventory
-        
-        validated_apps = {}
-        invalid_count = 0
-        
-        for app_key, app_data in list(inventory.get('apps', {}).items()):
-            # Validate and normalize app data
-            validated_app = self._validate_app_data(app_data)
-            if validated_app:
-                validated_apps[app_key] = validated_app
-                invalid_count += 1
-        
-        if invalid_count > 0:
-            logger.warning(f"[INVENTORY] Rejected {invalid_count} apps during validation")
-        
-        # Return with validation results
-        return self._add_validation_results(inventory, invalid_count)
-    def _validate_field(self, field_name: str, field_value: str) -> bool:
-        """Validate individual field values"""
-        if not field_value:
-            return True  # Empty field is valid
-        
-        # Common validation patterns
-        invalid_patterns = {
-            'name': [
-                r'[<>:"\'"]',  # No special chars
-                r'^(CON|PRN|AUX|LPT)\d+\d+$',  # No Windows device names
-                r'^(?|\.|\.\.|/|\\)$',  # No paths or special chars
-            ],
-            'version': [
-                r'[<>:"\'"]',  # No special chars
-                r'^[0-9]+$',  # Version numbers only
-                r'^[a-fA-F\.]{0,}$',  # Version format check
-            ],
-            'publisher': [
-                r'[<>:"\'"]',  # No special chars
-                r'^(Microsoft|Adobe|Oracle|VMware|Unknown)$',  # Block known fake publishers
-            ]
-        }
-        
-        # Check against invalid patterns
-        field_patterns = invalid_patterns.get(field_name, [])
-        for pattern in field_patterns:
-            if re.search(pattern, field_value):
-                logger.warning(f"[INVENTORY] Invalid {field_name}: {field_value}")
-                return False
-        
-        return True
-    
-    def _validate_inventory(self, inventory: Dict) -> int:
-        """Validate inventory data for safety"""
-        if not inventory or 'apps' not in inventory:
-            return 0
-        
-        invalid_count = 0
-        for app_data in inventory.get('apps', []):
-            app_name = app_data.get('name', '').strip()
-            if not app_name:
-                logger.warning(f"[INVENTORY] Invalid app entry: missing name")
-                continue
-            
-            # Validate all fields
-            fields_to_validate = ['name', 'version', 'publisher', 'install_location']
-            for field in fields_to_validate:
-                field_value = app_data.get(field, '')
-                if not self._validate_field(field, field_value):
-                    invalid_count += 1
-            
-            # Additional sanity checks
-            # App name must be reasonable length (1-100 chars)
-            if len(app_name) < 1 or len(app_name) > 100:
-                logger.warning(f"[INVENTORY] Invalid app name length: {app_name}")
-                invalid_count += 1
-            
-            # Version must be reasonable (format x.x.x, max 50 chars)
-            version = app_data.get('version', '')
-            if version and not re.match(r'^\d+\.\d+$', version):
-                logger.warning(f"[INVENTORY] Invalid version format: {version} for {app_name}")
-                invalid_count += 1
-        
-        if invalid_count > 0:
-            logger.warning(f"[INVENTORY] Rejected {invalid_count} invalid entries")
-        
-        return invalid_count
-    
-    def _add_validation_results(self, inventory: Dict, invalid_count: int) -> Dict:
-        """Add validation results to inventory dict"""
-        if invalid_count > 0:
-            inventory['validation'] = {
-                'invalid_entries': invalid_count,
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-        else:
-            inventory['validation'] = {
-                'invalid_entries': 0,
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-        
-        return inventory
-    
-    def _validate_app_data(self, app_data: Dict) -> Dict:
-        """Validate a single app's data"""
-        if not app_data:
-            return {}
-        
-        validated_data = {}
-        
-        # Sanitize name
-        name = app_data.get('name', '').strip()
-        if not name:
-            return app_data  # Skip empty names
-        
-        # Only keep alphanumeric chars, dots, hyphens, and spaces
-        validated_name = re.sub(r'[^a-zA-Z0-9\-\.\s]', '', name)
-        validated_name = re.sub(r'\s+', ' ', validated_name)  # Replace multiple spaces with single space
-        validated_name = validated_name[:100]  # Limit length
-        
-        # Validate other fields
-        for field in ['version', 'publisher', 'install_location']:
-            if field in app_data:
-                value = app_data[field]
-                if field and not self._validate_field(field, value):
-                    validated_data[field] = f"[INVALID]{value}"
-                else:
-                    validated_data[field] = value
-            else:
-                validated_data[field] = ""
-        
-        # Create validated app object
-        validated_app = Application(
-            name=validated_name,
-            version=validated_data.get('version', 'Unknown'),
-            publisher=validated_data.get('publisher', 'Unknown'),
-            install_location=validated_data.get('install_location', 'Unknown'),
-            source=app_data.get('source', 'Unknown'),
-            install_date=app_data.get('install_date', 'Unknown')
+            version=validated_data.get('version') or 'Unknown',
+            publisher=validated_data.get('publisher') or 'Unknown',
+            install_location=validated_data.get('install_location'),  # None if not available
+            source=validated_data.get('source'),  # None if not available
+            install_date=validated_data.get('install_date')  # None if not available
         )
         
         return validated_app

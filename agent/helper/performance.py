@@ -317,6 +317,239 @@ def log_memory_if_high(threshold_mb: float = 100):
 
 
 # =============================================================================
+# CPU THROTTLER - Prevents agent from consuming excessive CPU
+# =============================================================================
+
+class CPUThrottler:
+    """
+    Monitors and throttles CPU usage to prevent impacting user experience.
+    
+    Best Practice: Monitoring agents should use < 5% CPU during active collection
+    and < 1% during idle periods.
+    """
+    
+    # Default limits
+    DEFAULT_MAX_CPU_ACTIVE = 5.0    # Max 5% when user is active
+    DEFAULT_MAX_CPU_IDLE = 2.0      # Max 2% when user is idle
+    DEFAULT_MAX_CPU_LOCKED = 1.0    # Max 1% when screen is locked
+    
+    def __init__(self, max_cpu_percent: float = 5.0):
+        self.max_cpu = max_cpu_percent
+        self.current_limit = max_cpu_percent
+        self._process = None
+        self._throttle_count = 0
+        self._last_check = 0
+        self.logger = logging.getLogger('CPUThrottler')
+        
+        # Initialize process handle
+        try:
+            import psutil
+            self._process = psutil.Process()
+            # Initial CPU measurement (needs warm-up)
+            self._process.cpu_percent(interval=None)
+        except ImportError:
+            self.logger.warning("[CPU] psutil not available, throttling disabled")
+        except Exception as e:
+            self.logger.error(f"[CPU] Failed to initialize: {e}")
+    
+    def set_state(self, state: str):
+        """Adjust CPU limit based on system state"""
+        if state == 'active':
+            self.current_limit = self.DEFAULT_MAX_CPU_ACTIVE
+        elif state == 'idle':
+            self.current_limit = self.DEFAULT_MAX_CPU_IDLE
+        elif state == 'locked':
+            self.current_limit = self.DEFAULT_MAX_CPU_LOCKED
+    
+    def get_cpu_percent(self) -> float:
+        """Get current CPU usage percentage"""
+        if not self._process:
+            return 0.0
+        
+        try:
+            # Non-blocking call (uses cached value)
+            return self._process.cpu_percent(interval=None)
+        except Exception:
+            return 0.0
+    
+    def throttle_if_needed(self) -> bool:
+        """
+        Check CPU usage and sleep if exceeding limit.
+        
+        Returns:
+            bool: True if throttling was applied
+        """
+        if not self._process:
+            return False
+        
+        try:
+            # Don't check too frequently
+            now = time.time()
+            if now - self._last_check < 0.5:
+                return False
+            self._last_check = now
+            
+            cpu = self.get_cpu_percent()
+            stats.record('cpu_percent', cpu)
+            
+            if cpu > self.current_limit:
+                self._throttle_count += 1
+                
+                # Log only occasionally to prevent spam
+                if self._throttle_count % 10 == 1:
+                    log_throttled(
+                        logging.WARNING,
+                        f"[CPU] Usage {cpu:.1f}% exceeds limit {self.current_limit}%, throttling",
+                        key="cpu_throttle"
+                    )
+                
+                # Back off - sleep proportional to how much over limit
+                excess = cpu - self.current_limit
+                sleep_time = min(0.5 + (excess * 0.1), 2.0)  # 0.5s to 2s
+                time.sleep(sleep_time)
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.debug(f"CPU check error: {e}")
+            return False
+    
+    def get_stats(self) -> dict:
+        """Get throttling statistics"""
+        return {
+            'current_limit': self.current_limit,
+            'throttle_count': self._throttle_count,
+            'current_cpu': self.get_cpu_percent()
+        }
+
+
+# Global CPU throttler instance
+_cpu_throttler = None
+
+def get_cpu_throttler() -> CPUThrottler:
+    """Get singleton CPU throttler instance"""
+    global _cpu_throttler
+    if _cpu_throttler is None:
+        _cpu_throttler = CPUThrottler()
+    return _cpu_throttler
+
+
+# =============================================================================
+# MEMORY LIMIT ENFORCER - Prevents runaway memory consumption
+# =============================================================================
+
+class MemoryLimitEnforcer:
+    """
+    Monitors memory usage and takes action when limits are exceeded.
+    
+    Actions:
+    - 'warn': Log critical warning only
+    - 'gc': Force garbage collection
+    - 'restart': Request graceful restart (raises exception)
+    """
+    
+    DEFAULT_SOFT_LIMIT_MB = 100   # Warning threshold
+    DEFAULT_HARD_LIMIT_MB = 150   # Action threshold
+    
+    def __init__(self, soft_limit_mb: float = 100, hard_limit_mb: float = 150, action: str = 'gc'):
+        self.soft_limit = soft_limit_mb
+        self.hard_limit = hard_limit_mb
+        self.action = action  # 'warn', 'gc', 'restart'
+        self.logger = logging.getLogger('MemoryLimit')
+        self._exceeded_count = 0
+        self._gc_count = 0
+    
+    def check_and_enforce(self) -> dict:
+        """
+        Check memory and enforce limits.
+        
+        Returns:
+            dict: Status with 'exceeded', 'usage_mb', 'action_taken'
+        """
+        usage = get_memory_usage_mb()
+        result = {
+            'exceeded': False,
+            'usage_mb': usage,
+            'action_taken': None
+        }
+        
+        # Check soft limit (warning)
+        if usage > self.soft_limit:
+            log_throttled(
+                logging.WARNING,
+                f"[MEMORY] Usage {usage:.1f}MB exceeds soft limit {self.soft_limit}MB",
+                key="memory_soft"
+            )
+        
+        # Check hard limit (action)
+        if usage > self.hard_limit:
+            self._exceeded_count += 1
+            result['exceeded'] = True
+            
+            if self.action == 'warn':
+                self.logger.critical(
+                    f"[MEMORY] CRITICAL: {usage:.1f}MB exceeds hard limit {self.hard_limit}MB"
+                )
+                result['action_taken'] = 'warn'
+                
+            elif self.action == 'gc':
+                # Force garbage collection
+                self.logger.warning(
+                    f"[MEMORY] {usage:.1f}MB exceeds limit, forcing garbage collection"
+                )
+                self._force_gc()
+                self._gc_count += 1
+                result['action_taken'] = 'gc'
+                
+                # Check if GC helped
+                new_usage = get_memory_usage_mb()
+                result['post_gc_usage_mb'] = new_usage
+                
+                if new_usage > self.hard_limit:
+                    self.logger.critical(
+                        f"[MEMORY] Still at {new_usage:.1f}MB after GC, consider restart"
+                    )
+                    
+            elif self.action == 'restart':
+                self.logger.critical(
+                    f"[MEMORY] {usage:.1f}MB exceeds limit, requesting restart"
+                )
+                result['action_taken'] = 'restart'
+                # Raise exception to trigger restart
+                raise MemoryError(f"Memory limit exceeded: {usage:.1f}MB > {self.hard_limit}MB")
+        
+        return result
+    
+    def _force_gc(self):
+        """Force garbage collection"""
+        import gc
+        gc.collect()
+        gc.collect()  # Run twice for thorough cleanup
+    
+    def get_stats(self) -> dict:
+        """Get memory limit statistics"""
+        return {
+            'soft_limit_mb': self.soft_limit,
+            'hard_limit_mb': self.hard_limit,
+            'exceeded_count': self._exceeded_count,
+            'gc_count': self._gc_count,
+            'current_usage_mb': get_memory_usage_mb()
+        }
+
+
+# Global memory enforcer instance
+_memory_enforcer = None
+
+def get_memory_enforcer() -> MemoryLimitEnforcer:
+    """Get singleton memory enforcer instance"""
+    global _memory_enforcer
+    if _memory_enforcer is None:
+        _memory_enforcer = MemoryLimitEnforcer(action='gc')
+    return _memory_enforcer
+
+
+# =============================================================================
 # INITIALIZATION
 # =============================================================================
 
@@ -324,10 +557,19 @@ def init_performance_monitoring():
     """Initialize performance monitoring for agent"""
     logger.info("[PERF] Agent performance monitoring initialized")
     
-    # Record baseline memory
+    # Initialize CPU throttler
+    cpu = get_cpu_throttler()
+    
+    # Initialize memory enforcer
+    memory = get_memory_enforcer()
+    
+    # Record baseline
     log_memory_if_high(threshold_mb=150)
     
     return {
         'throttled_logger': _throttled_logger,
         'stats': stats,
+        'cpu_throttler': cpu,
+        'memory_enforcer': memory,
     }
+

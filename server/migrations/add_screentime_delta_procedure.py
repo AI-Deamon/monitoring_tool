@@ -41,26 +41,28 @@ def create_delta_procedure():
                 p_delta_active INTEGER,
                 p_delta_idle INTEGER,
                 p_delta_locked INTEGER,
-                p_state VARCHAR
+                p_state VARCHAR,
+                p_delta_away INTEGER DEFAULT 0
             ) RETURNS TABLE(status text, message text) AS $$
             DECLARE
                 v_date DATE;
             BEGIN
                 -- Extract date from timestamp
                 v_date := p_timestamp::DATE;
-
+                
                 -- INCREMENTAL ADD MODEL:
                 -- Add the deltas to existing values (or create new row if first of day)
                 INSERT INTO screen_time (
-                    agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated
+                    agent_id, date, active_seconds, idle_seconds, locked_seconds, away_seconds, last_updated
                 ) VALUES (
-                    p_agent_id, v_date, p_delta_active, p_delta_idle, p_delta_locked, NOW()
+                    p_agent_id, v_date, p_delta_active, p_delta_idle, p_delta_locked, p_delta_away, NOW()
                 )
                 ON CONFLICT (agent_id, date) DO UPDATE SET
                     active_seconds = screen_time.active_seconds + EXCLUDED.active_seconds,
-                    idle_seconds = screen_time.idle_seconds + EXCLUDED.idle_seconds,
+                    idle_seconds   = screen_time.idle_seconds   + EXCLUDED.idle_seconds,
                     locked_seconds = screen_time.locked_seconds + EXCLUDED.locked_seconds,
-                    last_updated = NOW();
+                    away_seconds   = COALESCE(screen_time.away_seconds, 0) + EXCLUDED.away_seconds,
+                    last_updated   = NOW();
 
                 RETURN QUERY SELECT 'success'::text, 'Screentime delta added'::text;
             EXCEPTION WHEN OTHERS THEN
