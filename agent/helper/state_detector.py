@@ -466,12 +466,15 @@ class StateDetector:
     def _create_span(self, state: str, start_time: float, end_time: float, duration: float) -> Optional[dict]:
         """
         Create an immutable span record with clock drift detection.
+        Ensures timestamp consistency by adjusting end_time when capping duration.
         """
         try:
             from datetime import datetime, timezone
             
-            # Detect suspicious clock jumps
+            # Calculate duration from timestamps (source of truth)
             calculated_duration = end_time - start_time
+            
+            # Detect suspicious clock jumps
             drift = abs(calculated_duration - duration)
             
             if drift > 5.0:  # More than 5 second drift
@@ -479,16 +482,18 @@ class StateDetector:
                     f"[SPAN] Clock drift detected: {drift:.1f}s "
                     f"(calculated={calculated_duration:.1f}s, measured={duration:.1f}s)"
                 )
-                # Use the more conservative value
-                duration = min(calculated_duration, duration)
+                # Use calculated duration as source of truth
+                duration = calculated_duration
             
             # Validate duration range
             if duration < 1.0:
                 return None
             
+            # Cap duration AND adjust end_time to maintain consistency
             if duration > 86400:  # 24 hours
-                logger.warning(f"[SPAN] Capping span > 24h: {duration:.1f}s")
+                logger.warning(f"[SPAN] Capping span >24h: {duration:.1f}s -> 86400s")
                 duration = 86400
+                end_time = start_time + 86400  # Adjust end_time to match capped duration
             
             start_dt = datetime.fromtimestamp(start_time, tz=timezone.utc)
             end_dt = datetime.fromtimestamp(end_time, tz=timezone.utc)
@@ -549,9 +554,21 @@ class StateDetector:
                 now = time.time()
                 
                 duration = now - session_start
+                
+                # Cap recovery duration to 8 hours (reasonable max for unattended session)
+                MAX_RECOVERY_DURATION = 8 * 3600  # 8 hours
+                
+                if duration > MAX_RECOVERY_DURATION:
+                    logger.warning(
+                        f"[RECOVERY] Interrupted session too long ({duration:.1f}s), "
+                        f"capping to {MAX_RECOVERY_DURATION}s"
+                    )
+                    duration = MAX_RECOVERY_DURATION
+                    # Adjust start time to match capped duration
+                    session_start = now - MAX_RECOVERY_DURATION
+                
                 if duration > 60:  # Only if > 1 minute
                     # Create span for the interrupted session
-                    # Use 5% safety margin to be conservative
                     span = self._create_span(
                         state=prev_state,
                         start_time=session_start,
@@ -561,7 +578,7 @@ class StateDetector:
                     if span:
                         with self._state_lock:
                             self.pending_spans.append(span)
-                        logger.info(f"[RECOVERY] Recovered interrupted {prev_state} session: {duration:.1f}s")
+                        logger.info(f"[RECOVERY] Recovered {prev_state} session: {duration:.1f}s")
         except Exception as e:
             logger.error(f"[RECOVERY] Failed to load state: {e}")
 

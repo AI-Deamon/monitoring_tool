@@ -182,6 +182,9 @@ def validate_span(span: dict, agent_id: str) -> Optional[str]:
     """
     Comprehensive server-side validation for screen time spans.
     Returns error message if invalid, None if valid.
+    
+    Special handling for capped spans (duration=86400) to accept
+    legitimately capped long sessions while rejecting invalid data.
     """
     try:
         required = ['span_id', 'state', 'start_time', 'end_time', 'duration_seconds']
@@ -205,13 +208,27 @@ def validate_span(span: dict, agent_id: str) -> Optional[str]:
         calc_duration = (end - start).total_seconds()
         sent_duration = float(span['duration_seconds'])
         
-        # Allow small margin (1s) for float ceiling/rounding during transfer
-        if abs(calc_duration - sent_duration) > 1.1:
-             return f"Duration mismatch: calculated {calc_duration}s vs sent {sent_duration}s"
-             
         # Reject unrealistically long spans (> 24h)
         if sent_duration > 86400:
             return "Span duration exceeds 24 hours"
+        
+        # Special handling for capped spans (exactly 86400 seconds)
+        # These are legitimately capped long sessions from crash recovery
+        if sent_duration == 86400 and calc_duration >= 86400:
+            # This is a capped span, accept it
+            short_id = short_agent_id(agent_id)
+            logger.info(
+                f"[{short_id}] Accepting capped span: "
+                f"calculated={calc_duration:.1f}s, sent=86400s"
+            )
+            return None
+        
+        # Normal validation: 5% tolerance for float rounding
+        drift = abs(calc_duration - sent_duration)
+        tolerance = sent_duration * 0.05  # 5% tolerance
+        
+        if drift > tolerance:
+            return f"Duration mismatch: calculated {calc_duration}s vs sent {sent_duration}s (drift={drift:.1f}s, tolerance={tolerance:.1f}s)"
             
         return None
     except Exception as e:

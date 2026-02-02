@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-SentinelEdge Server - Smart Startup
-====================================
-Automatically runs all necessary setup scripts and starts the server.
+SentinelEdge Server - Complete Self-Healing Startup
+====================================================
+Automatically runs ALL necessary setup: tables, procedures, functions, migrations.
+Designed for easy deployment to new machines.
+
 Just run: python start_server.py
 """
 import sys
@@ -27,15 +29,15 @@ logger = logging.getLogger(__name__)
 def print_banner():
     """Print startup banner"""
     print("""
-╔══════════════════════════════════════════════════════════╗
-║         SentinelEdge Server - Smart Startup              ║
-║         Automatic Setup & Configuration                  ║
-╚══════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║         SentinelEdge Server - Complete Self-Healing          ║
+║         Automatic Setup & All Database Initialization        ║
+╚══════════════════════════════════════════════════════════════╝
 """)
 
 def check_database_connection(app):
     """Check if database is accessible"""
-    logger.info("[1/6] Checking database connection...")
+    logger.info("[1/8] Checking database connection...")
     with app.app_context():
         try:
             db.session.execute(text("SELECT 1"))
@@ -46,12 +48,12 @@ def check_database_connection(app):
             logger.error("\n  Please check:")
             logger.error("  1. PostgreSQL is running")
             logger.error("  2. DATABASE_URL in .env is correct")
-            logger.error("  3. Database exists (createdb sentineledge)")
+            logger.error("  3. Database exists (createdb sentinel_edge_v3)")
             return False
 
 def create_tables(app):
     """Create all database tables"""
-    logger.info("[2/6] Creating/verifying database tables...")
+    logger.info("[2/8] Creating/verifying database tables...")
     with app.app_context():
         try:
             db.create_all()
@@ -61,9 +63,78 @@ def create_tables(app):
             logger.error(f"  ❌ Table creation failed: {e}")
             return False
 
+def create_additional_tables(app):
+    """Create screen_time_spans and domain_classification_rules tables"""
+    logger.info("[3/8] Creating additional tables (spans, domain rules)...")
+    with app.app_context():
+        try:
+            connection = db.engine.raw_connection()
+            cursor = connection.cursor()
+            
+            # Create table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS screen_time_spans (
+                    id SERIAL PRIMARY KEY,
+                    span_id VARCHAR(128) UNIQUE NOT NULL,
+                    agent_id UUID NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+                    state VARCHAR(20) NOT NULL CHECK (state IN ('active', 'idle', 'locked')),
+                    start_time TIMESTAMP NOT NULL,
+                    end_time TIMESTAMP NOT NULL,
+                    duration_seconds INTEGER NOT NULL CHECK (duration_seconds > 0 AND duration_seconds <= 86400),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    processed BOOLEAN DEFAULT FALSE,
+                    CONSTRAINT valid_time_range CHECK (end_time > start_time)
+                );
+            """)
+            
+            # Create indexes
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_spans_agent_date 
+                ON screen_time_spans(agent_id, start_time);
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_spans_processed 
+                ON screen_time_spans(processed) WHERE NOT processed;
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_spans_span_id 
+                ON screen_time_spans(span_id);
+            """)
+            
+            # Create domain_classification_rules table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS domain_classification_rules (
+                    id SERIAL PRIMARY KEY,
+                    pattern VARCHAR(255) NOT NULL,
+                    pattern_type VARCHAR(20) NOT NULL CHECK (pattern_type IN ('exact', 'prefix', 'suffix', 'contains', 'regex')),
+                    classified_as VARCHAR(255) NOT NULL,
+                    action VARCHAR(20) NOT NULL CHECK (action IN ('map', 'ignore')),
+                    priority INTEGER DEFAULT 100,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    CONSTRAINT unique_pattern UNIQUE (pattern, pattern_type)
+                );
+            """)
+            
+            # Create index for domain rules
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_domain_rules_active 
+                ON domain_classification_rules(is_active, priority);
+            """)
+            
+            connection.commit()
+            cursor.close()
+            connection.close()
+            logger.info("  ✅ Additional tables created (spans + domain rules)")
+            return True
+        except Exception as e:
+            logger.error(f"  ❌ Additional tables creation failed: {e}")
+            return False
+
 def install_stored_procedures(app):
-    """Install all critical stored procedures using raw connection"""
-    logger.info("[3/6] Installing stored procedures...")
+    """Install all critical stored procedures"""
+    logger.info("[4/8] Installing stored procedures...")
     with app.app_context():
         try:
             connection = db.engine.raw_connection()
@@ -75,7 +146,7 @@ def install_stored_procedures(app):
             cursor.execute("DROP FUNCTION IF EXISTS process_app_switch_event(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP, TIMESTAMP, INTEGER, VARCHAR) CASCADE;")
             cursor.execute("DROP FUNCTION IF EXISTS process_domain_switch_event(VARCHAR, VARCHAR, VARCHAR, TEXT, TEXT, VARCHAR, TIMESTAMP, TIMESTAMP, INTEGER, VARCHAR) CASCADE;")
             
-            # 2. Process screentime event
+            # 2. Process screentime event (legacy cumulative - now heartbeat only)
             logger.info("  - Creating process_screentime_event...")
             cursor.execute("""
                 CREATE OR REPLACE FUNCTION process_screentime_event(
@@ -83,17 +154,17 @@ def install_stored_procedures(app):
                     p_active_total INTEGER, p_idle_total INTEGER,
                     p_locked_total INTEGER, p_state VARCHAR
                 ) RETURNS TABLE(status text, message text) AS $$
-                DECLARE v_date DATE;
                 BEGIN
-                    v_date := p_timestamp::DATE;
-                    INSERT INTO screen_time (agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated)
-                    VALUES (p_agent_id::UUID, v_date, p_active_total, p_idle_total, p_locked_total, NOW())
-                    ON CONFLICT (agent_id, date) DO UPDATE SET
-                        active_seconds = GREATEST(screen_time.active_seconds, EXCLUDED.active_seconds),
-                        idle_seconds = GREATEST(screen_time.idle_seconds, EXCLUDED.idle_seconds),
-                        locked_seconds = GREATEST(screen_time.locked_seconds, EXCLUDED.locked_seconds),
-                        last_updated = NOW();
-                    RETURN QUERY SELECT 'success'::text, 'Screentime processed'::text;
+                    -- NEW: Only update agent metadata, NOT daily totals
+                    UPDATE agents SET 
+                        last_seen = p_timestamp,
+                        current_state = p_state,
+                        last_active_total = p_active_total,
+                        last_idle_total = p_idle_total,
+                        last_locked_total = p_locked_total
+                    WHERE agent_id = p_agent_id::UUID;
+                    
+                    RETURN QUERY SELECT 'success'::text, 'Heartbeat processed'::text;
                 EXCEPTION WHEN OTHERS THEN
                     RETURN QUERY SELECT 'error'::text, SQLERRM::text;
                 END;
@@ -172,15 +243,178 @@ def install_stored_procedures(app):
             connection.commit()
             cursor.close()
             connection.close()
-            logger.info("  ✅ Stored procedures installed")
+            logger.info("  ✅ Core stored procedures installed")
             return True
         except Exception as e:
             logger.error(f"  ❌ Procedure installation failed: {e}")
             return False
 
+def install_sync_functions(app):
+    """Install all sync and aggregation functions"""
+    logger.info("[5/8] Installing sync/aggregation functions...")
+    with app.app_context():
+        try:
+            connection = db.engine.raw_connection()
+            cursor = connection.cursor()
+            
+            # Drop all sync functions first to avoid return type conflicts
+            logger.info("  - Dropping legacy sync functions...")
+            cursor.execute("DROP FUNCTION IF EXISTS sync_screen_time_from_spans(DATE) CASCADE;")
+            cursor.execute("DROP FUNCTION IF EXISTS cleanup_old_spans() CASCADE;")
+            cursor.execute("DROP FUNCTION IF EXISTS sync_app_usage_from_sessions(DATE) CASCADE;")
+            cursor.execute("DROP FUNCTION IF EXISTS sync_domain_usage_from_sessions(DATE) CASCADE;")
+            cursor.execute("DROP FUNCTION IF EXISTS sync_screen_time_from_sessions(DATE) CASCADE;")
+            
+            # 1. sync_screen_time_from_spans (CRITICAL for span aggregation)
+            logger.info("  - Creating sync_screen_time_from_spans...")
+            cursor.execute("""
+                CREATE OR REPLACE FUNCTION sync_screen_time_from_spans(p_date DATE DEFAULT CURRENT_DATE)
+                RETURNS TABLE(ret_agent_id UUID, synced BOOLEAN) AS $$
+                BEGIN
+                    -- Insert/update screen_time from unprocessed spans
+                    INSERT INTO screen_time (agent_id, date, active_seconds, idle_seconds, locked_seconds)
+                    SELECT 
+                        s.agent_id,
+                        s.start_time::DATE as span_date,
+                        SUM(CASE WHEN s.state = 'active' THEN s.duration_seconds ELSE 0 END) as active_sec,
+                        SUM(CASE WHEN s.state = 'idle' THEN s.duration_seconds ELSE 0 END) as idle_sec,
+                        SUM(CASE WHEN s.state = 'locked' THEN s.duration_seconds ELSE 0 END) as locked_sec
+                    FROM screen_time_spans s
+                    WHERE s.start_time::DATE = p_date
+                      AND s.processed = FALSE
+                    GROUP BY s.agent_id, s.start_time::DATE
+                    ON CONFLICT (agent_id, date)
+                    DO UPDATE SET
+                        active_seconds = screen_time.active_seconds + EXCLUDED.active_seconds,
+                        idle_seconds = screen_time.idle_seconds + EXCLUDED.idle_seconds,
+                        locked_seconds = screen_time.locked_seconds + EXCLUDED.locked_seconds,
+                        updated_at = NOW();
+                    
+                    -- Mark spans as processed
+                    UPDATE screen_time_spans
+                    SET processed = TRUE
+                    WHERE start_time::DATE = p_date AND processed = FALSE;
+                    
+                    -- Return affected agents
+                    RETURN QUERY
+                    SELECT DISTINCT s.agent_id, TRUE as synced
+                    FROM screen_time_spans s
+                    WHERE s.start_time::DATE = p_date;
+                END;
+                $$ LANGUAGE plpgsql;
+            """)
+            
+            # 2. cleanup_old_spans
+            logger.info("  - Creating cleanup_old_spans...")
+            cursor.execute("""
+                CREATE OR REPLACE FUNCTION cleanup_old_spans()
+                RETURNS INTEGER AS $$
+                DECLARE
+                    deleted_count INTEGER;
+                BEGIN
+                    DELETE FROM screen_time_spans
+                    WHERE processed = TRUE
+                    AND created_at < NOW() - INTERVAL '7 days';
+                    
+                    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+                    RETURN deleted_count;
+                END;
+                $$ LANGUAGE plpgsql;
+            """)
+            
+            # 3. sync_app_usage_from_sessions
+            logger.info("  - Creating sync_app_usage_from_sessions...")
+            cursor.execute("""
+                CREATE OR REPLACE FUNCTION sync_app_usage_from_sessions(p_date DATE)
+                RETURNS void AS $$
+                BEGIN
+                    INSERT INTO app_usage (agent_id, date, app, duration_seconds, session_count, last_updated)
+                    SELECT 
+                        agent_id,
+                        p_date,
+                        app,
+                        COALESCE(SUM(duration_seconds), 0)::INTEGER,
+                        COUNT(*),
+                        NOW()
+                    FROM app_sessions
+                    WHERE start_time::DATE = p_date
+                    GROUP BY agent_id, app
+                    ON CONFLICT (agent_id, date, app) DO UPDATE SET
+                        duration_seconds = EXCLUDED.duration_seconds,
+                        session_count = EXCLUDED.session_count,
+                        last_updated = NOW();
+                END;
+                $$ LANGUAGE plpgsql;
+            """)
+            
+            # 4. sync_domain_usage_from_sessions
+            logger.info("  - Creating sync_domain_usage_from_sessions...")
+            cursor.execute("""
+                CREATE OR REPLACE FUNCTION sync_domain_usage_from_sessions(p_date DATE)
+                RETURNS void AS $$
+                BEGIN
+                    INSERT INTO domain_usage (agent_id, date, domain, duration_seconds, session_count, last_updated)
+                    SELECT 
+                        agent_id,
+                        p_date,
+                        domain,
+                        COALESCE(SUM(duration_seconds), 0)::INTEGER,
+                        COUNT(*),
+                        NOW()
+                    FROM domain_sessions
+                    WHERE start_time::DATE = p_date
+                    GROUP BY agent_id, domain
+                    ON CONFLICT (agent_id, date, domain) DO UPDATE SET
+                        duration_seconds = EXCLUDED.duration_seconds,
+                        session_count = EXCLUDED.session_count,
+                        last_updated = NOW();
+                END;
+                $$ LANGUAGE plpgsql;
+            """)
+            
+            # 5. sync_screen_time_from_sessions (FIX: renamed return columns to avoid ambiguity)
+            logger.info("  - Creating sync_screen_time_from_sessions...")
+            cursor.execute("""
+                CREATE OR REPLACE FUNCTION sync_screen_time_from_sessions(p_date DATE)
+                RETURNS TABLE(ret_agent_id VARCHAR, ret_active_seconds INTEGER) AS $$
+                DECLARE
+                    r RECORD;
+                BEGIN
+                    FOR r IN 
+                        SELECT 
+                            s.agent_id,
+                            COALESCE(SUM(s.duration_seconds), 0)::INTEGER as total_active
+                        FROM app_sessions s
+                        WHERE s.start_time::DATE = p_date
+                        GROUP BY s.agent_id
+                    LOOP
+                        INSERT INTO screen_time (agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated)
+                        VALUES (r.agent_id, p_date, r.total_active, 0, 0, NOW())
+                        ON CONFLICT (agent_id, date) DO UPDATE SET
+                            active_seconds = EXCLUDED.active_seconds,
+                            last_updated = NOW();
+                            
+                        ret_agent_id := r.agent_id;
+                        ret_active_seconds := r.total_active;
+                        RETURN NEXT;
+                    END LOOP;
+                    RETURN;
+                END;
+                $$ LANGUAGE plpgsql;
+            """)
+            
+            connection.commit()
+            cursor.close()
+            connection.close()
+            logger.info("  ✅ Sync/aggregation functions installed")
+            return True
+        except Exception as e:
+            logger.error(f"  ❌ Sync functions installation failed: {e}")
+            return False
+
 def fix_schema(app):
-    """Fix schema issues (add missing columns)"""
-    logger.info("[4/6] Fixing schema (adding missing columns)...")
+    """Fix schema issues (add missing columns and constraints)"""
+    logger.info("[6/8] Fixing schema (adding missing columns)...")
     with app.app_context():
         try:
             # Add idempotency_key to domain_sessions if missing
@@ -192,6 +426,31 @@ def fix_schema(app):
                 CREATE INDEX IF NOT EXISTS idx_domain_sessions_idempotency_key 
                 ON domain_sessions(idempotency_key);
             """))
+            
+            # Add updated_at to screen_time if missing
+            db.session.execute(text("""
+                ALTER TABLE screen_time 
+                ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+            """))
+            
+            # Add heartbeat columns to agents table
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS current_state VARCHAR(20);
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS last_active_total INTEGER DEFAULT 0;
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS last_idle_total INTEGER DEFAULT 0;
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS last_locked_total INTEGER DEFAULT 0;
+            """))
+            
             db.session.commit()
             logger.info("  ✅ Schema fixed")
             return True
@@ -202,7 +461,7 @@ def fix_schema(app):
 
 def create_default_admin(app):
     """Create default admin user if not exists"""
-    logger.info("[5/6] Checking admin user...")
+    logger.info("[7/8] Checking admin user...")
     with app.app_context():
         try:
             from auth import DashboardUser
@@ -222,14 +481,96 @@ def create_default_admin(app):
             db.session.rollback()
             return False
 
+def repair_today_data(app):
+    """Repair today's data to fix double-counting issues"""
+    logger.info("[8/9] Repairing today's screen time data...")
+    with app.app_context():
+        try:
+            # We use text() for raw SQL with SQLAlchemy
+            from sqlalchemy import text
+            
+            # Reset today's totals and re-run span sync
+            logger.info("  - Resetting today's totals and re-processing spans...")
+            db.session.execute(text("""
+                -- 1. Reset today's totals to 0
+                UPDATE screen_time 
+                SET active_seconds = 0, idle_seconds = 0, locked_seconds = 0 
+                WHERE date = CURRENT_DATE;
+                
+                -- 2. Mark all today's spans as unprocessed
+                UPDATE screen_time_spans 
+                SET processed = FALSE 
+                WHERE start_time::DATE = CURRENT_DATE;
+            """))
+            db.session.commit()
+            
+            # 3. Run span sync via the stored procedure
+            db.session.execute(text("SELECT * FROM sync_screen_time_from_spans(CURRENT_DATE);"))
+            db.session.commit()
+            
+            logger.info("  ✅ Data repaired (re-calculated from spans)")
+            return True
+        except Exception as e:
+            logger.error(f"  ❌ Data repair failed: {e}")
+            db.session.rollback()
+            return False
+
+def verify_functions(app):
+    """Verify all critical functions are installed correctly"""
+    logger.info("[8/8] Verifying database functions...")
+    with app.app_context():
+        try:
+            # List of functions to verify
+            functions = [
+                'process_screentime_event',
+                'process_app_switch_event', 
+                'process_domain_switch_event',
+                'sync_screen_time_from_spans',
+                'cleanup_old_spans',
+                'sync_app_usage_from_sessions',
+                'sync_domain_usage_from_sessions',
+                'sync_screen_time_from_sessions'
+            ]
+            
+            result = db.session.execute(text("""
+                SELECT routine_name 
+                FROM information_schema.routines 
+                WHERE routine_type = 'FUNCTION' 
+                AND routine_schema = 'public'
+            """))
+            
+            installed = [row[0] for row in result.fetchall()]
+            missing = [f for f in functions if f not in installed]
+            
+            if missing:
+                logger.warning(f"  ⚠️  Missing functions: {missing}")
+            else:
+                logger.info(f"  ✅ All {len(functions)} functions verified")
+            
+            # Verify screen_time_spans table
+            result = db.session.execute(text("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'screen_time_spans'
+                )
+            """))
+            if result.scalar():
+                logger.info("  ✅ screen_time_spans table exists")
+            else:
+                logger.warning("  ⚠️  screen_time_spans table missing!")
+            
+            return True
+        except Exception as e:
+            logger.error(f"  ❌ Verification failed: {e}")
+            return False
+
 def start_server(app):
     """Start the Flask server"""
-    logger.info("[6/6] Starting server...")
     logger.info("\n" + "="*60)
-    logger.info("✅ AUTO-SETUP COMPLETE!")
+    logger.info("✅ AUTO-SETUP COMPLETE! All database functions installed.")
     logger.info("="*60)
     logger.info("\n🚀 Server starting...")
-    logger.info("   Dashboard: http://localhost:5000/dashboard")
+    logger.info("   Dashboard: http://localhost:5051/dashboard")
     logger.info("   Login: admin / changeme123")
     logger.info("\n⚠️  Press Ctrl+C to stop\n")
     
@@ -247,13 +588,17 @@ def main():
     # Create app
     app = create_app()
     
-    # Run all setup steps
+    # Run all setup steps in order
     steps = [
         (check_database_connection, app),
         (create_tables, app),
+        (create_additional_tables, app),
         (install_stored_procedures, app),
+        (install_sync_functions, app),
         (fix_schema, app),
         (create_default_admin, app),
+        (repair_today_data, app),
+        (verify_functions, app),
     ]
     
     for step_func, *args in steps:
@@ -275,5 +620,6 @@ if __name__ == "__main__":
         sys.exit(0)
     except Exception as e:
         logger.error(f"\n❌ Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
-

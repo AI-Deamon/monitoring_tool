@@ -45,29 +45,20 @@ def upgrade():
     # ========================================================================
     op.execute("""
         CREATE OR REPLACE FUNCTION sync_screen_time_from_spans(p_date DATE DEFAULT CURRENT_DATE)
-        RETURNS TABLE(agent_id UUID, synced BOOLEAN) AS $$
+        RETURNS TABLE(ret_agent_id UUID, synced BOOLEAN) AS $$
         BEGIN
-            RETURN QUERY
-            WITH span_totals AS (
-                SELECT
-                    s.agent_id,
-                    s.start_time::DATE as span_date,
-                    SUM(CASE WHEN s.state = 'active' THEN s.duration_seconds ELSE 0 END) as active_sec,
-                    SUM(CASE WHEN s.state = 'idle' THEN s.duration_seconds ELSE 0 END) as idle_sec,
-                    SUM(CASE WHEN s.state = 'locked' THEN s.duration_seconds ELSE 0 END) as locked_sec
-                FROM screen_time_spans s
-                WHERE s.start_time::DATE = p_date
-                  AND s.processed = FALSE
-                GROUP BY s.agent_id, s.start_time::DATE
-            )
+            -- Insert/update screen_time from unprocessed spans
             INSERT INTO screen_time (agent_id, date, active_seconds, idle_seconds, locked_seconds)
             SELECT 
-                st.agent_id,
-                st.span_date,
-                st.active_sec,
-                st.idle_sec,
-                st.locked_sec
-            FROM span_totals st
+                s.agent_id,
+                s.start_time::DATE as span_date,
+                SUM(CASE WHEN s.state = 'active' THEN s.duration_seconds ELSE 0 END) as active_sec,
+                SUM(CASE WHEN s.state = 'idle' THEN s.duration_seconds ELSE 0 END) as idle_sec,
+                SUM(CASE WHEN s.state = 'locked' THEN s.duration_seconds ELSE 0 END) as locked_sec
+            FROM screen_time_spans s
+            WHERE s.start_time::DATE = p_date
+              AND s.processed = FALSE
+            GROUP BY s.agent_id, s.start_time::DATE
             ON CONFLICT (agent_id, date)
             DO UPDATE SET
                 active_seconds = screen_time.active_seconds + EXCLUDED.active_seconds,
@@ -80,9 +71,11 @@ def upgrade():
             SET processed = TRUE
             WHERE start_time::DATE = p_date AND processed = FALSE;
             
+            -- Return affected agents
             RETURN QUERY
-            SELECT DISTINCT st.agent_id, TRUE as synced
-            FROM span_totals st;
+            SELECT DISTINCT s.agent_id, TRUE as synced
+            FROM screen_time_spans s
+            WHERE s.start_time::DATE = p_date;
         END;
         $$ LANGUAGE plpgsql;
     """)
