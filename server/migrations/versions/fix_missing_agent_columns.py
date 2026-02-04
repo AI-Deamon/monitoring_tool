@@ -57,6 +57,11 @@ def upgrade():
                 ALTER TABLE agents ADD COLUMN diagnostics_json TEXT;
             END IF;
             
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='domain_sessions' AND column_name='idempotency_key') THEN
+                ALTER TABLE domain_sessions ADD COLUMN idempotency_key VARCHAR(255);
+                CREATE INDEX IF NOT EXISTS idx_domain_sessions_idempotency_key ON domain_sessions(idempotency_key);
+            END IF;
+            
             IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agents' AND column_name='api_token') THEN
                 ALTER TABLE agents ADD COLUMN api_token TEXT;
             END IF;
