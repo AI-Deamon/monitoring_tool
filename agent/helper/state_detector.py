@@ -24,8 +24,12 @@ from pathlib import Path
 import threading
 import logging
 import time
+import os
 from enum import Enum
 from typing import Callable, Optional
+
+# ✅ PHASE 2: Import state machine (single source of truth)
+from core.state_machine import ScreenTimeEngine, ScreenState, LastEvent
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +153,11 @@ class StateDetector:
         # Reference to IdleDetector for synchronization (set by main.py)
         self.idle_detector = None
         
-        # ✅ NEW: Cumulative time tracking (for heartbeat deltas)
-        self._cumulative_active = 0.0
-        self._cumulative_idle = 0.0
-        self._cumulative_locked = 0.0
-        self._last_cumulative_update = time.time()
+        # ✅ PHASE 2: Initialize state machine (ONLY place that calculates time)
+        self.screen_time_engine = ScreenTimeEngine(
+            data_dir=data_dir or Path(os.path.expanduser('~')) / '.sentineledge',
+            agent_id=self.agent_id
+        )
         
         # Check if pywin32 is available
         if not HAS_WIN32:
@@ -169,8 +173,11 @@ class StateDetector:
             logger.info("[STATE] Started in ACTIVE state")
             self.current_state = "active"
             
-        # ✅ NEW: Load persisted state for crash recovery
-        self._load_persisted_state()
+        # ✅ PHASE 2: Load persisted state and handle startup gap
+        persisted = self.screen_time_engine.load_persisted_state()
+        if persisted:
+            gap_info = self.screen_time_engine.handle_startup(persisted)
+            logger.info(f"[STATE] Startup gap handling: {gap_info}")
     
     def _is_session_locked(self) -> bool:
         """Check if workstation is locked OR fast user switched (no lock event)"""
@@ -258,16 +265,16 @@ class StateDetector:
             return 0.0
 
     def _transition(self, new_state: str):
-        """Standardized FIX 2: Single transition and event authority with duration tracking + span generation"""
+        """✅ PHASE 2: Use state machine for ALL time calculations"""
         prev_state = self.current_state
         if prev_state == new_state:
             return
         
-        # ✅ Calculate duration in previous state
+        # ✅ Calculate duration in previous state (for span generation only)
         now = time.time()
         duration_seconds = now - self._last_state_change_time
         
-        # ✅ NEW: CREATE SPAN for the exiting state
+        # ✅ NEW: CREATE SPAN for the exiting state (timeline visualization only)
         if self._last_state_change_time > 0 and duration_seconds >= 1.0:
             span = self._create_span(
                 state=prev_state,
@@ -278,13 +285,20 @@ class StateDetector:
             if span:
                 self.pending_spans.append(span)
         
-        # ✅ NEW: Update cumulative time for the exiting state
-        if prev_state == "active":
-            self._cumulative_active += duration_seconds
-        elif prev_state == "idle":
-            self._cumulative_idle += duration_seconds
-        elif prev_state == "locked":
-            self._cumulative_locked += duration_seconds
+        # ✅ PHASE 2: ONLY place time is calculated - call state machine
+        # Map local state names to ScreenState enum
+        state_map = {
+            "active": ScreenState.ACTIVE,
+            "idle": ScreenState.IDLE,
+            "locked": ScreenState.LOCKED
+        }
+        
+        if new_state in state_map:
+            try:
+                transition_info = self.screen_time_engine.transition(state_map[new_state])
+                logger.debug(f"[STATE] State machine transition: {transition_info}")
+            except Exception as e:
+                logger.error(f"[STATE] State machine transition error: {e}", exc_info=True)
         
         self._last_state_change_time = now
 
@@ -525,7 +539,7 @@ class StateDetector:
     # ========================================================================
 
     def _load_persisted_state(self):
-        """Recover in-progress session and cumulative counters on startup."""
+        """Recover in-progress session on startup."""
         try:
             import json
             if not self.state_file.exists():
@@ -534,20 +548,7 @@ class StateDetector:
             with open(self.state_file, 'r') as f:
                 data = json.load(f)
             
-            # 1. Recover Cumulative Counters (FIX for the "Reset" issue)
-            # Only load if the saved date matches Today's date
-            saved_date = data.get('date')
-            current_date = datetime.now().date().isoformat()
-            
-            if saved_date == current_date:
-                self._cumulative_active = float(data.get('cumulative_active', self._cumulative_active))
-                self._cumulative_idle = float(data.get('cumulative_idle', self._cumulative_idle))
-                self._cumulative_locked = float(data.get('cumulative_locked', self._cumulative_locked))
-                logger.info(f"[RECOVERY] Loaded daily cumulative: A={self._cumulative_active:.0f}s, I={self._cumulative_idle:.0f}s, L={self._cumulative_locked:.0f}s")
-            else:
-                logger.info(f"[RECOVERY] Discarding cumulative from previous day ({saved_date}) - starting fresh for {current_date}")
-            
-            # 2. Recover Current Session Span
+            # 1. Recover Current Session Span
             if 'current_state' in data and 'session_start' in data:
                 prev_state = data['current_state']
                 session_start = float(data['session_start'])
@@ -581,17 +582,16 @@ class StateDetector:
                         logger.info(f"[RECOVERY] Recovered {prev_state} session: {duration:.1f}s")
         except Exception as e:
             logger.error(f"[RECOVERY] Failed to load state: {e}")
+        except Exception as e:
+            logger.error(f"[RECOVERY] Failed to load state: {e}")
 
     def _persist_current_state(self):
-        """Save current session and counters for crash recovery."""
+        """Save current session metadata for crash recovery."""
         try:
             import json
             data = {
                 'current_state': self.current_state,
                 'session_start': self._last_state_change_time,
-                'cumulative_active': self._cumulative_active,
-                'cumulative_idle': self._cumulative_idle,
-                'cumulative_locked': self._cumulative_locked,
                 'date': datetime.now().date().isoformat(),
                 'timestamp': time.time()
             }
@@ -606,42 +606,41 @@ class StateDetector:
     
     def get_cumulative_deltas(self) -> dict:
         """
-        Get cumulative time deltas since last call.
-        Also updates cumulative time for CURRENT state and PERSISTS to disk.
+        ✅ PHASE 2: Read totals from state machine (ONLY source of truth)
+        Also calls tick() to prevent time freezing.
         """
-        now = time.time()
+        # ✅ CRITICAL: Call tick() to update time for current state
+        # This prevents the "time freeze" bug when no transitions occur
+        try:
+            self.screen_time_engine.tick()
+        except Exception as e:
+            logger.error(f"[STATE] State machine tick error: {e}", exc_info=True)
         
-        # First, add time spent in CURRENT state since last update
-        current_duration = now - self._last_cumulative_update
-        if self.current_state == "active":
-            self._cumulative_active += current_duration
-        elif self.current_state == "idle":
-            self._cumulative_idle += current_duration
-        elif self.current_state == "locked":
-            self._cumulative_locked += current_duration
-        
-        # Update timestamp for next call
-        self._last_cumulative_update = now
-        
-        # PERSIST counters every minute (when Collector calls this)
-        self._persist_current_state()
-        
-        # Return total cumulative time
-        return {
-            'delta_active_seconds': self._cumulative_active,
-            'delta_idle_seconds': self._cumulative_idle,
-            'delta_locked_seconds': self._cumulative_locked
-        }
+        # ✅ PHASE 2: Read totals from state machine (ONLY place that calculates time)
+        try:
+            totals = self.screen_time_engine.get_daily_totals()
+            
+            # Return in expected format for heartbeat
+            return {
+                'delta_active_seconds': totals.get('active_seconds', 0),
+                'delta_idle_seconds': totals.get('idle_seconds', 0),
+                'delta_locked_seconds': totals.get('locked_seconds', 0),
+                'delta_away_seconds': totals.get('away_seconds', 0)  # NEW: track away time
+            }
+        except Exception as e:
+            logger.error(f"[STATE] Error reading state machine totals: {e}", exc_info=True)
+            return {
+                'delta_active_seconds': 0,
+                'delta_idle_seconds': 0,
+                'delta_locked_seconds': 0,
+                'delta_away_seconds': 0
+            }
     
     def reset_cumulative(self):
-        """Reset cumulative counters (called at midnight)."""
-        self._cumulative_active = 0.0
-        self._cumulative_idle = 0.0
-        self._cumulative_locked = 0.0
-        self._last_cumulative_update = time.time()
-        
-        # Ensure the reset is persisted to disk immediately
-        self._persist_current_state()
-        
-        logger.info("[STATE] Cumulative counters reset")
+        """✅ PHASE 2: Reset via state machine (ONLY place that manages counters)"""
+        try:
+            self.screen_time_engine.reset_daily()
+            logger.info("[STATE] Daily counters reset via state machine")
+        except Exception as e:
+            logger.error(f"[STATE] Error resetting state machine: {e}", exc_info=True)
 

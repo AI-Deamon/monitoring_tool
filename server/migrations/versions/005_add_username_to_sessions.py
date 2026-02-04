@@ -15,14 +15,36 @@ depends_on = None
 
 
 def upgrade():
-    # Add username to app_sessions
-    op.add_column('app_sessions', sa.Column('username', sa.String(255), nullable=True))
+    # Add username to app_sessions if not exists
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name='app_sessions' AND column_name='username'
+            ) THEN
+                ALTER TABLE app_sessions ADD COLUMN username VARCHAR(255) NULL;
+            END IF;
+        END $$;
+    """)
     
     # Add username to domain_sessions if it exists and doesn't have the column
-    try:
-        op.add_column('domain_sessions', sa.Column('username', sa.String(255), nullable=True))
-    except Exception:
-        pass  # Column might already exist or table might not exist
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables 
+                WHERE table_name='domain_sessions'
+            ) THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='domain_sessions' AND column_name='username'
+                ) THEN
+                    ALTER TABLE domain_sessions ADD COLUMN username VARCHAR(255) NULL;
+                END IF;
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade():

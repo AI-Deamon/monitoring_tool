@@ -10,12 +10,17 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20250218_add_sync_functions'
-down_revision = '20250218_add_stored_procedures'
+down_revision = '20250218_add_domain_duration'
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
+    # Drop existing functions if they exist to avoid return type conflicts
+    op.execute("DROP FUNCTION IF EXISTS sync_app_usage_from_sessions(DATE);")
+    op.execute("DROP FUNCTION IF EXISTS sync_domain_usage_from_sessions(DATE);")
+    op.execute("DROP FUNCTION IF EXISTS sync_screen_time_from_sessions(DATE);")
+
     # sync_app_usage_from_sessions
     op.execute("""
     CREATE OR REPLACE FUNCTION sync_app_usage_from_sessions(p_date DATE)

@@ -91,13 +91,15 @@ def validate_duration(value, default=0, max_value=86400, context="duration") -> 
 
 class LiveTelemetryTracker:
     """
+    ✅ PHASE 4: Liveness tracking ONLY - NO cumulative totals
+    
     Tracks live agent state and sends updates every 10 seconds.
     
     Key Features:
-    - Tracks DAILY cumulative totals for screen time (Active/Idle/Locked).
-    - Persists state locally to survive restarts.
-    - Sends current app duration every 10s.
-    - Immediately sends app/domain switches.
+    - Tracks CURRENT state (active/idle/locked) for live display
+    - Sends current app/domain for live display
+    - Immediately sends app/domain switches
+    - Does NOT track cumulative screen time (that's in state_machine.py)
     """
     
     def __init__(self, config: CoreConfig, buffer: BufferDB, uploader=None):
@@ -134,15 +136,11 @@ class LiveTelemetryTracker:
         if not self.current_state.get('agent_id'):
             self.current_state['agent_id'] = config.agent_id
         
-        # ✅ FIXED: Use IST for date calculation (Bug #2)
+        # ✅ PHASE 4: No screen time counter initialization
+        # Screen time is tracked ONLY in state_machine.py
         today = get_ist_now().date().isoformat()
         if self.current_state.get('today') != today:
-            self.current_state.update({
-                'today': today,
-                'active_seconds': 0,
-                'idle_seconds': 0,
-                'locked_seconds': 0
-            })
+            self.current_state['today'] = today
             logger.info(f"[LIVE] Initialized for {today} (IST)")
             
         # Ensure app/domain structures
@@ -202,14 +200,16 @@ class LiveTelemetryTracker:
 
     def process_heartbeat(self, heartbeat: Dict):
         """
+        ✅ PHASE 4: Liveness tracking ONLY - NO time accumulation
+        
         Process incoming heartbeat and update live state.
-        Accumulates DAILY totals.
+        Tracks CURRENT state only (not cumulative totals).
         """
         try:
             now = datetime.now(timezone.utc)
             self.total_heartbeats_processed += 1
             
-            # ✅ NEW: Track when last heartbeat was processed (for downtime detection)
+            # ✅ Track when last heartbeat was processed (for downtime detection)
             self.current_state['last_heartbeat_time'] = now.isoformat()
             
             # Extract heartbeat data
@@ -221,77 +221,19 @@ class LiveTelemetryTracker:
             if username != 'unknown':
                 self.current_state['username'] = username
             
-            # --- DAILY SCREEN TIME TRACKING ---
-            # 🔧 CRITICAL FIX: Use system_state from StateDetector (authoritative source)
-            # idle.state is ONLY for idle transition events, NOT for time accounting
+            # --- CURRENT STATE TRACKING (LIVENESS ONLY) ---
+            # 🔧 Use system_state from StateDetector (authoritative source)
             system_state = heartbeat.get('system_state', 'active')
             idle_state_fallback = idle_data.get('state', 'active')
             current_idle_state = system_state if system_state else idle_state_fallback
             
-            # ✅ FIXED: Validate duration value (Bug #7 - Type mismatch)
-            raw_heartbeat_interval = heartbeat.get('pulsetime', 10)
-            heartbeat_interval = validate_duration(raw_heartbeat_interval, default=10, max_value=180, context="heartbeat_interval")
+            # ✅ PHASE 4: NO TIME ACCUMULATION - just track current state
+            # Time calculation happens ONLY in state_machine.py
             
-            # Note: domain_data validation moved to line ~310 where it's actually defined
-
-            # Validate app duration
-            app_duration = app_data.get("duration", 0)
-            app_data["duration"] = validate_duration(app_duration, context="app_duration")
-            
-            # ✅ IMPROVED: Calculate actual elapsed time (Bug #4)
-            if 'last_state_heartbeat_time' in self.current_state:
-                try:
-                    last_time = datetime.fromisoformat(self.current_state['last_state_heartbeat_time'])
-                    actual_elapsed = (now - last_time).total_seconds()
-                    
-                    # Sanity check: Cap at 180s to support Helper's adaptive polling (120s during lock)
-                    if 10 <= actual_elapsed <= 180:
-                        heartbeat_interval = actual_elapsed
-                        logger.debug(f"[LIVE] Using actual elapsed time: {actual_elapsed:.1f}s")
-                    else:
-                        logger.debug(f"[LIVE] Elapsed time out of range ({actual_elapsed:.1f}s), using default 10s")
-                        heartbeat_interval = 10
-                except Exception as e:
-                    logger.debug(f"[LIVE] Could not calculate elapsed time: {e}")
-                    heartbeat_interval = 10
-            
-            # Update timestamp for next calculation
-            self.current_state['last_state_heartbeat_time'] = now.isoformat()
-            
-            # ✅ FIXED: Check for day rollover using IST (Bug #2)
-            today = get_ist_now().date().isoformat()
-            if today != self.current_state.get('today'):
-                logger.info(f"[LIVE] 🌅 MIDNIGHT ROLLOVER (IST): {self.current_state.get('today')} → {today}")
-                logger.info(f"[LIVE] Final totals for {self.current_state.get('today')}:")
-                logger.info(f"  Active:  {self.current_state.get('active_seconds', 0)}s ({self.current_state.get('active_seconds', 0)/3600:.1f}h)")
-                logger.info(f"  Idle:    {self.current_state.get('idle_seconds', 0)}s ({self.current_state.get('idle_seconds', 0)/3600:.1f}h)")
-                logger.info(f"  Locked:  {self.current_state.get('locked_seconds', 0)}s ({self.current_state.get('locked_seconds', 0)/3600:.1f}h)")
-
-                # Reset counters
-                self.current_state['today'] = today
-                self.current_state['active_seconds'] = 0
-                self.current_state['idle_seconds'] = 0
-                self.current_state['locked_seconds'] = 0
-                logger.info(f"[LIVE] ✅ Counters reset for new day: {today}")
-            
-            # Accumulate counters with validated/actual elapsed time
-            if current_idle_state == 'active':
-                self.current_state['active_seconds'] += heartbeat_interval
-            elif current_idle_state == 'idle':
-                self.current_state['idle_seconds'] += heartbeat_interval
-            elif current_idle_state == 'locked':
-                self.current_state['locked_seconds'] += heartbeat_interval
-            
-            # Detect state changes (active ↔ idle ↔ locked)
-            previous_state = self.current_state.get('last_idle_state', 'active')
-            if previous_state != current_idle_state:
-                # ✅ DISABLED: Helper's StateDetector is authoritative - don't duplicate
-                # self._send_state_change_event(now, previous_state, current_idle_state)
-                logger.debug(f"[LIVE] State changed: {previous_state} → {current_idle_state} (Helper handles)")
-            
+            # Update current state for live display
             self.current_state['last_idle_state'] = current_idle_state
             
-            # --- APP USAGE TRACKING ---
+            # --- APP USAGE TRACKING (for live display) ---
             current_app = app_data.get('current')
             current_title = app_data.get('current_title')
             friendly_name = app_data.get('friendly_name', current_app)
@@ -317,8 +259,7 @@ class LiveTelemetryTracker:
                     }
                     logger.debug(f"[LIVE] App started: {friendly_name}")
                 else:
-                    # Same app - accumulate duration
-                    self.current_state['current_app']['duration_seconds'] += heartbeat_interval
+                    # Same app - update window title only (duration tracked by server)
                     self.current_state['current_app']['window_title'] = current_title
             
             # --- DOMAIN USAGE TRACKING ---
@@ -353,11 +294,8 @@ class LiveTelemetryTracker:
                         }
                         logger.debug(f"[LIVE] Domain started: {current_domain}")
                     else:
-                        # Same domain - update duration
-                        if domain_duration > 0:
-                            self.current_state['current_domain']['duration_seconds'] = domain_duration
-                        else:
-                            self.current_state['current_domain']['duration_seconds'] += heartbeat_interval
+                        # Same domain (duration tracked by server)
+                        pass
             else:
                 # No domain data from helper - clear any stale domain state to prevent sending invalid requests
                 if self.current_state['current_domain']['domain']:
@@ -476,37 +414,26 @@ class LiveTelemetryTracker:
         logger.info(f"[LIVE] Buffer flush complete. Remaining: {len(self.offline_buffer)}")
     
     def _send_periodic_update(self, timestamp: datetime):
-        """Send periodic update with DAILY TOTALS"""
+        """
+        ✅ PHASE 4: Send liveness updates ONLY - NO screen time totals
+        
+        Screen time totals come from uploader (which reads from state_machine).
+        This method only sends current app/domain for live display.
+        """
         try:
             self.total_updates_sent += 1
             
-            # --- SCREEN TIME UPDATE (Daily Totals) ---
-            screentime_update = {
-                'agent_id': self.current_state['agent_id'],
-                'username': self.current_state['username'],
-                'date': self.current_state['today'],
-                'timestamp': timestamp.isoformat(),
-                # Send TOTALS
-                'active_seconds': self.current_state['active_seconds'],
-                'idle_seconds': self.current_state['idle_seconds'],
-                'locked_seconds': self.current_state['locked_seconds'],
-                'current_state': self.current_state['last_idle_state']
-            }
+            # ✅ PHASE 4: NO SCREEN TIME UPDATE
+            # Screen time is sent by uploader from aggregator (which reads from state_machine)
+            # Live telemetry is for LIVENESS ONLY (current app, current domain, current state)
             
-            sent = self._send_request('/telemetry/screentime', screentime_update)
+            logger.debug(f"[LIVE] Liveness update - State: {self.current_state['last_idle_state']}")
             
-            logger.info(
-                f"[LIVE] Screen time (Today): active={self.current_state['active_seconds']}s, "
-                f"idle={self.current_state['idle_seconds']}s"
-                f"{'' if sent else ' (offline)'}"
-            )
-            
-            # --- CURRENT APP UPDATE ---
+            # --- CURRENT APP UPDATE (for live display) ---
             if self.current_state['current_app']['app_name']:
                 app_state = self.current_state['current_app']
                 
                 # Clamp duration to valid range (0-86400 seconds = 0-24 hours)
-                # This prevents database constraint violations
                 raw_duration = app_state['duration_seconds']
                 clamped_duration = max(0, min(raw_duration, 86400))
                 if raw_duration != clamped_duration:
@@ -522,13 +449,13 @@ class LiveTelemetryTracker:
                     'is_browser': app_state.get('is_browser', False),
                     'window_title': app_state['window_title'],
                     'session_start': app_state['session_start'],
-                    'duration_seconds': clamped_duration,  # Use clamped value
-                    'state': self.current_state['last_idle_state'],  # Include idle state!
+                    'duration_seconds': clamped_duration,
+                    'state': self.current_state['last_idle_state'],
                     'is_active': True
                 }
                 self._send_request('/telemetry/app-active', app_update)
             
-            # --- CURRENT DOMAIN UPDATE ---
+            # --- CURRENT DOMAIN UPDATE (for live display) ---
             if self.current_state['current_domain']['domain']:
                 domain_state = self.current_state['current_domain']
                 
@@ -636,7 +563,7 @@ class LiveTelemetryTracker:
             logger.error(f"Error sending state change: {e}")
 
     def get_stats(self) -> Dict:
-        """Get current statistics for dashboard"""
+        """✅ PHASE 4: Get current statistics for dashboard (liveness only)"""
         app_name = self.current_state['current_app'].get('app_name', 'unknown')
         app_friendly = self.current_state['current_app'].get('friendly_name', app_name)
         
@@ -648,11 +575,7 @@ class LiveTelemetryTracker:
             'current_state': self.current_state.get('last_idle_state', 'unknown'),
             'current_app': app_friendly,
             'current_app_exe': app_name,
-            'counters': {
-                'active_seconds': self.current_state.get('active_seconds', 0),
-                'idle_seconds': self.current_state.get('idle_seconds', 0),
-                'locked_seconds': self.current_state.get('locked_seconds', 0)
-            },
+            # ✅ PHASE 4: No cumulative counters - they're in state_machine.py
             'today': self.current_state.get('today'),
             'last_updated': datetime.fromtimestamp(self.last_update_time).isoformat()
         }

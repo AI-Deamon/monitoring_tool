@@ -17,8 +17,18 @@ depends_on = None
 
 
 def upgrade():
-    """Add username column to screen_time table."""
-    op.add_column('screen_time', sa.Column('username', sa.String(255), nullable=True))
+    """Add username column to screen_time table if it doesn't exist."""
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name='screen_time' AND column_name='username'
+            ) THEN
+                ALTER TABLE screen_time ADD COLUMN username VARCHAR(255) NULL;
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade():

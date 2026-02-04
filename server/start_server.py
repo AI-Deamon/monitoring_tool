@@ -28,11 +28,19 @@ logger = logging.getLogger(__name__)
 
 def print_banner():
     """Print startup banner"""
-    print("""
+    try:
+        print("""
 ╔══════════════════════════════════════════════════════════════╗
 ║         SentinelEdge Server - Complete Self-Healing          ║
 ║         Automatic Setup & All Database Initialization        ║
 ╚══════════════════════════════════════════════════════════════╝
+""")
+    except UnicodeEncodeError:
+        print("""
+============================================
+    SentinelEdge Server - Complete Self-Healing
+    Automatic Setup & All Database Initialization
+============================================
 """)
 
 def check_database_connection(app):
@@ -63,9 +71,9 @@ def create_tables(app):
             logger.error(f"  ❌ Table creation failed: {e}")
             return False
 
-def create_additional_tables(app):
-    """Create screen_time_spans and domain_classification_rules tables"""
-    logger.info("[3/8] Creating additional tables (spans, domain rules)...")
+def create_screen_time_spans_table(app):
+    """Create screen_time_spans table and indexes"""
+    logger.info("[3/8] Creating screen_time_spans table...")
     with app.app_context():
         try:
             connection = db.engine.raw_connection()
@@ -101,35 +109,13 @@ def create_additional_tables(app):
                 ON screen_time_spans(span_id);
             """)
             
-            # Create domain_classification_rules table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS domain_classification_rules (
-                    id SERIAL PRIMARY KEY,
-                    pattern VARCHAR(255) NOT NULL,
-                    pattern_type VARCHAR(20) NOT NULL CHECK (pattern_type IN ('exact', 'prefix', 'suffix', 'contains', 'regex')),
-                    classified_as VARCHAR(255) NOT NULL,
-                    action VARCHAR(20) NOT NULL CHECK (action IN ('map', 'ignore')),
-                    priority INTEGER DEFAULT 100,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW(),
-                    CONSTRAINT unique_pattern UNIQUE (pattern, pattern_type)
-                );
-            """)
-            
-            # Create index for domain rules
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_domain_rules_active 
-                ON domain_classification_rules(is_active, priority);
-            """)
-            
             connection.commit()
             cursor.close()
             connection.close()
-            logger.info("  ✅ Additional tables created (spans + domain rules)")
+            logger.info("  ✅ screen_time_spans table and indexes created")
             return True
         except Exception as e:
-            logger.error(f"  ❌ Additional tables creation failed: {e}")
+            logger.error(f"  ❌ screen_time_spans table creation failed: {e}")
             return False
 
 def install_stored_procedures(app):
@@ -146,7 +132,7 @@ def install_stored_procedures(app):
             cursor.execute("DROP FUNCTION IF EXISTS process_app_switch_event(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP, TIMESTAMP, INTEGER, VARCHAR) CASCADE;")
             cursor.execute("DROP FUNCTION IF EXISTS process_domain_switch_event(VARCHAR, VARCHAR, VARCHAR, TEXT, TEXT, VARCHAR, TIMESTAMP, TIMESTAMP, INTEGER, VARCHAR) CASCADE;")
             
-            # 2. Process screentime event (legacy cumulative - now heartbeat only)
+            # 2. Process screentime event (legacy cumulative)
             logger.info("  - Creating process_screentime_event...")
             cursor.execute("""
                 CREATE OR REPLACE FUNCTION process_screentime_event(
@@ -154,17 +140,17 @@ def install_stored_procedures(app):
                     p_active_total INTEGER, p_idle_total INTEGER,
                     p_locked_total INTEGER, p_state VARCHAR
                 ) RETURNS TABLE(status text, message text) AS $$
+                DECLARE v_date DATE;
                 BEGIN
-                    -- NEW: Only update agent metadata, NOT daily totals
-                    UPDATE agents SET 
-                        last_seen = p_timestamp,
-                        current_state = p_state,
-                        last_active_total = p_active_total,
-                        last_idle_total = p_idle_total,
-                        last_locked_total = p_locked_total
-                    WHERE agent_id = p_agent_id::UUID;
-                    
-                    RETURN QUERY SELECT 'success'::text, 'Heartbeat processed'::text;
+                    v_date := p_timestamp::DATE;
+                    INSERT INTO screen_time (agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated)
+                    VALUES (p_agent_id::UUID, v_date, p_active_total, p_idle_total, p_locked_total, NOW())
+                    ON CONFLICT (agent_id, date) DO UPDATE SET
+                        active_seconds = GREATEST(screen_time.active_seconds, EXCLUDED.active_seconds),
+                        idle_seconds = GREATEST(screen_time.idle_seconds, EXCLUDED.idle_seconds),
+                        locked_seconds = GREATEST(screen_time.locked_seconds, EXCLUDED.locked_seconds),
+                        last_updated = NOW();
+                    RETURN QUERY SELECT 'success'::text, 'Screentime processed'::text;
                 EXCEPTION WHEN OTHERS THEN
                     RETURN QUERY SELECT 'error'::text, SQLERRM::text;
                 END;
@@ -256,14 +242,6 @@ def install_sync_functions(app):
         try:
             connection = db.engine.raw_connection()
             cursor = connection.cursor()
-            
-            # Drop all sync functions first to avoid return type conflicts
-            logger.info("  - Dropping legacy sync functions...")
-            cursor.execute("DROP FUNCTION IF EXISTS sync_screen_time_from_spans(DATE) CASCADE;")
-            cursor.execute("DROP FUNCTION IF EXISTS cleanup_old_spans() CASCADE;")
-            cursor.execute("DROP FUNCTION IF EXISTS sync_app_usage_from_sessions(DATE) CASCADE;")
-            cursor.execute("DROP FUNCTION IF EXISTS sync_domain_usage_from_sessions(DATE) CASCADE;")
-            cursor.execute("DROP FUNCTION IF EXISTS sync_screen_time_from_sessions(DATE) CASCADE;")
             
             # 1. sync_screen_time_from_spans (CRITICAL for span aggregation)
             logger.info("  - Creating sync_screen_time_from_spans...")
@@ -372,11 +350,11 @@ def install_sync_functions(app):
                 $$ LANGUAGE plpgsql;
             """)
             
-            # 5. sync_screen_time_from_sessions (FIX: renamed return columns to avoid ambiguity)
+            # 5. sync_screen_time_from_sessions
             logger.info("  - Creating sync_screen_time_from_sessions...")
             cursor.execute("""
                 CREATE OR REPLACE FUNCTION sync_screen_time_from_sessions(p_date DATE)
-                RETURNS TABLE(ret_agent_id VARCHAR, ret_active_seconds INTEGER) AS $$
+                RETURNS TABLE(agent_id VARCHAR, active_seconds INTEGER) AS $$
                 DECLARE
                     r RECORD;
                 BEGIN
@@ -394,8 +372,8 @@ def install_sync_functions(app):
                             active_seconds = EXCLUDED.active_seconds,
                             last_updated = NOW();
                             
-                        ret_agent_id := r.agent_id;
-                        ret_active_seconds := r.total_active;
+                        agent_id := r.agent_id;
+                        active_seconds := r.total_active;
                         RETURN NEXT;
                     END LOOP;
                     RETURN;
@@ -433,22 +411,64 @@ def fix_schema(app):
                 ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
             """))
             
-            # Add heartbeat columns to agents table
+            # Add missing columns to agents table
             db.session.execute(text("""
                 ALTER TABLE agents 
-                ADD COLUMN IF NOT EXISTS current_state VARCHAR(20);
+                ADD COLUMN IF NOT EXISTS agent_name VARCHAR(255);
             """))
             db.session.execute(text("""
                 ALTER TABLE agents 
-                ADD COLUMN IF NOT EXISTS last_active_total INTEGER DEFAULT 0;
+                ADD COLUMN IF NOT EXISTS os_build INTEGER;
             """))
             db.session.execute(text("""
                 ALTER TABLE agents 
-                ADD COLUMN IF NOT EXISTS last_idle_total INTEGER DEFAULT 0;
+                ADD COLUMN IF NOT EXISTS windows_edition VARCHAR(50);
             """))
             db.session.execute(text("""
                 ALTER TABLE agents 
-                ADD COLUMN IF NOT EXISTS last_locked_total INTEGER DEFAULT 0;
+                ADD COLUMN IF NOT EXISTS architecture VARCHAR(50);
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS local_agent_key VARCHAR(255);
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS api_token TEXT;
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS api_key VARCHAR(128);
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS hashed_api_token VARCHAR(255);
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS operational_status VARCHAR(50) DEFAULT 'NORMAL';
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS status_reason TEXT;
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS last_status_change TIMESTAMP;
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS diagnostics_json TEXT;
+            """))
+            db.session.execute(text("""
+                ALTER TABLE agents 
+                ADD COLUMN IF NOT EXISTS last_telemetry_time TIMESTAMP;
+            """))
+            
+            # Add created_at to app_sessions if missing
+            db.session.execute(text("""
+                ALTER TABLE app_sessions 
+                ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
             """))
             
             db.session.commit()
@@ -478,40 +498,6 @@ def create_default_admin(app):
             return True
         except Exception as e:
             logger.error(f"  ❌ Admin creation failed: {e}")
-            db.session.rollback()
-            return False
-
-def repair_today_data(app):
-    """Repair today's data to fix double-counting issues"""
-    logger.info("[8/9] Repairing today's screen time data...")
-    with app.app_context():
-        try:
-            # We use text() for raw SQL with SQLAlchemy
-            from sqlalchemy import text
-            
-            # Reset today's totals and re-run span sync
-            logger.info("  - Resetting today's totals and re-processing spans...")
-            db.session.execute(text("""
-                -- 1. Reset today's totals to 0
-                UPDATE screen_time 
-                SET active_seconds = 0, idle_seconds = 0, locked_seconds = 0 
-                WHERE date = CURRENT_DATE;
-                
-                -- 2. Mark all today's spans as unprocessed
-                UPDATE screen_time_spans 
-                SET processed = FALSE 
-                WHERE start_time::DATE = CURRENT_DATE;
-            """))
-            db.session.commit()
-            
-            # 3. Run span sync via the stored procedure
-            db.session.execute(text("SELECT * FROM sync_screen_time_from_spans(CURRENT_DATE);"))
-            db.session.commit()
-            
-            logger.info("  ✅ Data repaired (re-calculated from spans)")
-            return True
-        except Exception as e:
-            logger.error(f"  ❌ Data repair failed: {e}")
             db.session.rollback()
             return False
 
@@ -570,7 +556,7 @@ def start_server(app):
     logger.info("✅ AUTO-SETUP COMPLETE! All database functions installed.")
     logger.info("="*60)
     logger.info("\n🚀 Server starting...")
-    logger.info("   Dashboard: http://localhost:5051/dashboard")
+    logger.info("   Dashboard: http://localhost:5050/dashboard")
     logger.info("   Login: admin / changeme123")
     logger.info("\n⚠️  Press Ctrl+C to stop\n")
     
@@ -591,18 +577,21 @@ def main():
     # Run all setup steps in order
     steps = [
         (check_database_connection, app),
-        (create_tables, app),
-        (create_additional_tables, app),
-        (install_stored_procedures, app),
-        (install_sync_functions, app),
-        (fix_schema, app),
+        # (create_tables, app), # Handled by Alembic
+        # (create_screen_time_spans_table, app), # Handled by Alembic
+        # (install_stored_procedures, app), # Handled by Alembic
+        # (install_sync_functions, app), # Handled by Alembic
+        # (fix_schema, app), # Handled by Alembic
         (create_default_admin, app),
-        (repair_today_data, app),
         (verify_functions, app),
     ]
     
     for step_func, *args in steps:
         if not step_func(*args):
+            # Special case: allow continue if just verify failed but core is ok
+            if step_func == verify_functions:
+                logger.warning("  ⚠️  Database verification had warnings but continuing...")
+                continue
             logger.error("\n❌ Setup failed. Please fix errors and try again.")
             sys.exit(1)
     

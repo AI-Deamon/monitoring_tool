@@ -89,8 +89,6 @@ class DataCollector:
             # State
             self.sequence_number = 0
             self.last_inventory_time = None
-            self.app_durations = {}  # app_name -> cumulative seconds
-
             # Domain session state
             self._last_idle_state = 'active'
             self._last_foreground_app = None
@@ -101,11 +99,6 @@ class DataCollector:
 
             # Track current date for midnight detection
             self._current_date = datetime.now(timezone.utc).date()
-
-            # Track previous cumulative values for delta calculation
-            self._prev_cumulative_active = 0.0
-            self._prev_cumulative_idle = 0.0
-            self._prev_cumulative_locked = 0.0
 
             # CPU fallback tracker for when window tracking fails
             self.cpu_tracker = CPUBasedTracker() if CPU_FALLBACK_AVAILABLE else None
@@ -154,7 +147,6 @@ class DataCollector:
                 with open(self.config.state_file, 'r') as f:
                     state = json.load(f)
                     self.sequence_number = state.get('sequence_number', 0)
-                    self.app_durations = state.get('app_durations', {})
                     self.last_inventory_time = state.get('last_inventory_time')
                     
                     # Restore domain tracker states
@@ -174,7 +166,6 @@ class DataCollector:
         try:
             state = {
                 'sequence_number': self.sequence_number,
-                'app_durations': self.app_durations,
                 'last_inventory_time': self.last_inventory_time,
                 'active_domain_state': self.active_domain_tracker.get_state(),
                 'history_state': self.history_tracker.get_state(),
@@ -225,11 +216,6 @@ class DataCollector:
             if self.state_detector:
                 self.state_detector.reset_cumulative()
 
-            # Reset previous cumulative values for delta calculation (LEGACY - no longer used)
-            self._prev_cumulative_active = 0.0
-            self._prev_cumulative_idle = 0.0
-            self._prev_cumulative_locked = 0.0
-
             # Update current date
             self._current_date = current_date
             self._session_start = now
@@ -240,25 +226,6 @@ class DataCollector:
             # FIX: Reset WindowTracker timestamp to prevent overnight duration overflow
             if self.window_tracker:
                 logger.info("[COLLECTOR] Resetting WindowTracker for new day...")
-                # Save current app's duration before reset
-                if hasattr(self.window_tracker, '_current_app') and self.window_tracker._current_app:
-                    try:
-                        old_duration = (now - self.window_tracker._app_start).total_seconds()
-                        logger.info(f"[COLLECTOR] Previous session: {self.window_tracker._current_app} ({old_duration:.1f}s)")
-                        
-                        # Update cumulative usage if available
-                        if hasattr(self.window_tracker, '_cumulative_app_usage') and hasattr(self.window_tracker, 'duration_lock'):
-                            with self.window_tracker.duration_lock:
-                                if self.window_tracker._current_app in self.window_tracker._cumulative_app_usage:
-                                    self.window_tracker._cumulative_app_usage[self.window_tracker._current_app] += old_duration
-                                else:
-                                    self.window_tracker._cumulative_app_usage[self.window_tracker._current_app] = old_duration
-                            
-                            if hasattr(self.window_tracker, '_save_state'):
-                                self.window_tracker._save_state()
-                    except Exception as e:
-                        logger.warning(f"[COLLECTOR] Error saving previous session: {e}")
-                
                 # Reset start time to NOW (prevents overnight overflow)
                 self.window_tracker._app_start = now
                 logger.info("[COLLECTOR] WindowTracker timestamp reset")
@@ -360,36 +327,8 @@ class DataCollector:
         # End domain session tracking
         # ====================================================================
         
-        # Accumulate app durations
-        if window_change and window_change.get('app_name'):
-            app_name = window_change['app_name']
-            duration = validate_duration(
-                window_change.get('duration_seconds', 0),
-                context=f"window_change[{window_change.get('app_name')}]"
-            )
-
-            if app_name in self.app_durations:
-                self.app_durations[app_name] += duration
-            else:
-                self.app_durations[app_name] = duration
-        
-        # Calculate deltas for live tracking (simple interval-based)
-        # Note: Precision accounting is now event-driven for idle sessions
-        delta_active = 0
-        delta_idle = 0
-        delta_locked = 0
-        
-        if current_state == 'active':
-            delta_active = self.config.heartbeat_interval
-        elif current_state == 'idle':
-            delta_idle = self.config.heartbeat_interval
-        elif current_state == 'locked':
-            delta_locked = self.config.heartbeat_interval
-
-        # Keep these updated to prevent old drift logic from firing
-        self._prev_cumulative_active = 0.0
-        self._prev_cumulative_idle = 0.0
-        self._prev_cumulative_locked = 0.0
+        # ✅ PHASE 2: Screen time deltas now come from StateDetector (which uses state machine)
+        # No manual calculation needed here
 
         # Build simplified heartbeat packet
         heartbeat = {
@@ -418,12 +357,15 @@ class DataCollector:
             }
         }
         
-        # ✅ NEW: Add cumulative deltas from StateDetector
+        # ✅ PHASE 2: Get cumulative deltas from StateDetector (ONLY source of truth)
+        # StateDetector calls state_machine.tick() and state_machine.get_daily_totals()
+        # This is the ONLY place screen time is calculated
         if self.state_detector:
             deltas = self.state_detector.get_cumulative_deltas()
-            heartbeat['screentime']['delta_active_seconds'] = int(deltas['delta_active_seconds'])
-            heartbeat['screentime']['delta_idle_seconds'] = int(deltas['delta_idle_seconds'])
-            heartbeat['screentime']['delta_locked_seconds'] = int(deltas['delta_locked_seconds'])
+            heartbeat['screentime']['delta_active_seconds'] = int(deltas.get('delta_active_seconds', 0))
+            heartbeat['screentime']['delta_idle_seconds'] = int(deltas.get('delta_idle_seconds', 0))
+            heartbeat['screentime']['delta_locked_seconds'] = int(deltas.get('delta_locked_seconds', 0))
+            heartbeat['screentime']['delta_away_seconds'] = int(deltas.get('delta_away_seconds', 0))  # NEW
         
         # Add app change info if occurred
         if window_change and window_change.get('changed'):
@@ -577,25 +519,8 @@ class DataCollector:
             return None
     
     def get_app_usage_summary(self) -> List[Dict]:
-        """
-        Get accumulated app usage for batch upload
-
-        Returns:
-            List of app usage dicts
-        """
-        summary = []
-        for app_name, total_seconds in list(self.app_durations.items()):
-            if total_seconds > 0:
-                summary.append({
-                    'app_name': app_name,
-                    'total_seconds': total_seconds
-                })
-
-        # Clear accumulated durations after retrieval
-        self.app_durations = {}
-
-        self._save_state()
-        return summary
+        """[DEPRECATED] Cumulative tracking removed."""
+        return []
     
     def shutdown(self):
         """

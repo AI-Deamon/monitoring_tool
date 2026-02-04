@@ -19,14 +19,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
-    # Update agents.id from integer to varchar
-    op.execute('ALTER TABLE agents DROP CONSTRAINT agents_pkey')
-    op.execute('ALTER TABLE agents ADD COLUMN temp_id VARCHAR(128)')
-    op.execute('UPDATE agents SET temp_id = id::text')
-    op.execute('ALTER TABLE agents DROP COLUMN id')
-    op.execute('ALTER TABLE agents RENAME COLUMN temp_id TO id')
-    op.execute('ALTER TABLE agents ADD PRIMARY KEY (id)')
+    """Upgrade schema - NEUTRALIZED to preserve numeric ID."""
+    # This migration was changing agents.id to VARCHAR which breaks old FKs.
+    pass
+    # op.execute('ALTER TABLE agents DROP CONSTRAINT agents_pkey')
+    # ...
 
 
 def downgrade() -> None:

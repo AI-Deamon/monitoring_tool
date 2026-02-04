@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '003_add_api_key_auth'
-down_revision = '87b72471d98c'
+down_revision = '20250128_add_cascade_to_fks'
 branch_labels = None
 depends_on = None
 

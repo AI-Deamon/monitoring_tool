@@ -20,7 +20,7 @@ from dateutil.parser import parse as parse_date
 
 # revision identifiers, used by Alembic.
 revision: str = 'c15377a4441b'
-down_revision: Union[str, Sequence[str], None] = '002_add_new_tables'
+down_revision: Union[str, Sequence[str], None] = '003a_create_core_tables'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -73,15 +73,53 @@ def upgrade() -> None:
         op.drop_constraint('batch_deduplication_agent_id_fkey', 'batch_deduplication', type_='foreignkey')
     except Exception:
         pass
+    
+    # Drop foreign keys from core aggregation tables (from 003a migration)
+    try:
+        op.drop_constraint('screen_time_agent_id_fkey', 'screen_time', type_='foreignkey')
+    except Exception:
+        pass
+    try:
+        op.drop_constraint('app_usage_agent_id_fkey', 'app_usage', type_='foreignkey')
+    except Exception:
+        pass
+    try:
+        op.drop_constraint('domain_usage_agent_id_fkey', 'domain_usage', type_='foreignkey')
+    except Exception:
+        pass
+    try:
+        op.drop_constraint('domain_sessions_agent_id_fkey', 'domain_sessions', type_='foreignkey')
+    except Exception:
+        pass
+    try:
+        op.drop_constraint('app_inventory_agent_id_fkey', 'app_inventory', type_='foreignkey')
+    except Exception:
+        pass
+    try:
+        op.drop_constraint('agent_current_status_agent_id_fkey', 'agent_current_status', type_='foreignkey')
+    except Exception:
+        pass
+    try:
+        op.drop_constraint('raw_events_agent_id_fkey', 'raw_events', type_='foreignkey')
+    except Exception:
+        pass
+    try:
+        op.drop_constraint('telemetry_events_agent_id_fkey', 'telemetry_events', type_='foreignkey')
+    except Exception:
+        pass
+    try:
+        op.drop_constraint('screen_time_spans_agent_id_fkey', 'screen_time_spans', type_='foreignkey')
+    except Exception:
+        pass
 
 
     # ### Schema changes ###
     op.create_table('app_sessions',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('agent_id', UUID(as_uuid=True), nullable=False),
-        sa.Column('app_name', sa.Text(), nullable=False),
-        sa.Column('start', sa.DateTime(), nullable=False),
-        sa.Column('end', sa.DateTime(), nullable=False),
+        sa.Column('app', sa.Text(), nullable=False),
+        sa.Column('start_time', sa.DateTime(), nullable=False),
+        sa.Column('end_time', sa.DateTime(), nullable=False),
         sa.Column('duration_seconds', sa.Integer(), nullable=False),
         sa.Column('window_title', sa.Text(), nullable=True),
         sa.PrimaryKeyConstraint('id')
@@ -139,7 +177,7 @@ def upgrade() -> None:
 
     op.alter_column('agents', 'hashed_api_token',
                existing_type=sa.VARCHAR(length=128),
-               nullable=False, unique=True)
+               nullable=True, unique=True)
     
     op.create_foreign_key('fk_app_sessions_agent_id', 'app_sessions', 'agents', ['agent_id'], ['agent_id'], ondelete='CASCADE')
     op.create_foreign_key('fk_idle_sessions_agent_id', 'idle_sessions', 'agents', ['agent_id'], ['agent_id'], ondelete='CASCADE')
@@ -178,6 +216,86 @@ def upgrade() -> None:
                 postgresql_using='agent_id::uuid',
                 nullable=False)
     op.create_foreign_key('fk_merged_event_logs_agent_id', 'merged_event_logs', 'agents', ['agent_id'], ['agent_id'], ondelete='CASCADE')
+    
+    # Alter core aggregation tables (from 003a migration)
+    # These tables were created with VARCHAR agent_id, need to convert to UUID
+    
+    # screen_time
+    op.alter_column('screen_time', 'agent_id',
+                existing_type=sa.VARCHAR(length=128),
+                type_=UUID(as_uuid=True),
+                postgresql_using='agent_id::uuid',
+                nullable=False)
+    
+    # app_usage
+    op.alter_column('app_usage', 'agent_id',
+                existing_type=sa.VARCHAR(length=128),
+                type_=UUID(as_uuid=True),
+                postgresql_using='agent_id::uuid',
+                nullable=False)
+    
+    # domain_usage
+    op.alter_column('domain_usage', 'agent_id',
+                existing_type=sa.VARCHAR(length=128),
+                type_=UUID(as_uuid=True),
+                postgresql_using='agent_id::uuid',
+                nullable=False)
+    
+    # domain_sessions
+    op.alter_column('domain_sessions', 'agent_id',
+                existing_type=sa.VARCHAR(length=128),
+                type_=UUID(as_uuid=True),
+                postgresql_using='agent_id::uuid',
+                nullable=False)
+    
+    # app_inventory
+    op.alter_column('app_inventory', 'agent_id',
+                existing_type=sa.VARCHAR(length=128),
+                type_=UUID(as_uuid=True),
+                postgresql_using='agent_id::uuid',
+                nullable=False)
+    
+    # agent_current_status
+    op.alter_column('agent_current_status', 'agent_id',
+                existing_type=sa.VARCHAR(length=128),
+                type_=UUID(as_uuid=True),
+                postgresql_using='agent_id::uuid',
+                nullable=False)
+    
+    # raw_events
+    op.alter_column('raw_events', 'agent_id',
+                existing_type=sa.VARCHAR(length=128),
+                type_=UUID(as_uuid=True),
+                postgresql_using='agent_id::uuid',
+                nullable=False)
+    
+    # telemetry_events
+    op.alter_column('telemetry_events', 'agent_id',
+                existing_type=sa.VARCHAR(length=128),
+                type_=UUID(as_uuid=True),
+                postgresql_using='agent_id::uuid',
+                nullable=False)
+    
+    # screen_time_spans
+    op.alter_column('screen_time_spans', 'agent_id',
+                existing_type=sa.VARCHAR(length=128),
+                type_=UUID(as_uuid=True),
+                postgresql_using='agent_id::uuid',
+                nullable=False)
+                
+    # Legacy tables from 001 that were missed
+    for table_name in ['events', 'applications', 'app_inventory_changes', 
+                      'screen_time_logs', 'app_usage_logs', 'domain_usage_logs', 
+                     'process_sessions', 'batch_deduplication']:
+        try:
+            op.alter_column(table_name, 'agent_id',
+                        existing_type=sa.VARCHAR(length=128),
+                        type_=UUID(as_uuid=True),
+                        postgresql_using='agent_id::uuid',
+                        nullable=True)
+        except Exception:
+            pass # column or table might not exist in some states
+
 
 
     # Data Migration

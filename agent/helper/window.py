@@ -47,7 +47,6 @@ class WindowTracker:
         
         # Enhanced tracking
         self._session_history: List[Dict] = []  # Recent app sessions
-        self._cumulative_app_usage: Dict[str, float] = {}  # app_name -> total seconds
         self._brief_app_threshold = 5.0  # Apps used < 5s considered "brief"
         
         # Statistics
@@ -89,7 +88,6 @@ class WindowTracker:
                 with open(self._state_file, 'r') as f:
                     state = json.load(f)
                 
-                self._cumulative_app_usage = state.get('cumulative_app_usage', {})
                 self._total_switches = state.get('total_switches', 0)
                 self._session_history = state.get('session_history', [])
                 
@@ -115,7 +113,7 @@ class WindowTracker:
                 else:
                     self._do_initial_sample()
                 
-                logger.debug(f"[WINDOW] Loaded state: {len(self._cumulative_app_usage)} apps tracked")
+                logger.debug(f"[WINDOW] Loaded state: {len(self._session_history)} sessions recovered")
         except Exception as e:
             logger.warning(f"[WINDOW] Failed to load state: {e}")
             self._do_initial_sample()
@@ -125,7 +123,6 @@ class WindowTracker:
         try:
             if self._state_file:
                 state = {
-                    'cumulative_app_usage': self._cumulative_app_usage,
                     'total_switches': self._total_switches,
                     'session_history': self._session_history[-50:],  # Save last 50 sessions
                     'last_app': self._current_app,
@@ -392,19 +389,6 @@ class WindowTracker:
                 )
                 duration = 86400
             
-            # Update cumulative usage for previous app
-            if self._current_app and duration > 0:
-                with self.duration_lock:
-                    if self._current_app in self._cumulative_app_usage:
-                        self._cumulative_app_usage[self._current_app] += duration
-                    else:
-                        self._cumulative_app_usage[self._current_app] = duration
-            
-            # Track statistics
-            self._total_switches += 1
-            if duration < self._brief_app_threshold:
-                self._brief_switches += 1
-            
             # Record session in history
             session = {
                 'app_name': self._current_app,
@@ -426,7 +410,6 @@ class WindowTracker:
                 'duration_seconds': duration,
                 'changed': True,
                 'timestamp': now.isoformat(),
-                'cumulative_seconds': self._cumulative_app_usage.get(self._current_app, 0),
                 'is_brief': duration < self._brief_app_threshold,
                 
                 # New app info
@@ -461,9 +444,6 @@ class WindowTracker:
         category = get_app_category(self._current_app) if self._current_app else 'other'
         browser_flag = is_browser(self._current_app) if self._current_app else False
         
-        with self.duration_lock:
-            cumulative = self._cumulative_app_usage.get(self._current_app, 0) + duration
-        
         return {
             'app_name': self._current_app,
             'friendly_name': friendly_name,      # Friendly name for display
@@ -473,22 +453,12 @@ class WindowTracker:
             'duration_seconds': duration,
             'changed': False,
             'timestamp': now.isoformat(),
-            'session_start': self._app_start.isoformat(),
-            'cumulative_seconds': cumulative
+            'session_start': self._app_start.isoformat()
         }
     
     def get_cumulative_usage(self) -> Dict[str, float]:
-        """Get cumulative app usage for reporting"""
-        # Include current app's ongoing duration
-        result = dict(self._cumulative_app_usage)
-        if self._current_app:
-            now = datetime.now(timezone.utc)
-            current_duration = (now - self._app_start).total_seconds()
-            if self._current_app in result:
-                result[self._current_app] += current_duration
-            else:
-                result[self._current_app] = current_duration
-        return result
+        """[DEPRECATED] Cumulative tracking removed."""
+        return {}
     
     def get_recent_sessions(self, count: int = 10) -> List[Dict]:
         """Get recent app sessions for debugging/display"""
@@ -500,13 +470,11 @@ class WindowTracker:
             'total_switches': self._total_switches,
             'brief_switches': self._brief_switches,
             'current_app': self._current_app,
-            'apps_tracked': len(self._cumulative_app_usage),
             'session_count': len(self._session_history)
         }
     
     def reset_cumulative(self):
-        """Reset cumulative counters (call at end of reporting period)"""
-        self._cumulative_app_usage.clear()
+        """Reset history (counters removed)"""
         self._session_history.clear()
         self._total_switches = 0
         self._brief_switches = 0
@@ -514,17 +482,5 @@ class WindowTracker:
     
     def shutdown(self):
         """Clean shutdown - save final state"""
-        # Record final app duration
-        now = datetime.now(timezone.utc)
-        if self._current_app:
-            duration = (now - self._app_start).total_seconds()
-            if duration > 0:
-                with self.duration_lock:
-                    if self._current_app in self._cumulative_app_usage:
-                        self._cumulative_app_usage[self._current_app] += duration
-                    else:
-                        self._cumulative_app_usage[self._current_app] = duration
-        
         self._save_state()
-        logger.info(f"[WINDOW] Shutdown complete. Tracked {len(self._cumulative_app_usage)} apps, "
-                   f"{self._total_switches} switches")
+        logger.info(f"[WINDOW] Shutdown complete. Switched {self._total_switches} times.")

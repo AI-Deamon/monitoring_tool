@@ -36,6 +36,7 @@ class Agent(db.Model):
     local_agent_key = db.Column(db.String(255), nullable=True)
     api_token = db.Column(db.Text, nullable=True)  # Legacy JWT token
     api_key = db.Column(db.String(128), nullable=True)  # New API key (sk_live_...)
+    hashed_api_token = db.Column(db.String(255), nullable=True)
     status = db.Column(db.String(50), default='active')  # active, inactive, suspended
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_seen = db.Column(db.DateTime, nullable=True)  # Any authenticated request

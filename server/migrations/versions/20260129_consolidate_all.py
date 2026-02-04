@@ -35,48 +35,63 @@ def upgrade():
     # PART 1: SCHEMA FIXES
     # ========================================================================
     
-    # Add away_seconds column if not exists
+    # Add away_seconds column if not exists (check table exists first)
     op.execute("""
         DO $$
         BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns 
-                WHERE table_name='screen_time' AND column_name='away_seconds'
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'screen_time'
             ) THEN
-                ALTER TABLE screen_time ADD COLUMN away_seconds INTEGER DEFAULT 0;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='screen_time' AND column_name='away_seconds'
+                ) THEN
+                    ALTER TABLE screen_time ADD COLUMN away_seconds INTEGER DEFAULT 0;
+                END IF;
             END IF;
         END $$;
     """)
     
-    # Add source column to app_inventory if not exists
+    # Add source column to app_inventory if not exists (check table exists first)
     op.execute("""
         DO $$
         BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns 
-                WHERE table_name='app_inventory' AND column_name='source'
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'app_inventory'
             ) THEN
-                ALTER TABLE app_inventory ADD COLUMN source VARCHAR(50);
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='app_inventory' AND column_name='source'
+                ) THEN
+                    ALTER TABLE app_inventory ADD COLUMN source VARCHAR(50);
+                END IF;
             END IF;
         END $$;
     """)
     
-    # Add domain session columns to agent_current_status if not exists
+    # Add domain session columns to agent_current_status if not exists (check table exists first)
     op.execute("""
         DO $$
         BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns 
-                WHERE table_name='agent_current_status' AND column_name='domain_session_start'
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'agent_current_status'
             ) THEN
-                ALTER TABLE agent_current_status ADD COLUMN domain_session_start TIMESTAMP NULL;
-            END IF;
-            
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns 
-                WHERE table_name='agent_current_status' AND column_name='domain_duration_seconds'
-            ) THEN
-                ALTER TABLE agent_current_status ADD COLUMN domain_duration_seconds INTEGER DEFAULT 0;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='agent_current_status' AND column_name='domain_session_start'
+                ) THEN
+                    ALTER TABLE agent_current_status ADD COLUMN domain_session_start TIMESTAMP NULL;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='agent_current_status' AND column_name='domain_duration_seconds'
+                ) THEN
+                    ALTER TABLE agent_current_status ADD COLUMN domain_duration_seconds INTEGER DEFAULT 0;
+                END IF;
             END IF;
         END $$;
     """)
@@ -92,6 +107,14 @@ def upgrade():
                 ALTER TABLE agents ADD COLUMN last_telemetry_time TIMESTAMP;
                 UPDATE agents SET last_telemetry_time = last_seen WHERE last_telemetry_time IS NULL AND last_seen IS NOT NULL;
             END IF;
+            
+            -- Fix missing created_at in app_sessions
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name='app_sessions' AND column_name='created_at'
+            ) THEN
+                ALTER TABLE app_sessions ADD COLUMN created_at TIMESTAMP DEFAULT NOW();
+            END IF;
         END $$;
     """)
     
@@ -99,15 +122,15 @@ def upgrade():
     # PART 2: PERFORMANCE INDEXES
     # ========================================================================
     
-    op.execute("""
-        CREATE INDEX IF NOT EXISTS idx_app_sessions_agent_date ON app_sessions(agent_id, start_time);
-        CREATE INDEX IF NOT EXISTS idx_domain_sessions_agent_date ON domain_sessions(agent_id, start_time);
-        CREATE INDEX IF NOT EXISTS idx_app_usage_agent_date ON app_usage(agent_id, date);
-        CREATE INDEX IF NOT EXISTS idx_domain_usage_agent_date ON domain_usage(agent_id, date);
-        CREATE INDEX IF NOT EXISTS idx_screen_time_agent_date ON screen_time(agent_id, date);
-        CREATE INDEX IF NOT EXISTS idx_raw_events_received ON raw_events(agent_id, received_at, processed);
-        CREATE INDEX IF NOT EXISTS idx_agent_current_status_last_seen ON agent_current_status(last_seen);
-    """)
+    # Create performance indexes
+    op.execute("CREATE INDEX IF NOT EXISTS idx_app_sessions_agent_date ON app_sessions(agent_id, start_time)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_domain_sessions_agent_date ON domain_sessions(agent_id, start_time)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_app_usage_agent_date ON app_usage(agent_id, date)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_domain_usage_agent_date ON domain_usage(agent_id, date)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_screen_time_agent_date ON screen_time(agent_id, date)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_raw_events_received ON raw_events(agent_id, received_at, processed)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_agent_current_status_last_seen ON agent_current_status(last_seen)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_screen_time_spans_agent_date ON screen_time_spans(agent_id, (start_time))") # Temporary simple index to ensure migration completes
     
     # ========================================================================
     # PART 3: STORED PROCEDURES (VARCHAR-compatible)
@@ -280,7 +303,7 @@ def upgrade():
     # Sync screen time from sessions
     op.execute("""
         CREATE OR REPLACE FUNCTION sync_screen_time_from_sessions(p_date DATE)
-        RETURNS TABLE(agent_id UUID, synced BOOLEAN) AS $$
+        RETURNS TABLE(res_agent_id UUID, synced BOOLEAN) AS $$
         BEGIN
             RETURN QUERY
             WITH session_totals AS (
@@ -367,7 +390,7 @@ def upgrade():
         $$ LANGUAGE plpgsql;
     """)
     
-    print("✓ Consolidated migration applied successfully!")
+    print("Consolidated migration applied successfully!")
 
 
 def downgrade():

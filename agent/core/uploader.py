@@ -847,7 +847,16 @@ class ServerUploader:
                 response = self._make_request('/telemetry/app-switch', payload)
             
             elif event_type == 'screentime':
-                # Get cumulative values from state dict (aggregator sums deltas)
+                # ✅ PHASE 6: Read cumulative totals from aggregator (read-only)
+                # DATA FLOW:
+                # 1. state_machine.py calculates time (ONLY place)
+                # 2. state_detector.get_cumulative_deltas() reads from state_machine
+                # 3. collector.collect_heartbeat() reads from state_detector
+                # 4. aggregator._process_screentime() reads from heartbeat
+                # 5. uploader (HERE) reads from aggregator - NO CALCULATION
+                # 6. server stores via GREATEST() - NO CALCULATION
+                
+                # Get cumulative values from aggregator (which reads from state_machine)
                 # Server expects: active_seconds, idle_seconds, locked_seconds (NOT delta_*)
                 state = event.get('state', {})
                 payload = {
@@ -857,6 +866,7 @@ class ServerUploader:
                     'active_seconds': state.get('delta_active_seconds', 0),  # Cumulative total
                     'idle_seconds': state.get('delta_idle_seconds', 0),      # Cumulative total
                     'locked_seconds': state.get('delta_locked_seconds', 0),  # Cumulative total
+                    'away_seconds': state.get('delta_away_seconds', 0),      # NEW: away time
                     'current_state': state.get('current_state', 'active')
                 }
                 

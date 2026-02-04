@@ -288,51 +288,6 @@ def cleanup_old_data():
         logger.error(f"[CLEANUP] Cleanup failed: {e}", exc_info=True)
 
 
-def sync_screen_time_spans():
-    """Background task to aggregate screen time spans into totals"""
-    from extensions import db
-    try:
-        # 1. Sync for Today (Aggregates new spans immediately)
-        today = datetime.utcnow().date()
-        db.session.execute(text("SELECT sync_screen_time_from_spans(:date)"), {'date': today})
-        
-        # 2. Sync for Yesterday (Catches late/buffered uploads from Helper)
-        yesterday = today - timedelta(days=1)
-        db.session.execute(text("SELECT sync_screen_time_from_spans(:date)"), {'date': yesterday})
-        
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"[SPANS] Error syncing screen time: {e}")
-
-def check_span_processing_lag():
-    """Monitor for processing delays in screen time spans"""
-    from extensions import db
-    try:
-        # Check for un-processed spans older than 15 minutes
-        cutoff = datetime.utcnow() - timedelta(minutes=15)
-        unprocessed = db.session.execute(text(
-            "SELECT count(*) FROM screen_time_spans WHERE processed = false AND created_at < :cutoff"
-        ), {'cutoff': cutoff}).scalar()
-        
-        if unprocessed > 0:
-            logger.warning(f"[HEALTH] Screen time span processing lag: {unprocessed} pending spans")
-    except Exception as e:
-        logger.error(f"[HEALTH] Error checking span lag: {e}")
-
-def cleanup_old_spans():
-    """Daily cleanup of processed screen time spans"""
-    from extensions import db
-    try:
-        # Calls the stored procedure for safe cleanup
-        db.session.execute(text("SELECT cleanup_old_spans()"))
-        db.session.commit()
-        logger.info("[SPANS] Cleaned up old processed spans")
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"[SPANS] Error during span cleanup: {e}")
-
-
 def start_background_tasks(app):
     """Start background scheduler"""
     scheduler = BackgroundScheduler(app)
@@ -367,28 +322,6 @@ def start_background_tasks(app):
         hour=5,
         minute=0,
         name="Data integrity audit"
-    )
-
-    # NEW: Screen Time Span Sync (Every 5 minutes)
-    scheduler.add_interval_job(
-        func=sync_screen_time_spans,
-        seconds=300,
-        name="Screen time span aggregation"
-    )
-
-    # NEW: Health Monitoring (Every 15 minutes)
-    scheduler.add_interval_job(
-        func=check_span_processing_lag,
-        seconds=900,
-        name="Span processing lag check"
-    )
-
-    # NEW: Daily Span Cleanup (3 AM UTC)
-    scheduler.add_job(
-        func=cleanup_old_spans,
-        hour=3,
-        minute=30,  # 30 mins after general cleanup
-        name="Daily span cleanup"
     )
     
     scheduler.start()

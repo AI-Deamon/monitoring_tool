@@ -310,6 +310,26 @@ def store_raw_event(agent_id, event_type, payload, processed=False, error=None):
 @require_auth
 def telemetry_screentime():
     """
+    ✅ AGENT-AUTHORITATIVE SCREEN TIME ENDPOINT
+    
+    This is the ONLY legal write path for screen_time table.
+    
+    DATA FLOW:
+    1. Agent's state_machine.py calculates cumulative totals (ONLY place)
+    2. Agent sends totals to this endpoint
+    3. Server validates (non-negative, sum ≤ 86400)
+    4. Server stores via GREATEST() (monotonic, no regression)
+    
+    FORBIDDEN:
+    - Server MUST NOT calculate, infer, recover, or repair screen time
+    - Server MUST NOT aggregate spans into screen_time
+    - Server MUST NOT compute deltas or durations
+    - Server MUST NOT reconstruct or repair gaps
+    
+    CRITICAL: Under-counting is acceptable; fabricated time is forbidden.
+    
+    The agent is the single source of truth.
+    
     Process screen time updates from Core's LiveTelemetryTracker.
     Accepts cumulative daily totals and uses GREATEST() for monotonic values.
     """

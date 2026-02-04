@@ -17,7 +17,7 @@ def upgrade():
     op.create_table(
         'domain_visits',
         sa.Column('id', sa.Integer(), primary_key=True),
-        sa.Column('agent_id', sa.String(128), sa.ForeignKey('agents.id'), nullable=False),
+        sa.Column('agent_id', sa.dialects.postgresql.UUID(), sa.ForeignKey('agents.agent_id'), nullable=False),
         sa.Column('username', sa.String(255), nullable=True),
         sa.Column('domain', sa.String(255), nullable=False),
         sa.Column('url', sa.Text(), nullable=True),

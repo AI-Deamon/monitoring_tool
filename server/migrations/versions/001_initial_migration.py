@@ -31,7 +31,8 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('last_seen', sa.DateTime(), nullable=True),
     sa.Column('is_online', sa.Boolean(), nullable=True),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('agent_id')
     )
     op.create_index(op.f('ix_agents_agent_id'), 'agents', ['agent_id'], unique=True)
     

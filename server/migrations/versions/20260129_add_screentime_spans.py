@@ -36,46 +36,21 @@ def upgrade():
     """)
     
     # Indexes for performance
-    op.execute("CREATE INDEX IF NOT EXISTS idx_spans_agent_date ON screen_time_spans(agent_id, start_time::DATE)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_spans_agent_date ON screen_time_spans(agent_id, start_time)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_spans_processed ON screen_time_spans(processed) WHERE NOT processed")
     op.execute("CREATE INDEX IF NOT EXISTS idx_spans_span_id ON screen_time_spans(span_id)")
     
     # ========================================================================
-    # PART 2: Aggregation stored procedure
+    # PART 2: Aggregation stored procedure (DISABLED)
     # ========================================================================
     op.execute("""
         CREATE OR REPLACE FUNCTION sync_screen_time_from_spans(p_date DATE DEFAULT CURRENT_DATE)
         RETURNS TABLE(ret_agent_id UUID, synced BOOLEAN) AS $$
         BEGIN
-            -- Insert/update screen_time from unprocessed spans
-            INSERT INTO screen_time (agent_id, date, active_seconds, idle_seconds, locked_seconds)
-            SELECT 
-                s.agent_id,
-                s.start_time::DATE as span_date,
-                SUM(CASE WHEN s.state = 'active' THEN s.duration_seconds ELSE 0 END) as active_sec,
-                SUM(CASE WHEN s.state = 'idle' THEN s.duration_seconds ELSE 0 END) as idle_sec,
-                SUM(CASE WHEN s.state = 'locked' THEN s.duration_seconds ELSE 0 END) as locked_sec
-            FROM screen_time_spans s
-            WHERE s.start_time::DATE = p_date
-              AND s.processed = FALSE
-            GROUP BY s.agent_id, s.start_time::DATE
-            ON CONFLICT (agent_id, date)
-            DO UPDATE SET
-                active_seconds = screen_time.active_seconds + EXCLUDED.active_seconds,
-                idle_seconds = screen_time.idle_seconds + EXCLUDED.idle_seconds,
-                locked_seconds = screen_time.locked_seconds + EXCLUDED.locked_seconds,
-                updated_at = NOW();
-            
-            -- Mark spans as processed
-            UPDATE screen_time_spans
-            SET processed = TRUE
-            WHERE start_time::DATE = p_date AND processed = FALSE;
-            
-            -- Return affected agents
-            RETURN QUERY
-            SELECT DISTINCT s.agent_id, TRUE as synced
-            FROM screen_time_spans s
-            WHERE s.start_time::DATE = p_date;
+            -- This function intentionally does nothing
+            -- Screen time is now agent-authoritative only
+            -- Spans are for timeline visualization only
+            RETURN;
         END;
         $$ LANGUAGE plpgsql;
     """)

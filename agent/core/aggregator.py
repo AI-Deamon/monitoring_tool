@@ -99,12 +99,22 @@ class HeartbeatAggregator:
     
     def _process_screentime(self, agent_id: str, heartbeats: List[Dict]):
         """
+        ✅ PHASE 3: Router only - reads cumulative totals from state machine
+        
         Process cumulative screentime from heartbeats.
         
         CRITICAL: Helper sends CUMULATIVE totals (10, 20, 30, 40, 50, 60).
         We must take the LATEST value (60), NOT sum them (210).
         
         The server uses GREATEST() to handle cumulative daily totals.
+        
+        DATA FLOW:
+        1. state_machine.py calculates time (ONLY place)
+        2. state_detector.get_cumulative_deltas() reads from state_machine
+        3. collector.collect_heartbeat() reads from state_detector
+        4. aggregator (THIS FILE) reads from heartbeat - NO CALCULATION
+        5. uploader reads from aggregator - NO CALCULATION
+        6. server stores via GREATEST() - NO CALCULATION
         """
         if not heartbeats:
             return
@@ -115,10 +125,12 @@ class HeartbeatAggregator:
         hb = latest_hb['data']
         screentime = hb.get('screentime', {})
         
-        # Extract cumulative totals from latest heartbeat
+        # ✅ PHASE 3: Extract cumulative totals (already calculated by state_machine.py)
+        # NO MATH HERE - just reading and routing
         cumulative_active = screentime.get('delta_active_seconds', 0)
         cumulative_idle = screentime.get('delta_idle_seconds', 0)
         cumulative_locked = screentime.get('delta_locked_seconds', 0)
+        cumulative_away = screentime.get('delta_away_seconds', 0)  # NEW: track away time
         
         # Get metadata from latest heartbeat
         latest_timestamp = hb.get('timestamp')
@@ -130,10 +142,10 @@ class HeartbeatAggregator:
         current_state = system_state if system_state else idle_state
         
         # Only store if there's actual time to report
-        if cumulative_active == 0 and cumulative_idle == 0 and cumulative_locked == 0:
+        if cumulative_active == 0 and cumulative_idle == 0 and cumulative_locked == 0 and cumulative_away == 0:
             return
         
-        # Create event for uploader with CUMULATIVE values
+        # ✅ PHASE 3: Create event for uploader with CUMULATIVE values (router only)
         # Server will use GREATEST() to ensure monotonic updates
         event = {
             'agent_id': agent_id,
@@ -143,6 +155,7 @@ class HeartbeatAggregator:
             'delta_active_seconds': cumulative_active,
             'delta_idle_seconds': cumulative_idle,
             'delta_locked_seconds': cumulative_locked,
+            'delta_away_seconds': cumulative_away,  # NEW
             'current_state': current_state
         }
         

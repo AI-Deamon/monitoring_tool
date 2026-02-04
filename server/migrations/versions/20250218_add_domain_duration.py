@@ -16,13 +16,30 @@ depends_on = None
 
 
 def upgrade():
-    # Add domain_session_start column
-    op.add_column('agent_current_status', 
-        sa.Column('domain_session_start', sa.DateTime(), nullable=True))
-    
-    # Add domain_duration_seconds column
-    op.add_column('agent_current_status', 
-        sa.Column('domain_duration_seconds', sa.Integer(), server_default='0', nullable=True))
+    # Add domain_session_start column if not exists
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'agent_current_status'
+            ) THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='agent_current_status' AND column_name='domain_session_start'
+                ) THEN
+                    ALTER TABLE agent_current_status ADD COLUMN domain_session_start TIMESTAMP NULL;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='agent_current_status' AND column_name='domain_duration_seconds'
+                ) THEN
+                    ALTER TABLE agent_current_status ADD COLUMN domain_duration_seconds INTEGER DEFAULT 0;
+                END IF;
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade():
