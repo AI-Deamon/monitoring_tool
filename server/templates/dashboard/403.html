@@ -51,6 +51,22 @@
             margin-bottom: 2rem;
         }
 
+        .debug-info {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+            text-align: left;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .debug-info h3 {
+            margin-top: 0;
+            color: var(--text-color);
+        }
+
         .btn {
             display: inline-block;
             padding: 0.75rem 1.5rem;
@@ -73,6 +89,19 @@
         <p class="error-code">403</p>
         <h1 class="error-title">Access Denied</h1>
         <p class="error-message">{{ message or "You don't have permission to access this page." }}</p>
+        
+        {% if debug_info %}
+        <div class="debug-info">
+            <h3>Debug Information:</h3>
+            <p><strong>User Filter:</strong> {{ debug_info.user_filter }}</p>
+            <p><strong>Current User:</strong> {{ debug_info.current_user }}</p>
+            <p><strong>Linked Username:</strong> {{ debug_info.linked_username }}</p>
+            <p><strong>Total Agents:</strong> {{ debug_info.total_agents }}</p>
+            <p><strong>Total Statuses:</strong> {{ debug_info.total_statuses }}</p>
+            <p><strong>Sample Usernames:</strong> {{ debug_info.sample_usernames | join(', ') }}</p>
+        </div>
+        {% endif %}
+        
         <a href="{{ url_for('dashboard.dashboard_home') }}" class="btn">← Back to Dashboard</a>
     </div>
 </body>

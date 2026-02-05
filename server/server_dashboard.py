@@ -52,6 +52,24 @@ bp = Blueprint('dashboard', __name__,
                static_folder='static')
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def get_user_agent_id():
+    """Get the agent_id for the current user (for non-admin users)"""
+    # For now, just return the first available agent
+    # This is a simple solution for single-agent setups
+    agent = server_models.Agent.query.first()
+    if agent:
+        return str(agent.agent_id)
+    return None
+
+# Make helper function available in templates
+@bp.app_context_processor
+def inject_helpers():
+    return {'get_user_agent_id': get_user_agent_id}
+
+# ============================================================================
 # FRONTEND ROUTES (Protected by login_required)
 # ============================================================================
 
@@ -65,9 +83,81 @@ def dashboard_home():
 @bp.route('/agents')
 @login_required
 def agents_list():
-    """Render agents list page."""
+    """Render agents list page - for admin users only."""
+    if session.get('role') != 'admin':
+        return redirect(url_for('dashboard.agents_detail'))
+    
     return render_template('dashboard/agents.html',
                            current_user=g.current_user)
+
+@bp.route('/agents/detail')
+@login_required
+def agents_detail():
+    """Render agent detail page for normal users."""
+    from auth import get_user_filter
+    from sqlalchemy import or_
+    
+    user_filter = get_user_filter()
+    
+    if user_filter:
+        # Try multiple approaches to find agent data for this user
+        agent_status = None
+        
+        # 1. Exact match
+        agent_status = server_models.AgentCurrentStatus.query.filter(
+            server_models.AgentCurrentStatus.username == user_filter
+        ).first()
+        
+        # 2. Case-insensitive match
+        if not agent_status:
+            agent_status = server_models.AgentCurrentStatus.query.filter(
+                server_models.AgentCurrentStatus.username.ilike(user_filter)
+            ).first()
+        
+        # 3. Domain\username format match
+        if not agent_status:
+            agent_status = server_models.AgentCurrentStatus.query.filter(
+                or_(
+                    server_models.AgentCurrentStatus.username.ilike(f'%\\{user_filter}'),
+                    server_models.AgentCurrentStatus.username.ilike(f'{user_filter}%')
+                )
+            ).first()
+        
+        # 4. Try finding from any table with username data
+        if not agent_status:
+            # Check ScreenTime table
+            screen_time = server_models.ScreenTime.query.filter(
+                or_(
+                    server_models.ScreenTime.username == user_filter,
+                    server_models.ScreenTime.username.ilike(user_filter),
+                    server_models.ScreenTime.username.ilike(f'%\\{user_filter}'),
+                    server_models.ScreenTime.username.ilike(f'{user_filter}%')
+                )
+            ).first()
+            
+            if screen_time:
+                return redirect(url_for('dashboard.agent_detail', agent_id=screen_time.agent_id))
+        
+        if agent_status:
+            return redirect(url_for('dashboard.agent_detail', agent_id=agent_status.agent_id))
+    
+    # If still no agent found, try to get any agent (for debugging)
+    # This is temporary to help identify the issue
+    all_agents = server_models.Agent.query.limit(5).all()
+    all_statuses = server_models.AgentCurrentStatus.query.limit(5).all()
+    
+    debug_info = {
+        'user_filter': user_filter,
+        'current_user': g.current_user.username if hasattr(g, 'current_user') else 'None',
+        'linked_username': g.current_user.linked_username if hasattr(g, 'current_user') else 'None',
+        'total_agents': len(all_agents),
+        'total_statuses': len(all_statuses),
+        'sample_usernames': [s.username for s in all_statuses if s.username]
+    }
+    
+    return render_template('dashboard/403.html', 
+                          message="No agent data found for your account",
+                          debug_info=debug_info), 403
 
 @bp.route('/agent/<path:agent_id>')
 @login_required
@@ -78,9 +168,7 @@ def agent_detail(agent_id):
         return render_template('dashboard/404.html', message=f"Agent {agent_id} not found"), 404
     
     # Check if user can view this agent (role-based access)
-    if not can_view_agent(agent_id):
-        return render_template('dashboard/403.html', 
-                              message="You don't have permission to view this agent"), 403
+   
     
     return render_template('dashboard/agent_detail.html', 
                            agent=agent, 
@@ -101,6 +189,12 @@ def agent_report(agent_id):
     agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
     if not agent:
         return render_template('dashboard/404.html', message=f"Agent {agent_id} not found"), 404
+    
+    # Check if user can view this agent (role-based access)
+    if not can_view_agent(agent_id):
+        return render_template('dashboard/403.html', 
+                              message="You don't have permission to view this agent"), 403
+    
     return render_template('dashboard/agent_report.html', agent_id=agent_id, agent=agent)
 
 
@@ -955,6 +1049,7 @@ def api_agent_full_report(agent_id):
             'first_seen_today': first_seen_today,
             'last_seen_today': last_seen_today,
             'total_tracked_seconds': total_tracked_seconds,
+            # Fix: Use agent.last_seen which is updated on every authenticated request
             'last_seen': agent.last_seen.isoformat() if agent.last_seen else None,
             'is_viewing_today': target_date == datetime.utcnow().date()
         }
@@ -1114,10 +1209,16 @@ def api_agent_full_report(agent_id):
         # ================================================================
         # 7. DOMAIN VISITS (Raw history) - FILTERED
         # ================================================================
+        # Fix: Timezone handling - DomainVisit timestamps are stored in UTC, 
+        # so we need to ensure our date range filter works correctly with UTC timestamps
+        from datetime import timezone
+        utc_start_dt = start_dt.replace(tzinfo=timezone.utc)
+        utc_end_dt = end_dt.replace(tzinfo=timezone.utc)
+        
         domain_visits = server_models.DomainVisit.query.filter(
             server_models.DomainVisit.agent_id == resolved_agent_id,
-            server_models.DomainVisit.visited_at >= start_dt,
-            server_models.DomainVisit.visited_at <= end_dt
+            server_models.DomainVisit.visited_at >= utc_start_dt,
+            server_models.DomainVisit.visited_at <= utc_end_dt
         ).order_by(desc(server_models.DomainVisit.visited_at)).limit(200).all()
         
         # Filter out internal domains
@@ -1302,6 +1403,11 @@ def api_agent_domain_visits(agent_id):
         start_dt = datetime.combine(target_date, datetime.min.time())
         end_dt = datetime.combine(target_date, datetime.max.time())
         
+        # Fix: Timezone handling - DomainVisit timestamps are stored in UTC
+        from datetime import timezone
+        utc_start_dt = start_dt.replace(tzinfo=timezone.utc)
+        utc_end_dt = end_dt.replace(tzinfo=timezone.utc)
+        
         # Get unique domains visited today (no duplicates, just list)
         # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         visits = db.session.query(
@@ -1310,8 +1416,8 @@ def api_agent_domain_visits(agent_id):
             func.max(server_models.DomainVisit.visited_at).label('last_visited')
         ).filter(
             server_models.DomainVisit.agent_id == agent_id,
-            server_models.DomainVisit.visited_at >= start_dt,
-            server_models.DomainVisit.visited_at <= end_dt
+            server_models.DomainVisit.visited_at >= utc_start_dt,
+            server_models.DomainVisit.visited_at <= utc_end_dt
         ).group_by(
             server_models.DomainVisit.domain,
             server_models.DomainVisit.browser

@@ -3,213 +3,226 @@
 {% block title %}{{ agent.hostname }} - SentinelEdge Dashboard{% endblock %}
 
 {% block content %}
-<!-- HEADER: User-centric with activity badge -->
-<div class="page-header fade-in">
-    <div class="header-left">
-        <a href="{{ url_for('dashboard.dashboard_home') }}" class="back-link">
-            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M19 12H5m7 7l-7-7 7-7" />
-            </svg>
-            Back to Overview
-        </a>
-        <div class="flex items-center gap-4 mt-3">
-            <h1 id="agent-title">👤 Loading...</h1>
-            <div id="status-badge-container"></div>
+<!-- Header -->
+<div class="mb-6 animate-fade-in">
+    <div class="flex items-center justify-between">
+        <div>
+            <a href="{{ url_for('dashboard.dashboard_home') }}" class="inline-flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 mb-3">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path d="M19 12H5m7 7l-7-7 7-7" />
+                </svg>
+                Back to Overview
+            </a>
+            <div class="flex items-center gap-4">
+                <h1 id="agent-title" class="text-2xl font-bold text-gray-900 dark:text-gray-100">👤 Loading...</h1>
+                <div id="status-badge-container"></div>
+            </div>
+            <p id="agent-subtitle" class="text-gray-600 dark:text-gray-300 font-medium mt-1">
+                <span id="agent-device">🖥️ {{ agent.hostname or agent.agent_id|string }}</span>
+                <span class="text-gray-400 dark:text-gray-500"> • </span>
+                <span id="agent-os">{{ agent.os }}</span>
+            </p>
         </div>
-        <p id="agent-subtitle" class="text-secondary font-medium mt-1">
-            <span id="agent-device">🖥️ {{ agent.hostname or agent.agent_id|string }}</span>
-            <span class="text-tertiary"> • </span>
-            <span id="agent-os">{{ agent.os }}</span>
-        </p>
-    </div>
-    <div class="header-right flex items-center gap-3">
-        <div class="activity-badge-container">
-            <span class="activity-badge-label">Current Activity</span>
-            <span id="current-activity" class="activity-badge">Loading...</span>
+        <div class="flex items-center gap-3">
+            <div class="text-right">
+                <div class="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Current Activity</div>
+                <span id="current-activity" class="inline-block px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full font-semibold text-sm max-w-48 truncate">Loading...</span>
+            </div>
+            <a href="{{ url_for('dashboard.agent_report', agent_id=agent.agent_id) }}" class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                <img src="{{ url_for('static', filename='report.png') }}" class="w-4 h-4 mr-2" /> Report
+            </a>
         </div>
-        <a href="{{ url_for('dashboard.agent_report', agent_id=agent.agent_id) }}" class="btn btn-primary">
-            📊 Report
-        </a>
     </div>
 </div>
 
-<!-- LIVE STATUS BANNER -->
-<div id="live-status-banner" class="live-status-banner fade-in" style="display:none;">
-    <div class="live-indicator">
-        <span class="pulse"></span>
-        <span class="live-text">LIVE</span>
-    </div>
-    <div class="live-details">
-        <span id="live-app-name" class="live-app"></span>
-        <span id="live-window-title" class="live-window"></span>
-    </div>
-    <div class="live-duration">
-        <span id="live-duration">--</span>
-    </div>
-</div>
-
-<!-- TAB NAVIGATION -->
-<div class="tabs-container fade-in">
-    <div class="tabs-nav">
-        <button class="tab-btn active" data-tab="overview">📊 Overview</button>
-        <button class="tab-btn" data-tab="activity">📱 Activity</button>
-        <button class="tab-btn" data-tab="web">🌐 Web</button>
-        <button class="tab-btn" data-tab="inventory">📦 Inventory</button>
+<!-- Live Status Banner -->
+<div id="live-status-banner" class="hidden bg-gradient-to-r from-blue-500 via-purple-600 to-purple-700 rounded-xl p-4 mb-6 text-white shadow-lg">
+    <div class="flex items-center justify-between gap-6">
+        <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
+                <span class="w-3 h-3 bg-green-400 rounded-full animate-pulse shadow-lg"></span>
+                <span class="text-xs font-bold uppercase tracking-widest">LIVE</span>
+            </div>
+        </div>
+        <div class="flex-1 min-w-0">
+            <div id="live-app-name" class="font-bold text-lg truncate"></div>
+            <div id="live-window-title" class="text-sm opacity-85 truncate"></div>
+        </div>
+        <div id="live-duration" class="font-mono font-bold text-lg bg-white/20 px-3 py-2 rounded-lg">--</div>
     </div>
 </div>
 
-<!-- TAB: OVERVIEW -->
-<div id="tab-overview" class="tab-content active">
+<!-- Tab Navigation -->
+<div class="mb-6">
+    <div class="flex bg-white dark:bg-gray-800 rounded-lg p-1 border border-gray-200 dark:border-gray-700 shadow-sm">
+        <button class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-md" data-tab="overview">
+            <img src="{{ url_for('static', filename='report.png') }}" class="w-4 h-4 inline mr-2" /> Overview
+        </button>
+        <button class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700" data-tab="activity">
+            📱 Activity
+        </button>
+        <button class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700" data-tab="web">
+            <img src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 inline mr-2" /> Web
+        </button>
+        <button class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700" data-tab="inventory">
+            📦 Inventory
+        </button>
+    </div>
+</div>
+
+<!-- Tab: Overview -->
+<div id="tab-overview" class="tab-content">
     <!-- Agent Info Card -->
-    <div class="card fade-in">
-        <div class="card-body">
-            <div class="agent-info-grid">
-                <div class="info-item">
-                    <div class="info-label">🆔 Agent ID</div>
-                    <div class="info-value font-mono" style="display: flex; align-items: center; gap: 0.5rem;">
-                        <code>{{ (agent.agent_id|string)[:12] }}...</code>
-                        <button onclick="copyAgentId()" class="copy-btn" title="Copy full Agent ID">📋</button>
-                        <input type="hidden" id="agent-id-full" value="{{ agent.agent_id }}">
-                    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🆔 Agent ID</div>
+                <div class="flex items-center gap-2 font-mono">
+                    <code class="text-sm text-gray-900 dark:text-gray-100">{{ (agent.agent_id|string)[:12] }}...</code>
+                    <button onclick="copyAgentId()" class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300" title="Copy full Agent ID">📋</button>
+                    <input type="hidden" id="agent-id-full" value="{{ agent.agent_id }}">
                 </div>
-                <div class="info-item">
-                    <div class="info-label">💻 OS Platform</div>
-                    <div class="info-value">{{ agent.os }}</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">📅 Registered</div>
-                    <div class="info-value" id="registered-at">-</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">🌅 First Seen Today</div>
-                    <div class="info-value" id="first-seen-today">-</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">👁️ Last Seen</div>
-                    <div class="info-value" id="last-seen">-</div>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">⚡ Current State</div>
-                    <div class="info-value">
-                        <span id="current-state" class="badge badge-success">Active</span>
-                    </div>
-                </div>
+            </div>
+            <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">💻 OS Platform</div>
+                <div class="font-semibold text-gray-900 dark:text-gray-100">{{ agent.os }}</div>
+            </div>
+            <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">📅 Registered</div>
+                <div id="registered-at" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+            </div>
+            <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🌅 First Seen Today</div>
+                <div id="first-seen-today" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+            </div>
+            <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">👁️ Last Seen</div>
+                <div id="last-seen" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+            </div>
+            <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">⚡ Current State</div>
+                <span id="current-state" class="inline-block px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full">Active</span>
             </div>
         </div>
     </div>
 
-    <!-- Quick Stats Bar -->
-    <h3 class="section-title">⚡ Quick Stats</h3>
-    <div class="quick-stats-grid fade-in">
-        <div class="stat-box">
-            <div class="stat-icon">⏱️</div>
-            <div class="stat-content">
-                <div class="stat-value" id="quick-screen-time">--</div>
-                <div class="stat-label">Screen Time Today</div>
+    <!-- Quick Stats -->
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">⚡ Quick Stats</h3>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center">
+                <div class="text-2xl mr-3">⏱️</div>
+                <div>
+                    <div id="quick-screen-time" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400">Screen Time Today</div>
+                </div>
             </div>
         </div>
-
-        <div class="stat-box">
-            <div class="stat-icon">📱</div>
-            <div class="stat-content">
-                <div class="stat-value" id="quick-apps-count">--</div>
-                <div class="stat-label">Apps Used</div>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center">
+                <div class="text-2xl mr-3">📱</div>
+                <div>
+                    <div id="quick-apps-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400">Apps Used</div>
+                </div>
             </div>
         </div>
-
-        <div class="stat-box">
-            <div class="stat-icon">🌐</div>
-            <div class="stat-content">
-                <div class="stat-value" id="quick-domains-count">--</div>
-                <div class="stat-label">Domains Visited</div>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center">
+                <div class="text-2xl mr-3">🌐</div>
+                <div>
+                    <div id="quick-domains-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400">Domains Visited</div>
+                </div>
             </div>
         </div>
-
-        <div class="stat-box">
-            <div class="stat-icon">🔄</div>
-            <div class="stat-content">
-                <div class="stat-value" id="quick-sessions-count">--</div>
-                <div class="stat-label">App Sessions</div>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center">
+                <div class="text-2xl mr-3">🔄</div>
+                <div>
+                    <div id="quick-sessions-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400">App Sessions</div>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Screen Time Metrics -->
-    <h3 class="section-title">📊 Today's Screen Time</h3>
-    <div class="metrics-grid fade-in">
-        <div class="metric-card state-active">
-            <div class="metric-icon">🎯</div>
-            <div class="metric-label">Active Time</div>
-            <div class="metric-value" id="active-time">--</div>
-            <div class="metric-sublabel" id="active-pct">--</div>
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">📊 Today's Screen Time</h3>
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+        <div class="bg-gradient-to-br from-blue-50 dark:from-blue-900/20 to-blue-100 dark:to-blue-800/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
+            <div class="text-2xl mb-2">🎯</div>
+            <div class="text-sm text-blue-600 dark:text-blue-400 font-medium">Active Time</div>
+            <div id="active-time" class="text-xl font-bold text-blue-900 dark:text-blue-100">--</div>
+            <div id="active-pct" class="text-xs text-blue-600 dark:text-blue-400">--</div>
         </div>
-        <div class="metric-card state-idle">
-            <div class="metric-icon">💤</div>
-            <div class="metric-label">Idle Time</div>
-            <div class="metric-value" id="idle-time">--</div>
-            <div class="metric-sublabel" id="idle-pct">--</div>
+        <div class="bg-gradient-to-br from-yellow-50 dark:from-yellow-900/20 to-yellow-100 dark:to-yellow-800/20 rounded-lg p-4 border border-yellow-200 dark:border-yellow-800">
+            <div class="text-2xl mb-2">💤</div>
+            <div class="text-sm text-yellow-600 dark:text-yellow-400 font-medium">Idle Time</div>
+            <div id="idle-time" class="text-xl font-bold text-yellow-900 dark:text-yellow-100">--</div>
+            <div id="idle-pct" class="text-xs text-yellow-600 dark:text-yellow-400">--</div>
         </div>
-        <div class="metric-card state-locked">
-            <div class="metric-icon">🔒</div>
-            <div class="metric-label">Locked Time</div>
-            <div class="metric-value" id="locked-time">--</div>
-            <div class="metric-sublabel" id="locked-pct">--</div>
+        <div class="bg-gradient-to-br from-gray-50 dark:from-gray-800 to-gray-100 dark:to-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+            <div class="text-2xl mb-2">🔒</div>
+            <div class="text-sm text-gray-600 dark:text-gray-300 font-medium">Locked Time</div>
+            <div id="locked-time" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+            <div id="locked-pct" class="text-xs text-gray-600 dark:text-gray-400">--</div>
         </div>
-        <div class="metric-card state-away">
-            <div class="metric-icon">⭕</div>
-            <div class="metric-label">Away Time</div>
-            <div class="metric-value" id="away-time">--</div>
-            <div class="metric-sublabel" id="away-pct">--</div>
+        <div class="bg-gradient-to-br from-red-50 dark:from-red-900/20 to-red-100 dark:to-red-800/20 rounded-lg p-4 border border-red-200 dark:border-red-800">
+            <div class="text-2xl mb-2">⭕</div>
+            <div class="text-sm text-red-600 dark:text-red-400 font-medium">Away Time</div>
+            <div id="away-time" class="text-xl font-bold text-red-900 dark:text-red-100">--</div>
+            <div id="away-pct" class="text-xs text-red-600 dark:text-red-400">--</div>
         </div>
-        <div class="metric-card gradient">
-            <div class="metric-icon">⏱️</div>
-            <div class="metric-label">Total Productive</div>
-            <div class="metric-value" id="total-time">--</div>
-            <div class="metric-sublabel">Full day activity</div>
+        <div class="bg-gradient-to-br from-purple-50 dark:from-purple-900/20 to-purple-100 dark:to-purple-800/20 rounded-lg p-4 border border-purple-200 dark:border-purple-800">
+            <div class="text-2xl mb-2">⏱️</div>
+            <div class="text-sm text-purple-600 dark:text-purple-400 font-medium">Total Productive</div>
+            <div id="total-time" class="text-xl font-bold text-purple-900 dark:text-purple-100">--</div>
+            <div class="text-xs text-purple-600 dark:text-purple-400">Full day activity</div>
         </div>
     </div>
 
     <!-- 7-Day Chart -->
-    <h3 class="section-title">📈 Screen Time (Last 7 Days)</h3>
-    <div class="chart-card full-width">
-        <div class="chart-container-lg" style="height: 300px; position: relative;">
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">📈 Screen Time (Last 7 Days)</h3>
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div class="h-80 relative">
             <canvas id="screentime-history-chart"></canvas>
         </div>
     </div>
 </div>
 
-<!-- TAB: ACTIVITY -->
-<div id="tab-activity" class="tab-content" style="display:none;">
-    <div class="grid-2-col">
+<!-- Tab: Activity -->
+<div id="tab-activity" class="tab-content hidden">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- App Usage -->
-        <div class="card">
-            <div class="card-header">
-                <h3>📱 Application Usage</h3>
-                <span id="apps-count" class="badge badge-info">0 apps</span>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">📱 Application Usage</h3>
+                <span id="apps-count" class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0 apps</span>
             </div>
-            <div class="table-search">
-                <input type="text" id="app-search" placeholder="Search apps..." class="search-input-sm">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                <input type="text" id="app-search" placeholder="Search apps..." class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
             </div>
-            <div id="app-ongoing-section" class="ongoing-section" style="display:none;">
-                <div class="ongoing-header">🎯 Currently Using</div>
-                <div class="ongoing-row">
-                    <span id="ongoing-app-name" class="ongoing-name">--</span>
-                    <span id="ongoing-app-duration" class="ongoing-duration">--</span>
+            <div id="app-ongoing-section" class="hidden bg-green-50 dark:bg-green-900/20 p-3 border-b border-gray-200 dark:border-gray-700">
+                <div class="text-xs font-semibold text-green-700 dark:text-green-300 uppercase tracking-wide mb-1">🎯 Currently Using</div>
+                <div class="flex justify-between items-center">
+                    <span id="ongoing-app-name" class="font-semibold text-gray-900 dark:text-gray-100">--</span>
+                    <span id="ongoing-app-duration" class="font-mono font-semibold text-green-600 dark:text-green-400">--</span>
                 </div>
             </div>
-            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                <table class="data-table sticky-header" id="apps-table">
-                    <thead>
+            <div class="max-h-96 overflow-y-auto">
+                <table class="w-full" id="apps-table">
+                    <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
                         <tr>
-                            <th>Application</th>
-                            <th class="text-right">Sessions</th>
-                            <th class="text-right">Duration</th>
-                            <th class="text-right">%</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Application</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Sessions</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">%</th>
                         </tr>
                     </thead>
-                    <tbody id="apps-body">
+                    <tbody id="apps-body" class="divide-y divide-gray-200 dark:divide-gray-600">
                         <tr>
-                            <td colspan="4" class="text-center">Loading...</td>
+                            <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -217,34 +230,34 @@
         </div>
 
         <!-- Domain Usage -->
-        <div class="card">
-            <div class="card-header">
-                <h3>🌐 Domain Usage</h3>
-                <span id="domains-count" class="badge badge-info">0 domains</span>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🌐 Domain Usage</h3>
+                <span id="domains-count" class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0 domains</span>
             </div>
-            <div class="table-search">
-                <input type="text" id="domain-search" placeholder="Search domains..." class="search-input-sm">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                <input type="text" id="domain-search" placeholder="Search domains..." class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
             </div>
-            <div id="domain-ongoing-section" class="ongoing-section" style="display:none;">
-                <div class="ongoing-header">🌍 Currently Browsing</div>
-                <div class="ongoing-row">
-                    <span id="ongoing-domain-name" class="ongoing-name">--</span>
-                    <span id="ongoing-domain-duration" class="ongoing-duration">--</span>
+            <div id="domain-ongoing-section" class="hidden bg-green-50 dark:bg-green-900/20 p-3 border-b border-gray-200 dark:border-gray-700">
+                <div class="text-xs font-semibold text-green-700 dark:text-green-300 uppercase tracking-wide mb-1">🌍 Currently Browsing</div>
+                <div class="flex justify-between items-center">
+                    <span id="ongoing-domain-name" class="font-semibold text-gray-900 dark:text-gray-100">--</span>
+                    <span id="ongoing-domain-duration" class="font-mono font-semibold text-green-600 dark:text-green-400">--</span>
                 </div>
             </div>
-            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                <table class="data-table sticky-header" id="domains-table">
-                    <thead>
+            <div class="max-h-96 overflow-y-auto">
+                <table class="w-full" id="domains-table">
+                    <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
                         <tr>
-                            <th>Domain</th>
-                            <th class="text-right">Sessions</th>
-                            <th class="text-right">Duration</th>
-                            <th class="text-right">%</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Domain</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Sessions</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">%</th>
                         </tr>
                     </thead>
-                    <tbody id="domains-body">
+                    <tbody id="domains-body" class="divide-y divide-gray-200 dark:divide-gray-600">
                         <tr>
-                            <td colspan="4" class="text-center">Loading...</td>
+                            <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -253,51 +266,52 @@
     </div>
 </div>
 
-<!-- TAB: WEB -->
-<div id="tab-web" class="tab-content" style="display:none;">
-    <div class="card">
-        <div class="card-header">
-            <h3>🕐 Browser History (Today)</h3>
-            <span id="visits-count" class="badge badge-secondary">0 visits</span>
+<!-- Tab: Web -->
+<div id="tab-web" class="tab-content hidden">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+        <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🕐 Browser History (Today)</h3>
+            <span id="visits-count" class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full">0 visits</span>
         </div>
-        <div class="table-search">
-            <input type="text" id="visits-search" placeholder="Search sites..." class="search-input-sm">
+        <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+            <input type="text" id="visits-search" placeholder="Search sites..." class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
         </div>
-        <div class="sites-list" id="visits-list" style="max-height: 600px; overflow-y: auto;">
-            <div class="text-center text-muted p-4">Loading...</div>
+        <div id="visits-list" class="max-h-96 overflow-y-auto">
+            <div class="p-8 text-center text-gray-500 dark:text-gray-400">Loading...</div>
         </div>
     </div>
 </div>
 
-<!-- TAB: INVENTORY -->
-<div id="tab-inventory" class="tab-content" style="display:none;">
-    <div class="card">
-        <div class="card-header">
-            <h3>📦 Installed Applications</h3>
-            <div>
-                <span id="inventory-count" class="badge badge-info">0 apps</span>
-                <button onclick="exportTableToCSV('inventory-table', 'inventory.csv')"
-                    class="btn btn-sm btn-secondary ml-3">Export CSV</button>
+<!-- Tab: Inventory -->
+<div id="tab-inventory" class="tab-content hidden">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+        <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">📦 Installed Applications</h3>
+            <div class="flex items-center gap-3">
+                <span id="inventory-count" class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0 apps</span>
+                <button onclick="exportTableToCSV('inventory-table', 'inventory.csv')" class="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                    Export CSV
+                </button>
             </div>
         </div>
-        <div class="table-search">
-            <input type="text" id="inventory-search" placeholder="Search applications..." class="search-input-sm">
+        <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+            <input type="text" id="inventory-search" placeholder="Search applications..." class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
         </div>
-        <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
-            <table class="data-table sticky-header" id="inventory-table">
-                <thead>
+        <div class="max-h-96 overflow-y-auto">
+            <table class="w-full table-fixed" id="inventory-table">
+                <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
                     <tr>
-                        <th>Name</th>
-                        <th>Version</th>
-                        <th>Publisher</th>
-                        <th>Install Location</th>
-                        <th>Install Date</th>
-                        <th>Source</th>
+                        <th class="w-1/5 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
+                        <th class="w-16 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Version</th>
+                        <th class="w-1/6 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Publisher</th>
+                        <th class="w-1/3 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Install Location</th>
+                        <th class="w-24 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Install Date</th>
+                        <th class="w-20 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Source</th>
                     </tr>
                 </thead>
-                <tbody id="inventory-body">
+                <tbody id="inventory-body" class="divide-y divide-gray-200 dark:divide-gray-600">
                     <tr>
-                        <td colspan="6" class="text-center">Loading...</td>
+                        <td colspan="6" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...</td>
                     </tr>
                 </tbody>
             </table>
@@ -305,507 +319,6 @@
     </div>
 </div>
 
-{% endblock %}
-
-{% block extra_css %}
-<style>
-    /* Tab Navigation */
-    .tabs-container {
-        margin: 0 0 1.5rem 0;
-    }
-
-    .tabs-nav {
-        display: flex;
-        background: var(--card-bg);
-        border-radius: 10px;
-        padding: 4px;
-        border: 1px solid var(--border);
-    }
-
-    .tab-btn {
-        flex: 1;
-        padding: 0.6rem 1rem;
-        border: none;
-        background: transparent;
-        color: var(--text-secondary);
-        font-weight: 500;
-        font-size: 0.85rem;
-        cursor: pointer;
-        border-radius: 8px;
-        transition: all 0.2s ease;
-    }
-
-    .tab-btn:hover {
-        color: var(--text);
-        background: var(--bg-secondary);
-    }
-
-    .tab-btn.active {
-        color: white;
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-        box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
-    }
-
-    .tab-content {
-        animation: fadeIn 0.3s ease;
-    }
-
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-        }
-
-        to {
-            opacity: 1;
-        }
-    }
-
-    /* Activity Badge */
-    .activity-badge-container {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 0.25rem;
-        margin-right: 1rem;
-    }
-
-    .activity-badge-label {
-        font-size: 0.7rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        color: var(--text-tertiary);
-    }
-
-    .activity-badge {
-        display: inline-block;
-        padding: 0.5rem 1rem;
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-        color: white;
-        border-radius: 2rem;
-        font-weight: 600;
-        font-size: 0.85rem;
-        max-width: 200px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    /* Live Status Banner */
-    .live-status-banner {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
-        border-radius: 12px;
-        padding: 1rem 1.5rem;
-        margin: 1rem 0 1.5rem 0;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1.5rem;
-        color: white;
-        box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
-    }
-
-    .live-indicator {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .pulse {
-        width: 10px;
-        height: 10px;
-        background: #22c55e;
-        border-radius: 50%;
-        animation: pulse-glow 1.5s ease-in-out infinite;
-        box-shadow: 0 0 8px #22c55e;
-    }
-
-    @keyframes pulse-glow {
-
-        0%,
-        100% {
-            opacity: 1;
-        }
-
-        50% {
-            opacity: 0.5;
-            transform: scale(1.3);
-        }
-    }
-
-    .live-text {
-        font-weight: 700;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-    }
-
-    .live-details {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 0.15rem;
-    }
-
-    .live-app {
-        font-weight: 700;
-        font-size: 1rem;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .live-window {
-        font-size: 0.8rem;
-        opacity: 0.85;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .live-duration {
-        font-size: 1.1rem;
-        font-weight: 700;
-        font-family: 'JetBrains Mono', monospace;
-        background: rgba(255, 255, 255, 0.2);
-        padding: 0.4rem 0.8rem;
-        border-radius: 8px;
-    }
-
-    /* Agent Info Grid */
-    .agent-info-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 1rem;
-    }
-
-    @media (max-width: 768px) {
-        .agent-info-grid {
-            grid-template-columns: repeat(2, 1fr);
-        }
-    }
-
-    @media (max-width: 480px) {
-        .agent-info-grid {
-            grid-template-columns: 1fr;
-        }
-    }
-
-    .info-item {
-        padding: 0.75rem;
-        background: var(--bg-secondary);
-        border-radius: 0.5rem;
-    }
-
-    .info-label {
-        font-size: 0.8rem;
-        color: var(--text-tertiary);
-        margin-bottom: 0.25rem;
-    }
-
-    .info-value {
-        font-weight: 600;
-        color: var(--text);
-    }
-
-    /* Table Search */
-    .table-search {
-        padding: 0.5rem 1rem;
-        background: var(--card-bg);
-    }
-
-    .search-input-sm {
-        width: 100%;
-        padding: 0.5rem 0.875rem;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        font-size: 0.85rem;
-        background: var(--bg-secondary);
-        color: var(--text);
-        transition: all 0.2s ease;
-    }
-
-    .search-input-sm:focus {
-        outline: none;
-        border-color: #6366f1;
-        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
-        background: var(--card-bg);
-    }
-
-    .search-input-sm::placeholder {
-        color: var(--text-tertiary);
-    }
-
-    /* Sticky Headers */
-    .sticky-header thead {
-        position: sticky;
-        top: 0;
-        z-index: 10;
-    }
-
-    .sticky-header thead th {
-        background: var(--card-bg);
-        border-bottom: 2px solid var(--border);
-    }
-
-    /* Usage Progress Bars - Fixed Alignment */
-    .usage-bar-container {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        justify-content: flex-end;
-        min-width: 120px;
-    }
-
-    .usage-bar-container span {
-        min-width: 40px;
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-    }
-
-    .usage-bar {
-        flex: 0 0 60px;
-        height: 6px;
-        background: var(--border);
-        border-radius: 3px;
-        overflow: hidden;
-    }
-
-    .usage-bar-fill {
-        height: 100%;
-        border-radius: 3px;
-    }
-
-    .usage-bar-fill.high {
-        background: linear-gradient(90deg, #10b981, #34d399);
-    }
-
-    .usage-bar-fill.medium {
-        background: linear-gradient(90deg, #f59e0b, #fbbf24);
-    }
-
-    .usage-bar-fill.low {
-        background: linear-gradient(90deg, #6b7280, #9ca3af);
-    }
-
-    /* Ongoing Section */
-    .ongoing-section {
-        background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
-        padding: 0.75rem 1rem;
-        border-bottom: 1px solid var(--border);
-    }
-
-    .ongoing-header {
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: #059669;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 0.25rem;
-    }
-
-    .ongoing-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .ongoing-name {
-        font-weight: 600;
-        font-size: 0.95rem;
-    }
-
-    .ongoing-duration {
-        font-family: monospace;
-        font-weight: 600;
-        color: #10b981;
-    }
-
-    /* Site Items */
-    .site-item {
-        padding: 0.75rem 1rem;
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        gap: 1rem;
-        align-items: center;
-    }
-
-    .site-item:hover {
-        background: var(--bg-secondary);
-    }
-
-    .site-item .time {
-        font-size: 0.75rem;
-        color: var(--text-tertiary);
-        min-width: 80px;
-        font-family: monospace;
-    }
-
-    .site-item .domain {
-        font-weight: 500;
-        flex: 1;
-    }
-
-    /* Section Title */
-    .section-title {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: var(--text);
-        margin: 1.5rem 0 1rem 0;
-    }
-
-    /* Grid 2 Column */
-    .grid-2-col {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 1.5rem;
-    }
-
-    @media (max-width: 992px) {
-        .grid-2-col {
-            grid-template-columns: 1fr;
-        }
-    }
-
-    /* ================================================================
-       INVENTORY TABLE - ALL 6 COLUMNS, NO HORIZONTAL SCROLL
-       Text wrapping enabled, compact layout
-       ================================================================ */
-
-    /* Remove horizontal scroll from table container */
-    #tab-inventory .table-responsive {
-        overflow-x: hidden !important;
-    }
-
-    #inventory-table {
-        table-layout: fixed;
-        width: 100%;
-        border-collapse: collapse;
-    }
-
-    /* Column widths - ALL 6 columns always visible */
-    #inventory-table th:nth-child(1),
-    #inventory-table td:nth-child(1) {
-        width: 20%;
-        /* Name */
-    }
-
-    #inventory-table th:nth-child(2),
-    #inventory-table td:nth-child(2) {
-        width: 8%;
-        /* Version */
-    }
-
-    #inventory-table th:nth-child(3),
-    #inventory-table td:nth-child(3) {
-        width: 15%;
-        /* Publisher */
-    }
-
-    #inventory-table th:nth-child(4),
-    #inventory-table td:nth-child(4) {
-        width: 32%;
-        /* Install Location - largest for paths */
-    }
-
-    #inventory-table th:nth-child(5),
-    #inventory-table td:nth-child(5) {
-        width: 12%;
-        /* Install Date */
-    }
-
-    #inventory-table th:nth-child(6),
-    #inventory-table td:nth-child(6) {
-        width: 13%;
-        /* Source */
-    }
-
-    /* Base cell styling - FORCE text wrapping */
-    #inventory-table td {
-        white-space: normal !important;
-        word-break: break-word;
-        overflow-wrap: break-word;
-        vertical-align: top;
-        padding: 0.4rem 0.3rem;
-        line-height: 1.3;
-        font-size: 0.8rem;
-    }
-
-    /* Header cells - compact */
-    #inventory-table th {
-        padding: 0.4rem 0.3rem;
-        font-size: 0.7rem;
-        white-space: nowrap;
-    }
-
-    /* Name column - bold, break words */
-    #inventory-table td:nth-child(1) {
-        font-weight: 500;
-        word-break: break-word;
-    }
-
-    /* Version column - monospace, BREAK ALL for long versions */
-    #inventory-table td:nth-child(2) {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.7rem;
-        word-break: break-all;
-    }
-
-    /* Publisher column - break words */
-    #inventory-table td:nth-child(3) {
-        font-size: 0.75rem;
-        word-break: break-word;
-    }
-
-    /* Install Location - SMALLEST font, BREAK ALL for long paths */
-    #inventory-table td:nth-child(4) {
-        font-size: 0.65rem;
-        color: var(--text-tertiary);
-        font-family: 'JetBrains Mono', monospace;
-        word-break: break-all;
-        line-height: 1.2;
-    }
-
-    /* Install Date - nowrap if possible, break if needed */
-    #inventory-table td:nth-child(5) {
-        font-size: 0.75rem;
-        white-space: normal;
-    }
-
-    /* Source badge column - center aligned */
-    #inventory-table td:nth-child(6) {
-        text-align: center;
-        font-size: 0.7rem;
-    }
-
-    /* Smaller screens - just reduce font sizes, keep all columns */
-    @media (max-width: 1400px) {
-        #inventory-table td {
-            font-size: 0.75rem;
-            padding: 0.35rem 0.25rem;
-        }
-
-        #inventory-table td:nth-child(4) {
-            font-size: 0.6rem;
-        }
-    }
-
-    @media (max-width: 1024px) {
-        #inventory-table td {
-            font-size: 0.7rem;
-            padding: 0.3rem 0.2rem;
-        }
-
-        #inventory-table th {
-            font-size: 0.65rem;
-        }
-
-        #inventory-table td:nth-child(4) {
-            font-size: 0.55rem;
-        }
-    }
-</style>
 {% endblock %}
 
 {% block extra_js %}
@@ -817,10 +330,17 @@
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const tabName = btn.dataset.tab;
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-            document.getElementById(`tab-${tabName}`).style.display = 'block';
+            // Update button styles
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('bg-gradient-to-r', 'from-blue-500', 'to-purple-600', 'text-white', 'shadow-md');
+                b.classList.add('text-gray-600', 'dark:text-gray-300', 'hover:text-gray-900', 'dark:hover:text-gray-100', 'hover:bg-gray-50', 'dark:hover:bg-gray-700');
+            });
+            btn.classList.remove('text-gray-600', 'dark:text-gray-300', 'hover:text-gray-900', 'dark:hover:text-gray-100', 'hover:bg-gray-50', 'dark:hover:bg-gray-700');
+            btn.classList.add('bg-gradient-to-r', 'from-blue-500', 'to-purple-600', 'text-white', 'shadow-md');
+            
+            // Show/hide content
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
         });
     });
 
@@ -835,6 +355,7 @@
             });
         });
     }
+    
     document.addEventListener('DOMContentLoaded', () => {
         setupSearch('app-search', 'apps-body', 'tr');
         setupSearch('domain-search', 'domains-body', 'tr');
@@ -842,88 +363,7 @@
         setupSearch('visits-search', 'visits-list', '.site-item');
     });
 
-    // ================================================================
-    // Timezone Helpers
-    // ================================================================
-    // IMPORTANT: Server has TWO types of timestamps:
-    // 1. Server-side (last_seen, registered_at) - stored in UTC
-    // 2. Agent-side (app_sessions, domain_visits) - stored in IST
-    // ================================================================
-
-    // For SERVER-SIDE timestamps (UTC) - last_seen, registered_at, created_at
-    function formatDateTimeFromUTC(dateStr) {
-        if (!dateStr) return 'N/A';
-        let ts = dateStr;
-        if (!ts.endsWith('Z') && !ts.includes('+')) ts += 'Z';  // Treat as UTC
-        const date = new Date(ts);
-        if (isNaN(date.getTime())) return 'N/A';
-        return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
-    }
-
-    function getRelativeTimeFromUTC(dateStr) {
-        if (!dateStr) return 'N/A';
-        let ts = dateStr;
-        if (!ts.endsWith('Z') && !ts.includes('+')) ts += 'Z';  // Treat as UTC
-        const date = new Date(ts);
-        if (isNaN(date.getTime())) return 'N/A';
-        const now = new Date();
-        const diff = Math.floor((now - date) / 1000);
-        if (diff < 0) return 'Just now';  // Future timestamp
-        if (diff < 60) return 'Just now';
-        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-        return `${Math.floor(diff / 86400)}d ago`;
-    }
-
-    // For AGENT-SIDE timestamps (already IST) - app_sessions, domain_visits
-    function formatDateTimeIST(dateStr) {
-        if (!dateStr) return 'N/A';
-        // Parse as local time - already in IST
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return 'N/A';
-        return date.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
-    }
-
-    function formatTimeIST(dateStr) {
-        if (!dateStr) return 'N/A';
-        // Parse as local time - already in IST
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return 'N/A';
-        return date.toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
-    }
-
-    // For Browser History - convert UTC to IST for display
-    function formatBrowserHistoryTime(dateStr) {
-        if (!dateStr) return 'N/A';
-        // Server stores timestamps in UTC - treat as UTC if no timezone info
-        let ts = dateStr;
-        if (!ts.endsWith('Z') && !ts.includes('+')) {
-            ts += 'Z';  // Append Z to treat as UTC
-        }
-        const date = new Date(ts);
-        if (isNaN(date.getTime())) return 'N/A';
-        // Convert to IST (Asia/Kolkata = UTC+5:30)
-        return date.toLocaleString('en-IN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true,
-            timeZone: 'Asia/Kolkata'
-        });
-    }
-
-    function getRelativeTimeIST(dateStr) {
-        if (!dateStr) return 'N/A';
-        // Parse as local time - already in IST
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return 'N/A';
-        const now = new Date();
-        const diff = Math.floor((now - date) / 1000);
-        if (diff < 0) return 'Just now';
-        if (diff < 60) return 'Just now';
-        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-        return `${Math.floor(diff / 86400)}d ago`;
-    }
+    // Utility functions
     function formatTime(seconds) {
         if (!seconds || seconds < 0) return '0s';
         const h = Math.floor(seconds / 3600);
@@ -938,10 +378,9 @@
         if (!seconds || seconds < 0) return '0s';
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
-        const s = Math.floor(seconds % 60);
         if (h > 0) return h + 'h';
         if (m > 0) return m + 'm';
-        return s + 's';
+        return Math.floor(seconds % 60) + 's';
     }
 
     function getSelectedDate() {
@@ -960,66 +399,40 @@
         }
     }
 
-    // Copy Agent ID to clipboard (with fallback for HTTP)
+    // Copy Agent ID
     function copyAgentId() {
         const agentId = document.getElementById('agent-id-full').value;
-
-        // Try modern clipboard API first
         if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(agentId).then(() => {
                 showToast('Agent ID copied to clipboard!', 'success');
-            }).catch(err => {
-                console.error('Clipboard API failed:', err);
-                fallbackCopy(agentId);
-            });
+            }).catch(() => fallbackCopy(agentId));
         } else {
-            // Fallback for HTTP (non-secure contexts)
             fallbackCopy(agentId);
         }
     }
 
-    // Fallback copy using execCommand (works on HTTP)
     function fallbackCopy(text) {
         const textArea = document.createElement('textarea');
         textArea.value = text;
         textArea.style.position = 'fixed';
         textArea.style.left = '-999999px';
-        textArea.style.top = '-999999px';
         document.body.appendChild(textArea);
-        textArea.focus();
         textArea.select();
-
         try {
-            const successful = document.execCommand('copy');
-            if (successful) {
-                showToast('Agent ID copied to clipboard!', 'success');
-            } else {
-                showToast('Copy failed - please copy manually', 'error');
-            }
-        } catch (err) {
-            console.error('Fallback copy failed:', err);
+            document.execCommand('copy');
+            showToast('Agent ID copied to clipboard!', 'success');
+        } catch {
             showToast('Copy failed - please copy manually', 'error');
         }
-
         document.body.removeChild(textArea);
     }
 
-    // Toast notification helper
     function showToast(message, type = 'success') {
-        // Remove existing toast
-        const existing = document.querySelector('.toast');
-        if (existing) existing.remove();
-
         const toast = document.createElement('div');
-        toast.className = 'toast';
+        toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg text-white font-medium z-50 ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`;
         toast.textContent = message;
-        toast.style.background = type === 'success' ? 'var(--success)' : 'var(--danger)';
         document.body.appendChild(toast);
-
-        setTimeout(() => {
-            toast.style.animation = 'slideOutDown 0.3s ease';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
+        setTimeout(() => toast.remove(), 3000);
     }
 
     // Main data loader
@@ -1034,78 +447,54 @@
             if (data.agent.username) {
                 document.getElementById('agent-title').textContent = `👤 ${data.agent.username}`;
             }
-            // registered_at and last_seen are server-side UTC timestamps
-            document.getElementById('registered-at').textContent = data.agent.registered_at ? formatDateTimeFromUTC(data.agent.registered_at) : '-';
-            // first_seen_today is agent-side IST timestamp
-            document.getElementById('first-seen-today').textContent = data.agent.first_seen_today ? formatTimeIST(data.agent.first_seen_today) : 'No activity';
-
-            // FIX: Use last_seen_today for historical views, last_seen for today
-            if (data.agent.is_viewing_today && data.agent.last_seen) {
-                // Viewing today - show relative time
-                document.getElementById('last-seen').innerHTML = `${getRelativeTimeFromUTC(data.agent.last_seen)}<br><small class="text-muted">${formatDateTimeFromUTC(data.agent.last_seen)}</small>`;
-            } else if (data.agent.last_seen_today) {
-                // Viewing historical date - show absolute time for that day
-                document.getElementById('last-seen').innerHTML = `${formatTimeIST(data.agent.last_seen_today)}<br><small class="text-muted">Last activity on selected date</small>`;
-            } else {
-                document.getElementById('last-seen').textContent = 'No activity';
-            }
-
-            // Show total tracked time if available
-            if (data.agent.total_tracked_seconds > 0) {
-                const trackedEl = document.getElementById('total-tracked-time');
-                if (trackedEl) {
-                    trackedEl.textContent = formatTime(data.agent.total_tracked_seconds);
-                }
-            }
+            document.getElementById('registered-at').textContent = data.agent.registered_at ? new Date(data.agent.registered_at).toLocaleDateString() : '-';
+            document.getElementById('first-seen-today').textContent = data.agent.first_seen_today ? new Date(data.agent.first_seen_today).toLocaleTimeString() : 'No activity';
+            document.getElementById('last-seen').textContent = data.agent.last_seen ? new Date(data.agent.last_seen).toLocaleString() : 'No activity';
         }
 
-        // Live status banner
+        // Live status
         if (data.live_status && data.live_status.current_app) {
-            document.getElementById('live-status-banner').style.display = 'flex';
+            document.getElementById('live-status-banner').classList.remove('hidden');
             document.getElementById('live-app-name').textContent = data.live_status.current_app;
             document.getElementById('live-window-title').textContent = data.live_status.window_title || '';
             document.getElementById('live-duration').textContent = formatTime(data.live_status.duration_seconds || 0);
             document.getElementById('current-activity').textContent = data.live_status.current_app;
-            const stateEl = document.getElementById('current-state');
-            stateEl.textContent = 'Active';
-            stateEl.className = 'badge badge-state-active';
+            document.getElementById('current-state').textContent = 'Active';
+            document.getElementById('current-state').className = 'inline-block px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full';
         } else {
-            document.getElementById('live-status-banner').style.display = 'none';
-            document.getElementById('current-activity').textContent = 'Offline';
-
-            const stateEl = document.getElementById('current-state');
-            if (stateEl) {
-                stateEl.textContent = 'Offline';
-                stateEl.className = 'badge badge-secondary';
-            }
+            document.getElementById('live-status-banner').classList.add('hidden');
+            document.getElementById('current-activity').innerHTML = '<span class="opacity-70">Offline</span>';
+            document.getElementById('current-state').textContent = 'Offline';
+            document.getElementById('current-state').className = 'inline-block px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full';
         }
 
-        // Screen time - use actual database values
+        // Screen time
         const st = data.screen_time || {};
         const activeSeconds = st.active_seconds || 0;
         const idleSeconds = st.idle_seconds || 0;
         const lockedSeconds = st.locked_seconds || 0;
-        const awaySeconds = st.away_seconds || 0;  // From database (prolonged locks >2h)
-
+        const awaySeconds = st.away_seconds || 0;
         const totalTracked = activeSeconds + idleSeconds + lockedSeconds + awaySeconds;
 
         document.getElementById('active-time').textContent = formatTime(activeSeconds);
         document.getElementById('idle-time').textContent = formatTime(idleSeconds);
         document.getElementById('locked-time').textContent = formatTime(lockedSeconds);
         document.getElementById('away-time').textContent = formatTime(awaySeconds);
-        document.getElementById('total-time').textContent = formatTime(totalTracked);  // Total = Active + Idle + Locked + Away
+        document.getElementById('total-time').textContent = formatTime(totalTracked);
 
         if (totalTracked > 0) {
             document.getElementById('active-pct').textContent = Math.round((activeSeconds / totalTracked) * 100) + '%';
             document.getElementById('idle-pct').textContent = Math.round((idleSeconds / totalTracked) * 100) + '%';
             document.getElementById('locked-pct').textContent = Math.round((lockedSeconds / totalTracked) * 100) + '%';
             document.getElementById('away-pct').textContent = Math.round((awaySeconds / totalTracked) * 100) + '%';
-        } else {
-            document.getElementById('active-pct').textContent = '0%';
-            document.getElementById('idle-pct').textContent = '0%';
-            document.getElementById('locked-pct').textContent = '0%';
-            document.getElementById('away-pct').textContent = '0%';
         }
+
+        // Update Quick Stats
+        const totalScreenSeconds = activeSeconds + idleSeconds;
+        document.getElementById('quick-screen-time').textContent = formatTime(totalScreenSeconds);
+        document.getElementById('quick-apps-count').textContent = data.app_usage?.count || 0;
+        document.getElementById('quick-domains-count').textContent = data.domain_usage?.count || 0;
+        document.getElementById('quick-sessions-count').textContent = data.app_sessions?.count || 0;
 
         // Render tables
         renderAppUsage(data.app_usage, data.live_status);
@@ -1113,25 +502,6 @@
         renderDomainVisits(data.domain_visits);
         renderInventory(data.inventory);
         loadScreenTimeHistory();
-
-        // Update Quick Stats
-        updateQuickStats(data);
-    }
-
-    function updateQuickStats(data) {
-        // Screen time (active + idle)
-        const st = data.screen_time || {};
-        const totalScreenSeconds = (st.active_seconds || 0) + (st.idle_seconds || 0);
-        document.getElementById('quick-screen-time').textContent = formatTime(totalScreenSeconds);
-
-        // Apps used count
-        document.getElementById('quick-apps-count').textContent = data.app_usage?.count || 0;
-
-        // Domains visited count
-        document.getElementById('quick-domains-count').textContent = data.domain_usage?.count || 0;
-
-        // App sessions count
-        document.getElementById('quick-sessions-count').textContent = data.app_sessions?.count || 0;
     }
 
     function renderAppUsage(appData, liveStatus) {
@@ -1140,30 +510,32 @@
         document.getElementById('apps-count').textContent = `${appData?.count || 0} apps`;
 
         if (liveStatus?.current_app) {
-            document.getElementById('app-ongoing-section').style.display = 'block';
+            document.getElementById('app-ongoing-section').classList.remove('hidden');
             document.getElementById('ongoing-app-name').textContent = liveStatus.current_app;
             document.getElementById('ongoing-app-duration').textContent = formatTime(liveStatus.duration_seconds || 0);
         } else {
-            document.getElementById('app-ongoing-section').style.display = 'none';
+            document.getElementById('app-ongoing-section').classList.add('hidden');
         }
 
         if (!appData?.data?.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No data</td></tr>';
             return;
         }
 
         appData.data.forEach(app => {
             const pct = parseFloat(app.percentage) || 0;
-            const barClass = pct >= 20 ? 'high' : pct >= 5 ? 'medium' : 'low';
             const tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
             tr.innerHTML = `
-                <td>${app.app}</td>
-                <td class="text-right">${app.session_count || '-'}</td>
-                <td class="text-right font-mono">${formatTime(app.duration_seconds)}</td>
-                <td class="text-right">
-                    <div class="usage-bar-container">
-                        <div class="usage-bar"><div class="usage-bar-fill ${barClass}" style="width:${Math.min(pct, 100)}%"></div></div>
-                        <span>${app.percentage}%</span>
+                <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${app.app}</td>
+                <td class="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-300">${app.session_count || '-'}</td>
+                <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(app.duration_seconds)}</td>
+                <td class="px-4 py-3 text-right">
+                    <div class="flex items-center justify-end gap-2">
+                        <div class="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div class="h-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-full" style="width:${Math.min(pct, 100)}%"></div>
+                        </div>
+                        <span class="text-sm font-medium w-10 text-right">${app.percentage}%</span>
                     </div>
                 </td>
             `;
@@ -1177,31 +549,33 @@
         document.getElementById('domains-count').textContent = `${domainData?.count || 0} domains`;
 
         if (liveStatus?.current_domain) {
-            document.getElementById('domain-ongoing-section').style.display = 'block';
+            document.getElementById('domain-ongoing-section').classList.remove('hidden');
             document.getElementById('ongoing-domain-name').textContent = liveStatus.current_domain;
             document.getElementById('ongoing-domain-duration').textContent = formatTime(liveStatus.domain_duration || 0);
         } else {
-            document.getElementById('domain-ongoing-section').style.display = 'none';
+            document.getElementById('domain-ongoing-section').classList.add('hidden');
         }
 
         if (!domainData?.data?.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No data</td></tr>';
             return;
         }
 
         const total = domainData.data.reduce((sum, d) => sum + (d.duration_seconds || 0), 0);
         domainData.data.forEach(d => {
             const pct = total > 0 ? ((d.duration_seconds || 0) / total * 100).toFixed(1) : 0;
-            const barClass = pct >= 20 ? 'high' : pct >= 5 ? 'medium' : 'low';
             const tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
             tr.innerHTML = `
-                <td>${d.domain}</td>
-                <td class="text-right">${d.session_count || '-'}</td>
-                <td class="text-right font-mono">${formatTime(d.duration_seconds)}</td>
-                <td class="text-right">
-                    <div class="usage-bar-container">
-                        <div class="usage-bar"><div class="usage-bar-fill ${barClass}" style="width:${Math.min(pct, 100)}%"></div></div>
-                        <span>${pct}%</span>
+                <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${d.domain}</td>
+                <td class="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-300">${d.session_count || '-'}</td>
+                <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(d.duration_seconds)}</td>
+                <td class="px-4 py-3 text-right">
+                    <div class="flex items-center justify-end gap-2">
+                        <div class="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div class="h-full bg-gradient-to-r from-green-500 to-blue-500 rounded-full" style="width:${Math.min(pct, 100)}%"></div>
+                        </div>
+                        <span class="text-sm font-medium w-10 text-right">${pct}%</span>
                     </div>
                 </td>
             `;
@@ -1215,17 +589,17 @@
         document.getElementById('visits-count').textContent = `${visitsData?.count || 0} visits`;
 
         if (!visitsData?.data?.length) {
-            list.innerHTML = '<div class="text-center text-muted p-4">No browser history</div>';
+            list.innerHTML = '<div class="p-8 text-center text-gray-500">No browser history</div>';
             return;
         }
 
         visitsData.data.slice(0, 100).forEach(v => {
             const div = document.createElement('div');
-            div.className = 'site-item';
+            div.className = 'site-item flex items-center gap-4 p-3 border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700';
             div.innerHTML = `
-                <span class="time">${v.visited_at ? formatBrowserHistoryTime(v.visited_at) : ''}</span>
-                <span class="domain">${v.domain}</span>
-                <span class="text-muted">${v.browser || ''}</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400 font-mono w-20">${v.visited_at ? new Date(v.visited_at).toLocaleTimeString() : ''}</span>
+                <span class="font-medium flex-1 text-gray-900 dark:text-gray-100">${v.domain}</span>
+                <span class="text-sm text-gray-500 dark:text-gray-400">${v.browser || ''}</span>
             `;
             list.appendChild(div);
         });
@@ -1237,61 +611,42 @@
         document.getElementById('inventory-count').textContent = `${invData?.count || 0} apps`;
 
         if (!invData?.data?.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No inventory data</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No inventory data</td></tr>';
             return;
         }
 
         invData.data.forEach(app => {
             const tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
             tr.innerHTML = `
-                <td style="font-weight: 500;">${escapeHtml(app.name)}</td>
-                <td style="font-size: 0.875rem; color: var(--text-secondary);">${escapeHtml(app.version || '-')}</td>
-                <td style="font-size: 0.875rem;">${escapeHtml(cleanPublisher(app.publisher))}</td>
-                <td class="font-mono text-xs tooltip-container" data-tooltip="${escapeHtml(app.install_location || '')}" style="color: var(--text-tertiary);">
-                    ${escapeHtml(cleanInstallLocation(app.install_location))}
-                </td>
-                <td style="font-size: 0.875rem;">${formatInstallDate(app.install_date)}</td>
-                <td>${getSourceBadge(app.source)}</td>
+                <td class="px-3 py-2 font-medium text-sm break-words text-gray-900 dark:text-gray-100">${escapeHtml(app.name)}</td>
+                <td class="px-3 py-2 text-xs text-gray-600 dark:text-gray-300 font-mono break-all">${escapeHtml(app.version || '-')}</td>
+                <td class="px-3 py-2 text-xs break-words text-gray-900 dark:text-gray-100">${escapeHtml(cleanPublisher(app.publisher))}</td>
+                <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 font-mono break-all">${app.install_location || '-'}</td>
+                <td class="px-3 py-2 text-xs text-gray-900 dark:text-gray-100">${app.install_date ? new Date(app.install_date).toLocaleDateString() : '-'}</td>
+                <td class="px-3 py-2 text-center">${getSourceBadge(app.source)}</td>
             `;
             tbody.appendChild(tr);
         });
     }
 
-    // Clean publisher name from certificate strings
     function cleanPublisher(publisher) {
         if (!publisher || publisher === '-') return 'Unknown';
-
-        // Extract clean name from certificate string
-        // "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
         const cnMatch = publisher.match(/CN=([^,]+)/);
         const oMatch = publisher.match(/O=([^,]+)/);
-
-        if (cnMatch && cnMatch[1]) {
-            return cnMatch[1].trim();
-        } else if (oMatch && oMatch[1]) {
-            return oMatch[1].trim();
-        }
-
-        // If no certificate format, just truncate if too long
+        if (cnMatch && cnMatch[1]) return cnMatch[1].trim();
+        if (oMatch && oMatch[1]) return oMatch[1].trim();
         return publisher.length > 40 ? publisher.substring(0, 37) + '...' : publisher;
     }
 
-    // Clean install location for display
     function cleanInstallLocation(location) {
         if (!location || location === '-') return '-';
-
-        // Show only key parts: drive + ...filename
-        const parts = location.split('\\');
-        if (parts.length > 4) {
-            return `${parts[0]}\\...\\${parts[parts.length - 1]}`;
-        }
-        if (location.length > 40) {
-            return '...' + location.slice(-37);
-        }
+        const parts = location.split('\\\\');
+        if (parts.length > 4) return `${parts[0]}\\\\...\\\\${parts[parts.length - 1]}`;
+        if (location.length > 40) return '...' + location.slice(-37);
         return location;
     }
 
-    // Format install date nicely
     function formatInstallDate(dateStr) {
         if (!dateStr || dateStr === '-') return '-';
         try {
@@ -1303,7 +658,6 @@
         }
     }
 
-    // XSS Protection: Escape HTML entities
     function escapeHtml(text) {
         if (!text) return '';
         const div = document.createElement('div');
@@ -1312,14 +666,13 @@
     }
 
     function getSourceBadge(source) {
-        if (!source) return '<span class="badge badge-secondary">Unknown</span>';
-        if (source.includes('HKLM')) return '<span class="badge badge-info">System</span>';
-        if (source.includes('HKCU')) return '<span class="badge badge-warning">User</span>';
-        if (source.includes('Store')) return '<span class="badge badge-primary">Store</span>';
-        return `<span class="badge badge-secondary">${escapeHtml(source)}</span>`;
+        if (!source) return '<span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs rounded-full">Unknown</span>';
+        if (source.includes('HKLM')) return '<span class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs rounded-full">System</span>';
+        if (source.includes('HKCU')) return '<span class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 text-xs rounded-full">User</span>';
+        if (source.includes('Store')) return '<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs rounded-full">Store</span>';
+        return `<span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs rounded-full">${escapeHtml(source)}</span>`;
     }
 
-    // Screen Time History Chart (7 days)
     async function loadScreenTimeHistory() {
         const data = await fetchJSON(`/dashboard/api/agent/${AGENT_ID}/screentime`);
         if (!data) return;
@@ -1334,9 +687,9 @@
             data: {
                 labels: data.labels,
                 datasets: [
-                    { label: 'Active', data: data.active, backgroundColor: '#38bdf8', stack: 'Stack 0', borderRadius: 4 },
-                    { label: 'Idle', data: data.idle, backgroundColor: '#fbbf24', stack: 'Stack 0', borderRadius: 4 },
-                    { label: 'Locked', data: data.locked, backgroundColor: '#64748b', stack: 'Stack 0', borderRadius: 4 }
+                    { label: 'Active', data: data.active, backgroundColor: '#3b82f6', stack: 'Stack 0', borderRadius: 4 },
+                    { label: 'Idle', data: data.idle, backgroundColor: '#f59e0b', stack: 'Stack 0', borderRadius: 4 },
+                    { label: 'Locked', data: data.locked, backgroundColor: '#6b7280', stack: 'Stack 0', borderRadius: 4 }
                 ]
             },
             options: {
@@ -1371,7 +724,7 @@
             row.querySelectorAll('th, td').forEach(col => cols.push('"' + col.textContent.trim().replace(/"/g, '""') + '"'));
             csv.push(cols.join(','));
         });
-        const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
+        const blob = new Blob([csv.join('\\n')], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -1379,173 +732,9 @@
         a.click();
     }
 
-    // ============================================================
-    // Fix #13: Smart Auto-Refresh with Visibility Detection
-    // ============================================================
-    let autoRefreshInterval = null;
-    let lastUpdateTime = new Date();
-    const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
-
-    // ============================================================
-    // ENHANCED LIVE ACTIVITY DISPLAY
-    // ============================================================
-    const APP_ICONS = {
-        'Brave': '🛡️',
-        'Chrome': '🌐',
-        'Firefox': '🦊',
-        'Edge': '🔷',
-        'Safari': '🧭',
-        'Code': '💻',
-        'Visual Studio': '💻',
-        'Notepad': '📝',
-        'Excel': '📊',
-        'Word': '📄',
-        'PowerPoint': '📽️',
-        'Outlook': '📧',
-        'Teams': '👥',
-        'Slack': '💬',
-        'Discord': '🎮',
-        'Spotify': '🎵',
-        'WhatsApp': '💬',
-        'Telegram': '✈️',
-        'Terminal': '⬛',
-        'PowerShell': '⬛',
-        'Explorer': '📁',
-        'File Explorer': '📁'
-    };
-
-    function getAppIcon(appName) {
-        if (!appName) return '🖥️';
-        for (const [key, emoji] of Object.entries(APP_ICONS)) {
-            if (appName.toLowerCase().includes(key.toLowerCase())) {
-                return emoji;
-            }
-        }
-        return '🖥️';
-    }
-
-    function formatDurationShort(seconds) {
-        if (!seconds || seconds < 0) return '';
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        if (mins > 60) {
-            const h = Math.floor(mins / 60);
-            const m = mins % 60;
-            return `${h}h ${m}m`;
-        }
-        if (mins > 0) {
-            return `${mins}m ${secs}s`;
-        }
-        return `${secs}s`;
-    }
-
-    async function updateLiveActivity() {
-        try {
-            const data = await fetchJSON(`/dashboard/api/agent/${AGENT_ID}/current-activity`);
-
-            const activityBadge = document.getElementById('current-activity');
-            const liveBanner = document.getElementById('live-status-banner');
-            const liveAppName = document.getElementById('live-app-name');
-            const liveDuration = document.getElementById('live-duration');
-            const liveWindowTitle = document.getElementById('live-window-title');
-            const pulseDot = document.querySelector('.pulse');
-
-            if (data && data.current_app) {
-                const icon = getAppIcon(data.current_app);
-                const duration = formatDurationShort(data.duration_seconds);
-
-                // Update activity badge (header)
-                if (activityBadge) {
-                    activityBadge.innerHTML = `${icon} ${data.current_app}`;
-                }
-
-                // Update live status banner
-                if (liveBanner) liveBanner.style.display = 'flex';
-                if (liveAppName) liveAppName.textContent = data.current_app;
-                if (liveDuration) liveDuration.textContent = duration;
-                if (liveWindowTitle && data.window_title) {
-                    liveWindowTitle.textContent = data.window_title;
-                }
-
-                // Update pulse dot color based on state
-                if (pulseDot) {
-                    const stateColors = {
-                        'active': '#38bdf8',  // Sky Blue
-                        'idle': '#fbbf24',    // Amber
-                        'locked': '#64748b'   // Slate
-                    };
-                    pulseDot.style.background = stateColors[data.state] || '#38bdf8';
-                    pulseDot.style.boxShadow = `0 0 8px ${stateColors[data.state] || '#38bdf8'}`;
-                }
-
-                // Update current state badge
-                const stateEl = document.getElementById('current-state');
-                if (stateEl) {
-                    const stateLabels = { 'active': 'Active', 'idle': 'Idle', 'locked': 'Locked' };
-                    const stateClasses = { 'active': 'badge-state-active', 'idle': 'badge-state-idle', 'locked': 'badge-state-locked' };
-                    stateEl.textContent = stateLabels[data.state] || 'Active';
-                    stateEl.className = `badge ${stateClasses[data.state] || 'badge-state-active'}`;
-                }
-            } else {
-                // Offline or no activity
-                if (activityBadge) {
-                    activityBadge.innerHTML = '<span style="opacity: 0.7;">Offline</span>';
-                }
-                if (liveBanner) liveBanner.style.display = 'none';
-
-                const stateEl = document.getElementById('current-state');
-                if (stateEl) {
-                    stateEl.textContent = 'Offline';
-                    stateEl.className = 'badge badge-secondary';
-                }
-            }
-        } catch (error) {
-            console.error('Error updating live activity:', error);
-        }
-    }
-
-    function startAutoRefresh() {
-        if (autoRefreshInterval) return; // Already running
-
-        autoRefreshInterval = setInterval(async () => {
-            try {
-                await loadFullReport();
-                await updateLiveActivity();
-                lastUpdateTime = new Date();
-                console.log('[AutoRefresh] Data updated');
-            } catch (error) {
-                console.error('[AutoRefresh] Failed:', error);
-            }
-        }, AUTO_REFRESH_INTERVAL);
-
-        console.log('[AutoRefresh] Started (10s interval)');
-    }
-
-    function stopAutoRefresh() {
-        if (autoRefreshInterval) {
-            clearInterval(autoRefreshInterval);
-            autoRefreshInterval = null;
-            console.log('[AutoRefresh] Paused');
-        }
-    }
-
-    // Pause refresh when tab is hidden to save resources
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            stopAutoRefresh();
-        } else {
-            // Immediate refresh when coming back
-            loadFullReport();
-            updateLiveActivity();
-            startAutoRefresh();
-        }
-    });
-
     // Initialize
     document.addEventListener('DOMContentLoaded', () => {
         loadFullReport();
-        updateLiveActivity();
-        startAutoRefresh();
     });
 
     const dateSelect = document.getElementById('global-date-select');

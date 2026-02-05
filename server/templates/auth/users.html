@@ -1,289 +1,195 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Management - SentinelEdge</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-color: #f4f7f9;
-            --primary-color: #4a90e2;
-            --text-color: #333;
-            --card-bg: #ffffff;
-            --border-color: #e0e0e0;
-            --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            --success-color: #28a745;
-            --warning-color: #ffc107;
-            --danger-color: #dc3545;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>User Management • SentinelEdge</title>
 
-        body {
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-        }
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
 
-        .header {
-            background: var(--card-bg);
-            padding: 1rem 2rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 1px solid var(--border-color);
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { inter: ['Inter', 'sans-serif'] },
         }
-
-        .header h1 {
-            margin: 0;
-            font-weight: 700;
-            font-size: 1.5rem;
-            color: var(--primary-color);
-        }
-
-        .header-actions {
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-        }
-
-        .header-actions a {
-            text-decoration: none;
-            color: var(--text-color);
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            transition: background 0.2s;
-        }
-
-        .header-actions a:hover {
-            background: #f0f0f0;
-        }
-
-        .container {
-            padding: 2rem;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .card {
-            background-color: var(--card-bg);
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-            margin-bottom: 2rem;
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1.5rem;
-            padding-bottom: 1rem;
-            border-bottom: 2px solid var(--border-color);
-        }
-
-        .card-header h2 {
-            margin: 0;
-            color: var(--primary-color);
-        }
-
-        .btn {
-            padding: 0.6rem 1.2rem;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 0.9rem;
-            text-decoration: none;
-            cursor: pointer;
-            border: none;
-            transition: all 0.2s;
-        }
-
-        .btn-primary {
-            background-color: var(--primary-color);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background-color: #357ABD;
-        }
-
-        .btn-danger {
-            background-color: var(--danger-color);
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background-color: #c82333;
-        }
-
-        .btn-sm {
-            padding: 0.4rem 0.8rem;
-            font-size: 0.8rem;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th,
-        td {
-            border: 1px solid var(--border-color);
-            padding: 12px;
-            text-align: left;
-        }
-
-        th {
-            background-color: #f8f9fa;
-            font-weight: 600;
-            color: var(--primary-color);
-        }
-
-        tr:nth-child(even) {
-            background-color: #f9fafb;
-        }
-
-        tr:hover {
-            background-color: #e9ecef;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 0.25em 0.6em;
-            font-size: 0.75rem;
-            font-weight: 600;
-            border-radius: 0.25rem;
-        }
-
-        .badge-admin {
-            background-color: #6f42c1;
-            color: white;
-        }
-
-        .badge-user {
-            background-color: #17a2b8;
-            color: white;
-        }
-
-        .badge-success {
-            background-color: var(--success-color);
-            color: white;
-        }
-
-        .badge-danger {
-            background-color: var(--danger-color);
-            color: white;
-        }
-
-        .badge-warning {
-            background-color: var(--warning-color);
-            color: #333;
-        }
-
-        .alert {
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1.5rem;
-        }
-
-        .alert-success {
-            background-color: #d4edda;
-            border: 1px solid #c3e6cb;
-            color: #155724;
-        }
-
-        .alert-danger {
-            background-color: #f8d7da;
-            border: 1px solid #f5c6cb;
-            color: #721c24;
-        }
-
-        .actions {
-            display: flex;
-            gap: 0.5rem;
-        }
-    </style>
+      }
+    }
+  </script>
 </head>
 
-<body>
-    <div class="header">
-        <h1>User Management</h1>
-        <div class="header-actions">
-            <a href="{{ url_for('dashboard.dashboard_home') }}">← Back to Dashboard</a>
-            <span>|</span>
-            <span>Logged in as: <strong>{{ session.username }}</strong></span>
-            <a href="{{ url_for('auth.logout') }}">Logout</a>
+<body class="font-inter bg-slate-100 text-slate-900 min-h-screen flex flex-col">
+
+  <!-- ================= NAVBAR ================= -->
+  <nav class="bg-white border-b border-slate-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <!-- Brand -->
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-blue-600 text-white font-extrabold flex items-center justify-center">
+          SE
         </div>
+        <span class="text-lg font-bold text-slate-900">SentinelEdge</span>
+      </div>
+
+      <!-- User Info -->
+      <div class="flex items-center gap-6 text-sm">
+        <span class="text-slate-600">
+          Logged in as <strong class="text-slate-900">{{ session.username }}</strong>
+        </span>
+        <a href="{{ url_for('dashboard.dashboard_home') }}"
+           class="text-slate-600 hover:text-slate-900 transition">
+          Dashboard
+        </a>
+        <a href="{{ url_for('auth.logout') }}"
+           class="text-red-600 hover:text-red-700 font-medium transition">
+          Logout
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ================= PAGE CONTENT ================= -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-6 py-8">
+
+    <!-- Page Header -->
+    <div class="mb-8 flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-extrabold text-slate-900">User Management</h1>
+        <p class="mt-1 text-sm text-slate-500">
+          Manage dashboard access and user roles
+        </p>
+      </div>
+
+      <a href="{{ url_for('auth.add_user') }}"
+         class="inline-flex items-center px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition">
+        + Add User
+      </a>
     </div>
 
-    <div class="container">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-        {% for category, message in messages %}
-        <div class="alert alert-{{ category }}">{{ message }}</div>
-        {% endfor %}
-        {% endif %}
-        {% endwith %}
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+      <div class="mb-6 rounded-lg px-4 py-3 text-sm border
+        {% if category == 'success' %}bg-green-50 border-green-300 text-green-700
+        {% elif category == 'danger' %}bg-red-50 border-red-300 text-red-700
+        {% elif category == 'warning' %}bg-yellow-50 border-yellow-300 text-yellow-700
+        {% else %}bg-blue-50 border-blue-300 text-blue-700{% endif %}">
+        {{ message }}
+      </div>
+      {% endfor %}
+    {% endif %}
+    {% endwith %}
 
-        <div class="card">
-            <div class="card-header">
-                <h2>Dashboard Users</h2>
-                <a href="{{ url_for('auth.add_user') }}" class="btn btn-primary">+ Add User</a>
-            </div>
+    <!-- Users Table Card -->
+    <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
 
-            <table>
-                <thead>
-                    <tr>
-                        <th>Username</th>
-                        <th>Role</th>
-                        <th>Linked Username</th>
-                        <th>Status</th>
-                        <th>Last Login</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for user in users %}
-                    <tr>
-                        <td><strong>{{ user.username }}</strong></td>
-                        <td>
-                            {% if user.role == 'admin' %}
-                            <span class="badge badge-admin">Admin</span>
-                            {% else %}
-                            <span class="badge badge-user">User</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ user.linked_username or '—' }}</td>
-                        <td>
-                            {% if user.is_locked %}
-                            <span class="badge badge-danger">Locked</span>
-                            {% elif not user.is_active %}
-                            <span class="badge badge-warning">Inactive</span>
-                            {% else %}
-                            <span class="badge badge-success">Active</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Never' }}</td>
-                        <td class="actions">
-                            <a href="{{ url_for('auth.edit_user', user_id=user.id) }}"
-                                class="btn btn-primary btn-sm">Edit</a>
-                            {% if user.id != session.user_id %}
-                            <form action="{{ url_for('auth.delete_user', user_id=user.id) }}" method="POST"
-                                onsubmit="return confirm('Are you sure you want to delete this user?');"
-                                style="display: inline;">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-                            </form>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
+      <!-- Table Header -->
+      <div class="px-6 py-4 border-b border-slate-200 bg-slate-50">
+        <h2 class="text-lg font-semibold text-slate-900">
+          Dashboard Users
+        </h2>
+      </div>
+
+      <!-- Table -->
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="px-6 py-3 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                Username
+              </th>
+              <th class="px-6 py-3 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                Role
+              </th>
+              <th class="px-6 py-3 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                Linked User
+              </th>
+              <th class="px-6 py-3 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th class="px-6 py-3 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                Last Login
+              </th>
+              <th class="px-6 py-3 text-right font-semibold text-slate-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+
+          <tbody class="bg-white divide-y divide-slate-200">
+            {% for user in users %}
+            <tr class="hover:bg-slate-50 transition">
+              <td class="px-6 py-4 font-medium text-slate-900">
+                {{ user.username }}
+              </td>
+
+              <td class="px-6 py-4">
+                {% if user.role == 'admin' %}
+                  <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                    Admin
+                  </span>
+                {% else %}
+                  <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                    User
+                  </span>
+                {% endif %}
+              </td>
+
+              <td class="px-6 py-4 text-slate-700">
+                {{ user.linked_username or '—' }}
+              </td>
+
+              <td class="px-6 py-4">
+                {% if user.is_locked %}
+                  <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+                    Locked
+                  </span>
+                {% elif not user.is_active %}
+                  <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
+                    Inactive
+                  </span>
+                {% else %}
+                  <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                    Active
+                  </span>
+                {% endif %}
+              </td>
+
+              <td class="px-6 py-4 text-slate-700">
+              {{ user.last_login.strftime('%d-%m-%Y %I:%M %p') if user.last_login else 'Never' }}
+
+              </td>
+
+              <td class="px-6 py-4 text-right">
+                <div class="flex justify-end gap-2">
+                  <a href="{{ url_for('auth.edit_user', user_id=user.id) }}"
+                     class="px-3 py-1.5 rounded-md bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition">
+                    Edit
+                  </a>
+
+                  {% if user.id != session.user_id %}
+                  <form action="{{ url_for('auth.delete_user', user_id=user.id) }}"
+                        method="POST"
+                        onsubmit="return confirm('Are you sure you want to delete this user?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit"
+                      class="px-3 py-1.5 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition">
+                      Delete
+                    </button>
+                  </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
 </body>
-
 </html>

@@ -195,15 +195,42 @@ def can_view_agent(agent_id: str, username: str = None) -> bool:
         return True
     
     # User can only view their linked data
-    # Match by the Windows username from the agent data
     if g.current_user.linked_username:
-        # If username is provided (from query), check against it
-        if username:
-            return g.current_user.linked_username.lower() == username.lower()
+        # Import here to avoid circular imports
+        import server_models
+        from sqlalchemy import or_
         
-        # Otherwise, we need to check if this agent has data for the user's linked username
-        # This requires querying the database - let the caller handle this
-        return True  # Allow, but filter in query
+        # Check if this agent has data for the user's linked username
+        linked_username = g.current_user.linked_username
+        
+        # Check AgentCurrentStatus table for username match
+        agent_status = server_models.AgentCurrentStatus.query.filter(
+            server_models.AgentCurrentStatus.agent_id == agent_id
+        ).filter(
+            or_(
+                server_models.AgentCurrentStatus.username == linked_username,
+                server_models.AgentCurrentStatus.username.ilike(linked_username),
+                server_models.AgentCurrentStatus.username.ilike(f'%\\{linked_username}'),
+                server_models.AgentCurrentStatus.username.ilike(f'{linked_username}%')
+            )
+        ).first()
+        
+        if agent_status:
+            return True
+        
+        # Also check ScreenTime table as fallback
+        screen_time = server_models.ScreenTime.query.filter(
+            server_models.ScreenTime.agent_id == agent_id
+        ).filter(
+            or_(
+                server_models.ScreenTime.username == linked_username,
+                server_models.ScreenTime.username.ilike(linked_username),
+                server_models.ScreenTime.username.ilike(f'%\\{linked_username}'),
+                server_models.ScreenTime.username.ilike(f'{linked_username}%')
+            )
+        ).first()
+        
+        return screen_time is not None
     
     return False
 

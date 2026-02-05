@@ -3,14 +3,19 @@
 {% block title %}Registered Agents - SentinelEdge Dashboard{% endblock %}
 
 {% block content %}
-<div class="page-header fade-in">
+<div class="flex items-center justify-between mb-8">
     <div>
-        <h1>🖥️ Registered Agents</h1>
-        <p class="text-secondary">Full list of registered systems and their current state</p>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+            </svg>
+            Registered Agents
+        </h1>
+        <p class="text-gray-600 dark:text-gray-400 mt-1">Full list of registered systems and their current state</p>
     </div>
-    <div class="header-actions">
-        <input type="text" id="agent-search" placeholder="Search hostname, user, or ID..." class="search-input">
-        <select id="status-filter" class="filter-select">
+    <div class="flex items-center gap-4">
+        <input type="text" id="agent-search" placeholder="Search hostname, user, or ID..." class="px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        <select id="status-filter" class="px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
             <option value="all">All Agents</option>
             <option value="active">Active Now</option>
             <option value="idle">Idle</option>
@@ -19,29 +24,29 @@
     </div>
 </div>
 
-<div class="card fade-in">
-    <div class="table-responsive">
-        <table class="data-table" id="agents-table">
-            <thead>
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-600" id="agents-table">
+            <thead class="bg-gray-50 dark:bg-gray-700">
                 <tr>
-                    <th class="sortable" onclick="sortTable(0)">Hostname & ID</th>
-                    <th class="sortable" onclick="sortTable(1)">User</th>
-                    <th class="sortable" onclick="sortTable(2)">Status</th>
-                    <th class="sortable" onclick="sortTable(3)">Current Activity</th>
-                    <th class="sortable" onclick="sortTable(4)">Screen Time</th>
-                    <th>Top App</th>
-                    <th>Apps</th>
-                    <th>Domains</th>
-                    <th>Inventory</th>
-                    <th>Last Seen</th>
-                    <th class="text-right">Actions</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onclick="sortTable(0)">Hostname & ID</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onclick="sortTable(1)">User</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onclick="sortTable(2)">Status</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onclick="sortTable(3)">Current Activity</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600" onclick="sortTable(4)">Screen Time</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Top App</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Apps</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Domains</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Inventory</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last Seen</th>
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                 </tr>
             </thead>
-            <tbody id="agents-body">
+            <tbody id="agents-body" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-600">
                 <tr>
-                    <td colspan="11" class="text-center p-5">
-                        <div class="spinner"></div>
-                        <p class="mt-2 text-tertiary">Loading fleet data...</p>
+                    <td colspan="11" class="px-6 py-12 text-center">
+                        <div class="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto mb-4"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Loading fleet data...</p>
                     </td>
                 </tr>
             </tbody>
@@ -52,6 +57,57 @@
 
 {% block extra_js %}
 <script>
+    // Helper functions
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    function getRelativeTimeIST(timestamp) {
+        const now = new Date();
+        const time = new Date(timestamp);
+        const diffMs = now - time;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMins / 60);
+        const diffDays = Math.floor(diffHours / 24);
+
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        return time.toLocaleDateString();
+    }
+
+    function formatTime(seconds) {
+        if (!seconds || seconds === 0) return '0m';
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        return `${minutes}m`;
+    }
+
+    async function fetchJSON(url) {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error('Fetch error:', error);
+            return null;
+        }
+    }
+
+    function showToast(message, type = 'info') {
+        console.log(`[${type.toUpperCase()}] ${message}`);
+    }
+
     let allAgents = [];
 
     async function loadAgents() {
@@ -93,10 +149,14 @@
         if (filtered.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="11" class="text-center p-5">
-                        <div class="text-4xl mb-2">🔍</div>
-                        <p class="text-lg font-bold text-secondary">No agents matching your criteria</p>
-                        <p class="text-sm text-tertiary">Try adjusting your search or filter</p>
+                    <td colspan="11" class="px-6 py-12 text-center">
+                        <div class="text-4xl mb-4">
+                            <svg class="w-12 h-12 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
+                        </div>
+                        <p class="text-lg font-semibold text-gray-600 dark:text-gray-300">No agents matching your criteria</p>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Try adjusting your search or filter</p>
                     </td>
                 </tr>`;
             return;
@@ -109,24 +169,24 @@
             let statusHtml;
             if (agent.telemetry_stale) {
                 // Online but not sending data - SILENT FAILURE!
-                statusHtml = '<span class="badge badge-warning" title="⚠️ Agent is online but not sending data!">⚠️ Stale</span>';
+                statusHtml = '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800" title="⚠️ Agent is online but not sending data!">⚠️ Stale</span>';
             } else if (agent.is_online) {
-                statusHtml = '<span class="badge badge-success">🟢 Online</span>';
+                statusHtml = '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">🟢 Online</span>';
             } else {
-                statusHtml = '<span class="badge badge-danger">🔴 Offline</span>';
+                statusHtml = '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">🔴 Offline</span>';
             }
 
             // Add operational status indicator
             if (agent.operational_status === 'DEGRADED') {
-                statusHtml += '<br><small class="text-warning">⚠️ Degraded</small>';
+                statusHtml += '<br><small class="text-yellow-600">⚠️ Degraded</small>';
             }
 
             // Current activity with state icon
-            let currentActivity = '<span class="text-muted">-</span>';
+            let currentActivity = '<span class="text-gray-500">-</span>';
             if (agent.current_app) {
                 const stateIcon = agent.current_state === 'active' ? '🎯' :
                     agent.current_state === 'idle' ? '💤' : '🔒';
-                currentActivity = `<span class="current-app">${stateIcon} ${agent.current_app}</span>`;
+                currentActivity = `<span class="text-gray-900 dark:text-gray-100">${stateIcon} ${agent.current_app}</span>`;
             }
 
             // Relative time (IST)
@@ -139,25 +199,25 @@
             const screenTimeTitle = `Active: ${formatTime(agent.active_seconds || 0)}, Idle: ${formatTime(agent.idle_seconds || 0)}, Locked: ${formatTime(agent.locked_seconds || 0)}`;
 
             tr.innerHTML = `
-                <td>
-                    <a href="/dashboard/agent/${agent.agent_id}" class="agent-link">
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <a href="/dashboard/agent/${agent.agent_id}" class="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">
                         <strong>${agent.hostname || 'Unknown'}</strong>
                     </a>
-                    <br><small class="text-muted font-mono">${agent.agent_id.slice(0, 12)}...</small>
+                    <br><small class="text-gray-500 dark:text-gray-400 font-mono text-xs">${agent.agent_id.slice(0, 12)}...</small>
                 </td>
-                <td>${agent.username || '-'}</td>
-                <td>${statusHtml}</td>
-                <td>${currentActivity}</td>
-                <td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.username || '-'}</td>
+                <td class="px-6 py-4 whitespace-nowrap">${statusHtml}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm">${currentActivity}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                     <span title="${screenTimeTitle}">${screenTime}</span>
                 </td>
-                <td>${agent.top_app || '-'}</td>
-                <td>${agent.total_apps_used || 0}</td>
-                <td>${agent.domains_visited || 0}</td>
-                <td>${agent.installed_apps || 0}</td>
-                <td><span title="${agent.last_seen || ''}">${lastSeenText}</span></td>
-                <td class="text-right">
-                    <a href="/dashboard/agent/${agent.agent_id}" class="btn btn-sm btn-primary">
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.top_app || '-'}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.total_apps_used || 0}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.domains_visited || 0}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.installed_apps || 0}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400"><span title="${agent.last_seen || ''}">${lastSeenText}</span></td>
+                <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
+                    <a href="/dashboard/agent/${agent.agent_id}" class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 transition-colors">
                         View
                     </a>
                 </td>

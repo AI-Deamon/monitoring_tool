@@ -3,100 +3,118 @@
 {% block title %}Overview - SentinelEdge Dashboard{% endblock %}
 
 {% block content %}
-<div class="page-header fade-in">
+<div class="flex items-center justify-between mb-8">
     <div>
-        <h1>🛡️ Dashboard Overview</h1>
-        <p class="text-secondary">Fleet-wide activity and agent status summary</p>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><img src="{{ url_for('static', filename='dashboard.png') }}" class="w-8 h-8 mr-4" /> Dashboard Overview</h1>
+        <p class="text-gray-600 dark:text-gray-400 mt-1">Fleet-wide activity and agent status summary</p>
     </div>
-    <div class="header-actions">
-        <span id="last-updated" class="text-sm text-tertiary">Last updated: Just now</span>
+    <div class="flex items-center gap-4">
+        <span id="last-updated" class="text-sm text-gray-500 dark:text-gray-400">Last updated: Just now</span>
         <span class="refresh-indicator" id="refresh-indicator">
-            <span class="spinner"></span>
+            <div class="w-5 h-5 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin"></div>
         </span>
     </div>
 </div>
 
 <!-- Fleet Summary Cards -->
-<div class="metrics-grid fade-in">
-    <div class="metric-card primary">
-        <div class="metric-icon">👥</div>
-        <div class="metric-label">Total Agents</div>
-        <p id="total-agents" class="metric-value">-</p>
-        <div class="metric-sublabel">Registered fleet size</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-shadow">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 bg-primary-100 dark:bg-primary-900 rounded-lg flex items-center justify-center text-2xl"><img src="{{ url_for('static', filename='agents.png') }}" class="w-8 h-8" /></div>
+            <div>
+                <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Total Agents</div>
+                <p id="total-agents" class="text-2xl font-bold text-gray-900 dark:text-gray-100">-</p>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Registered fleet size</div>
+            </div>
+        </div>
     </div>
-    <div class="metric-card success">
-        <div class="metric-icon">🟢</div>
-        <div class="metric-label">Online Now</div>
-        <p id="active-agents" class="metric-value">-</p>
-        <div class="metric-sublabel">Active in last 5 mins</div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-shadow">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 bg-success-100 dark:bg-success-900 rounded-lg flex items-center justify-center text-2xl"><img src="{{ url_for('static', filename='online.png') }}" class="w-8 h-8" /></div>
+            <div>
+                <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Online Now</div>
+                <p id="active-agents" class="text-2xl font-bold text-success-600 dark:text-success-400">-</p>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Active in last 5 mins</div>
+            </div>
+        </div>
     </div>
-    <div class="metric-card danger">
-        <div class="metric-icon">🔴</div>
-        <div class="metric-label">Offline</div>
-        <p id="offline-agents" class="metric-value">-</p>
-        <div class="metric-sublabel">Agents currently disconnected</div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-shadow">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12   rounded-lg flex items-center justify-center text-2xl"><img src="{{ url_for('static', filename='no.png') }}" class="w-8 h-8" /></div>
+            <div>
+                <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Offline</div>
+                <p id="offline-agents" class="text-2xl font-bold text-red-600 dark:text-red-400">-</p>
+                <div class="text-xs text-gray-500 dark:text-gray-400">Agents currently disconnected</div>
+            </div>
+        </div>
     </div>
 </div>
 
 
 <!-- Charts Row -->
-<div class="charts-grid fade-in">
-    <div class="chart-card">
-        <h3>Agent Status</h3>
-        <div class="chart-container">
-            <canvas id="agent-status-chart"></canvas>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Agent Status</h3>
+        </div>
+        <div class="p-6">
+            <div class="h-64 relative">
+                <canvas id="agent-status-chart"></canvas>
+            </div>
         </div>
     </div>
-    <div class="chart-card">
-        <h3>Fleet Screen Time Breakdown</h3>
-        <div class="chart-container">
-            <canvas id="screentime-chart"></canvas>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Fleet Screen Time Breakdown</h3>
+        </div>
+        <div class="p-6">
+            <div class="h-64 relative">
+                <canvas id="screentime-chart"></canvas>
+            </div>
         </div>
     </div>
 </div>
 
 <!-- Top Apps & Domains -->
-<div class="metrics-grid fade-in">
-    <div class="metric-card">
-        <div class="metric-label">🏆 Top App Today</div>
-        <p id="top-app-name" class="metric-value"
-            style="font-size: 1.5rem; margin-top: 0.5rem; color: var(--brand-primary);">-</p>
-        <div id="top-app-duration" class="font-semibold text-secondary">-</div>
-        <div class="metric-sublabel">Fleet-wide usage</div>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1"><img src="{{ url_for('static', filename='throphy.png') }}" class="w-5 h-5 inline mr-2" /> Top App Today</div>
+        <p id="top-app-name" class="text-xl font-bold text-primary-600 dark:text-primary-400 mb-2">-</p>
+        <div id="top-app-duration" class="font-semibold text-gray-600 dark:text-gray-300 mb-2">-</div>
+        <div class="text-xs text-gray-500 dark:text-gray-400">Fleet-wide usage</div>
     </div>
-    <div class="metric-card">
-        <div class="metric-label">🌐 Top Domain Today</div>
-        <p id="top-domain-name" class="metric-value"
-            style="font-size: 1.5rem; margin-top: 0.5rem; color: var(--brand-primary);">-</p>
-        <div id="top-domain-duration" class="font-semibold text-secondary">-</div>
-        <div class="metric-sublabel">Fleet-wide usage</div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+        <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1"><img src="{{ url_for('static', filename='globe.png') }}" class="w-5 h-5 inline mr-2" /> Top Domain Today</div>
+        <p id="top-domain-name" class="text-xl font-bold text-primary-600 dark:text-primary-400 mb-2">-</p>
+        <div id="top-domain-duration" class="font-semibold text-gray-600 dark:text-gray-300 mb-2">-</div>
+        <div class="text-xs text-gray-500 dark:text-gray-400">Fleet-wide usage</div>
     </div>
 </div>
 
 <!-- Top 5 Agents Widget -->
-<div class="card fade-in" style="margin-top: 2rem;">
-    <div class="card-header">
-        <h3>🏆 Top 5 Agents</h3>
-        <p class="text-xs text-tertiary">Leaders by screen time category</p>
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img src="{{ url_for('static', filename='throphy.png') }}" class="w-5 h-5 inline mr-2" />Top 5 Agents</h3>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Leaders by screen time category</p>
     </div>
-    <div class="card-body">
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+    <div class="p-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div>
-                <h4 style="font-size: 0.875rem; color: var(--warning); margin-bottom: 1rem;">⏸️ Most Idle Time</h4>
-                <ul id="top-idle-list" style="list-style: none; padding: 0; margin: 0;">
-                    <li class="text-muted">Loading...</li>
+                <h4 class="text-sm font-semibold text-warning-600 dark:text-warning-400 mb-4 flex items-center gap-2"><img src="{{ url_for('static', filename='pause.png') }}" class="w-4 h-4 inline mr-2" />Most Idle Time</h4>
+                <ul id="top-idle-list" class="space-y-2">
+                    <li class="text-gray-500 dark:text-gray-400">Loading...</li>
                 </ul>
             </div>
             <div>
-                <h4 style="font-size: 0.875rem; color: var(--success); margin-bottom: 1rem;">✅ Most Active Time</h4>
-                <ul id="top-active-list" style="list-style: none; padding: 0; margin: 0;">
-                    <li class="text-muted">Loading...</li>
+                <h4 class="text-sm font-semibold text-success-600 dark:text-success-400 mb-4 flex items-center gap-2"><img src="{{ url_for('static', filename='online.png') }}" class="w-4 h-4 inline mr-2" /> Most Active Time</h4>
+                <ul id="top-active-list" class="space-y-2">
+                    <li class="text-gray-500 dark:text-gray-400">Loading...</li>
                 </ul>
             </div>
             <div>
-                <h4 style="font-size: 0.875rem; color: var(--danger); margin-bottom: 1rem;">🔒 Most Locked Time</h4>
-                <ul id="top-locked-list" style="list-style: none; padding: 0; margin: 0;">
-                    <li class="text-muted">Loading...</li>
+                <h4 class="text-sm font-semibold text-red-600 dark:text-red-400 mb-4 flex items-center gap-2"><img src="{{ url_for('static', filename='lock.png') }}" class="w-4 h-4 inline mr-2" /> Most Locked Time</h4>
+                <ul id="top-locked-list" class="space-y-2">
+                    <li class="text-gray-500 dark:text-gray-400">Loading...</li>
                 </ul>
             </div>
         </div>
@@ -223,39 +241,39 @@
         const idleList = document.getElementById('top-idle-list');
         if (data.top_idle_agents && data.top_idle_agents.length > 0) {
             idleList.innerHTML = data.top_idle_agents.map((agent, index) => `
-                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;">
-                    <span><strong>${index + 1}.</strong> ${agent.hostname}</span>
-                    <span class="font-mono" style="color: var(--warning);">${formatTime(agent.idle_seconds)}</span>
+                <li class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
+                    <span class="text-sm text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname}</span>
+                    <span class="font-mono text-sm text-warning-600 dark:text-warning-400">${formatTime(agent.idle_seconds)}</span>
                 </li>
             `).join('');
         } else {
-            idleList.innerHTML = '<li class="text-muted">No data</li>';
+            idleList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-sm">No data</li>';
         }
 
         // Render Top Active Agents
         const activeList = document.getElementById('top-active-list');
         if (data.top_active_agents && data.top_active_agents.length > 0) {
             activeList.innerHTML = data.top_active_agents.map((agent, index) => `
-                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;">
-                    <span><strong>${index + 1}.</strong> ${agent.hostname}</span>
-                    <span class="font-mono" style="color: var(--success);">${formatTime(agent.active_seconds)}</span>
+                <li class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
+                    <span class="text-sm text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname}</span>
+                    <span class="font-mono text-sm text-success-600 dark:text-success-400">${formatTime(agent.active_seconds)}</span>
                 </li>
             `).join('');
         } else {
-            activeList.innerHTML = '<li class="text-muted">No data</li>';
+            activeList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-sm">No data</li>';
         }
 
         // Render Top Locked Agents
         const lockedList = document.getElementById('top-locked-list');
         if (data.top_locked_agents && data.top_locked_agents.length > 0) {
             lockedList.innerHTML = data.top_locked_agents.map((agent, index) => `
-                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between;">
-                    <span><strong>${index + 1}.</strong> ${agent.hostname}</span>
-                    <span class="font-mono" style="color: var(--danger);">${formatTime(agent.locked_seconds)}</span>
+                <li class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
+                    <span class="text-sm text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname}</span>
+                    <span class="font-mono text-sm text-red-600 dark:text-red-400">${formatTime(agent.locked_seconds)}</span>
                 </li>
             `).join('');
         } else {
-            lockedList.innerHTML = '<li class="text-muted">No data</li>';
+            lockedList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-sm">No data</li>';
         }
     }
 

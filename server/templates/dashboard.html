@@ -7,28 +7,72 @@
     <!-- Fix #13: Removed meta refresh - using JavaScript-based updates instead -->
     <title>SentinelEdge Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
-    <style>
-        :root {
-            --bg-color: #f4f7f9;
-            --primary-color: #4a90e2;
-            --text-color: #333;
-            --card-bg: #ffffff;
-            --border-color: #e0e0e0;
-            --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            --success-color: #28a745;
-            --warning-color: #ffc107;
-            --danger-color: #dc3545;
-            --info-color: #17a2b8;
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'inter': ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                        },
+                        success: {
+                            50: '#f0fdf4',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                        },
+                        warning: {
+                            50: '#fffbeb',
+                            500: '#f59e0b',
+                            600: '#d97706',
+                        },
+                        danger: {
+                            50: '#fef2f2',
+                            500: '#ef4444',
+                            600: '#dc2626',
+                        }
+                    }
+                }
+            }
         }
-
-        body {
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            font-size: 16px;
+    </script>
+    <style>
+        /* Custom animations and utilities */
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        
+        .animate-pulse-ring {
+            animation: pulse-ring 2s infinite;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        .animate-float {
+            animation: float 3s ease-in-out infinite;
+        }
+        
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .glass-effect {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
 
         .header {
@@ -175,462 +219,324 @@
             font-weight: 600;
         }
 
-        .status-online {
-            color: var(--success-color);
-            font-weight: 700;
-        }
-
-        .status-offline {
-            color: var(--danger-color);
-            font-weight: 700;
-        }
-
-        .status-idle {
-            color: var(--warning-color);
-            font-weight: 700;
-        }
-
-        .chart-container {
-            height: 300px;
-            position: relative;
-        }
-
-        .chart-card {
-            background-color: var(--card-bg);
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-        }
-
-        .chart-card h3 {
-            margin-top: 0;
-            font-weight: 700;
-            color: var(--primary-color);
-            border-bottom: 2px solid var(--border-color);
-            padding-bottom: 1rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .table-container {
-            width: 100%;
-            overflow-x: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
-        }
-
-        th,
-        td {
-            border: 1px solid var(--border-color);
-            padding: 12px;
-            text-align: left;
-        }
-
-        th {
-            background-color: #f8f9fa;
-            font-weight: 600;
-            color: var(--primary-color);
-        }
-
-        tr:nth-child(even) {
-            background-color: #f9fafb;
-        }
-
-        tr:hover {
-            background-color: #e9ecef;
-        }
-
-        .metric-card {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            padding: 1rem;
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            margin-bottom: 0.5rem;
-        }
-
-        .metric-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-        }
-
-        .metric-info {
-            flex-grow: 1;
-        }
-
-        .metric-value {
-            font-weight: 700;
-            font-size: 1.2rem;
-        }
-
-        .timeline {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        .timeline-item {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            padding: 0.75rem;
-            background-color: #f9fafb;
-            border-radius: 8px;
-            border-left: 4px solid var(--primary-color);
-        }
-
-        .timeline-time {
-            font-weight: 600;
-            color: var(--primary-color);
-            min-width: 60px;
-        }
-
-        .timeline-domain {
-            flex-grow: 1;
-            font-weight: 500;
-        }
-
-        .timeline-duration {
-            font-weight: 600;
-            color: var(--success-color);
-        }
-
-        .no-data {
-            text-align: center;
-            padding: 2rem;
-            color: #999;
-            font-style: italic;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 2rem;
-            color: var(--primary-color);
-            font-weight: 600;
-        }
-
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid var(--primary-color);
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 1rem auto;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        .error-message {
-            color: var(--danger-color);
-            background-color: #f8d7da;
-            padding: 1rem;
-            border-radius: 8px;
-            margin: 1rem 0;
-            border: 1px solid var(--danger-color);
-        }
-
-        .refresh-info {
-            font-size: 0.85rem;
-            color: #666;
-            text-align: right;
-            margin-top: 0.5rem;
-        }
-
-        /* Badge styles for source column */
-        .badge {
-            display: inline-block;
-            padding: 0.25em 0.6em;
-            font-size: 0.75rem;
-            font-weight: 600;
-            line-height: 1;
-            text-align: center;
-            white-space: nowrap;
-            vertical-align: baseline;
-            border-radius: 0.25rem;
-        }
-
-        .badge-primary {
-            color: #fff;
-            background-color: #007bff;
-        }
-
-        .badge-success {
-            color: #fff;
-            background-color: #28a745;
-        }
-
-        .badge-info {
-            color: #fff;
-            background-color: #17a2b8;
-        }
-
-        .badge-secondary {
-            color: #fff;
-            background-color: #6c757d;
-        }
-
-        .text-muted {
-            color: #6c757d;
-        }
-
-        .text-danger {
-            color: #dc3545;
-        }
     </style>
 </head>
 
-<body>
-    <div class="header">
-        <h1>SentinelEdge Dashboard</h1>
+<body class="font-inter bg-gray-50 text-gray-900">
+    <div class="bg-white shadow-sm border-b border-gray-200">
+        <div class="px-8 py-4">
+            <h1 class="text-2xl font-bold text-primary-600">SentinelEdge Dashboard</h1>
+        </div>
     </div>
-    <div class="container">
-        <div class="controls">
-            <form action="/dashboard" method="get" style="display: flex; width: 100%; gap: 1rem;">
-                <label for="agent_id">Select Agent:</label>
-                <select name="agent_id" id="agent_id" onchange="this.form.submit()">
-                    <option value="">-- Overview --</option>
-                    {% for agent in agents %}
-                    <option value="{{ agent.agent_id }}" {% if agent.agent_id==selected_agent_id %}selected{% endif %}>
-                        {{ agent.hostname }} ({{ agent.agent_id }})</option>
-                    {% endfor %}
-                </select>
-                <label for="date">Select Date:</label>
-                <input type="date" id="date" name="date" value="{{ selected_date }}" onchange="this.form.submit()">
-                <input type="submit" value="View">
+    <div class="max-w-7xl mx-auto p-8">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
+            <form action="/dashboard" method="get" class="flex flex-wrap items-center gap-6">
+                <div class="flex items-center gap-3">
+                    <label for="agent_id" class="text-sm font-semibold text-gray-700">Select Agent:</label>
+                    <select name="agent_id" id="agent_id" onchange="this.form.submit()" 
+                            class="px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors">
+                        <option value="">-- Overview --</option>
+                        {% for agent in agents %}
+                        <option value="{{ agent.agent_id }}" {% if agent.agent_id==selected_agent_id %}selected{% endif %}>
+                            {{ agent.hostname }} ({{ agent.agent_id }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="flex items-center gap-3">
+                    <label for="date" class="text-sm font-semibold text-gray-700">Select Date:</label>
+                    <input type="date" id="date" name="date" value="{{ selected_date }}" onchange="this.form.submit()"
+                           class="px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors">
+                </div>
+                <input type="submit" value="View" 
+                       class="px-6 py-2 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors cursor-pointer">
             </form>
         </div>
 
         {% if selected_agent_details %}
-        <div class="dashboard-grid">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
             <!-- SECTION A: Device Overview Card -->
-            <div class="device-card">
-                <div class="device-info">
-                    <h2>Agent Overview</h2>
-                    <div class="detail-row">
-                        <span>Hostname</span>
-                        <span>{{ selected_agent_details.hostname }}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span>Operating System</span>
-                        <span>{{ selected_agent_details.os }}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span>Agent Version</span>
-                        <span>{{ selected_agent_details.version }}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span>Agent ID</span>
-                        <span>{{ selected_agent_details.agent_id[:8] }}...</span>
-                    </div>
-                    <div class="detail-row">
-                        <span>Last Seen</span>
-                        <span>{{ selected_agent_details.last_seen }}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span>Status</span>
-                        <span class="status-{{ selected_agent_details.status.lower() }}">{{
-                            selected_agent_details.status }}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span>Server Connection</span>
-                        <span>http://localhost:5050</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- SECTION B: Top Domains (Time Spent) -->
-            <div class="chart-card">
-                <h3>Top Domains (Time Spent)</h3>
-                <div class="chart-container">
-                    <canvas id="domainChart"></canvas>
-                </div>
-            </div>
-
-            <!-- SECTION C: Domain Usage Timeline -->
-            <div class="chart-card">
-                <h3>Domain Usage Timeline</h3>
-                <div class="timeline" id="domainTimeline">
-                    {% if top_domains %}
-                    {% for domain in top_domains %}
-                    <div class="timeline-item">
-                        <span class="timeline-time">{{ loop.index }}</span>
-                        <span class="timeline-domain">{{ domain.domain }}</span>
-                        <span class="timeline-duration">{{ domain.seconds }}s</span>
-                    </div>
-                    {% endfor %}
-                    {% else %}
-                    <div class="no-data">No domain usage data available</div>
-                    {% endif %}
-                </div>
-            </div>
-
-            <!-- SECTION D: App Usage Summary -->
-            <div class="chart-card">
-                <h3>App Usage Summary</h3>
-                <div class="chart-container">
-                    <canvas id="appChart"></canvas>
-                </div>
-            </div>
-
-            <!-- SECTION E: Productivity / Idle Metrics -->
-            <div class="card">
-                <h3>Productivity Metrics</h3>
-                <div class="metric-card">
-                    <div class="metric-icon" style="background-color: #e7f0fe; color: var(--primary-color);">
-                        <i data-feather="activity"></i>
-                    </div>
-                    <div class="metric-info">
-                        <div>Active Time</div>
-                        <div class="metric-value">{{ "%.2f"|format(selected_agent_details.active_time) }} minutes</div>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon" style="background-color: #fff3cd; color: var(--warning-color);">
-                        <i data-feather="pause-circle"></i>
-                    </div>
-                    <div class="metric-info">
-                        <div>Idle Time</div>
-                        <div class="metric-value">{{ "%.2f"|format(selected_agent_details.idle_time) }} minutes</div>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon" style="background-color: #f8d7da; color: var(--danger-color);">
-                        <i data-feather="lock"></i>
-                    </div>
-                    <div class="metric-info">
-                        <div>Locked Time</div>
-                        <div class="metric-value">0 minutes</div>
+            <div class="lg:col-span-1">
+                <div class="gradient-bg rounded-2xl p-8 text-white relative overflow-hidden shadow-xl animate-float">
+                    <div class="absolute top-0 right-0 w-48 h-48 bg-white bg-opacity-10 rounded-full transform translate-x-24 -translate-y-24"></div>
+                    <div class="relative z-10">
+                        <div class="flex items-center gap-4 mb-6">
+                            <div class="w-4 h-4 bg-success-500 rounded-full animate-pulse-ring"></div>
+                            <h2 class="text-xl font-bold">Agent Overview</h2>
+                        </div>
+                        <div class="grid grid-cols-1 gap-4">
+                            <div class="glass-effect rounded-lg p-4">
+                                <div class="text-xs uppercase tracking-wide opacity-80 mb-1">Hostname</div>
+                                <div class="font-semibold">{{ selected_agent_details.hostname }}</div>
+                            </div>
+                            <div class="glass-effect rounded-lg p-4">
+                                <div class="text-xs uppercase tracking-wide opacity-80 mb-1">Operating System</div>
+                                <div class="font-semibold">{{ selected_agent_details.os }}</div>
+                            </div>
+                            <div class="glass-effect rounded-lg p-4">
+                                <div class="text-xs uppercase tracking-wide opacity-80 mb-1">Agent Version</div>
+                                <div class="font-semibold">{{ selected_agent_details.version }}</div>
+                            </div>
+                            <div class="glass-effect rounded-lg p-4">
+                                <div class="text-xs uppercase tracking-wide opacity-80 mb-1">Agent ID</div>
+                                <div class="font-semibold">{{ selected_agent_details.agent_id[:8] }}...</div>
+                            </div>
+                            <div class="glass-effect rounded-lg p-4">
+                                <div class="text-xs uppercase tracking-wide opacity-80 mb-1">Last Seen</div>
+                                <div class="font-semibold">{{ selected_agent_details.last_seen }}</div>
+                            </div>
+                            <div class="glass-effect rounded-lg p-4">
+                                <div class="text-xs uppercase tracking-wide opacity-80 mb-1">Status</div>
+                                <div class="font-semibold">
+                                    <span class="inline-flex items-center gap-2">
+                                        <span class="w-2 h-2 rounded-full {% if selected_agent_details.status.lower() == 'online' %}bg-success-400{% elif selected_agent_details.status.lower() == 'offline' %}bg-danger-400{% else %}bg-warning-400{% endif %}"></span>
+                                        {{ selected_agent_details.status }}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="glass-effect rounded-lg p-4">
+                                <div class="text-xs uppercase tracking-wide opacity-80 mb-1">Server Connection</div>
+                                <div class="font-semibold">http://localhost:5050</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- SECTION F: Inventory (Installed Apps) - DYNAMIC -->
-            <div class="chart-card">
-                <h3>Installed Applications <span id="inventory-count" class="badge badge-info">0</span></h3>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Application</th>
-                                <th>Version</th>
-                                <th>Publisher</th>
-                                <th>Source</th>
-                                <th>Last Seen</th>
-                            </tr>
-                        </thead>
-                        <tbody id="inventory-body">
-                            <tr>
-                                <td colspan="5" class="text-center">Loading inventory...</td>
-                            </tr>
-                        </tbody>
-                    </table>
+            <!-- SECTION B & C: Charts -->
+            <div class="lg:col-span-2 space-y-8">
+                <!-- Top Domains Chart -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
+                    <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                        <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <i data-feather="bar-chart-2" class="w-5 h-5 text-primary-600"></i>
+                            Top Domains (Time Spent)
+                        </h3>
+                    </div>
+                    <div class="p-6">
+                        <div class="h-72 relative">
+                            <canvas id="domainChart"></canvas>
+                        </div>
+                    </div>
                 </div>
-            </div>
 
-            <!-- SECTION G: System Health & Core Stats -->
-            <div class="card">
-                <h3>System Health & Core Stats</h3>
-                <div class="metric-card">
-                    <div class="metric-icon" style="background-color: #e7f0fe; color: var(--primary-color);">
-                        <i data-feather="clock"></i>
+                <!-- Domain Usage Timeline -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
+                    <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                        <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <i data-feather="clock" class="w-5 h-5 text-primary-600"></i>
+                            Domain Usage Timeline
+                        </h3>
                     </div>
-                    <div class="metric-info">
-                        <div>Core Service Uptime</div>
-                        <div class="metric-value">24h 30m</div>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon" style="background-color: #d1e7dd; color: var(--success-color);">
-                        <i data-feather="database"></i>
-                    </div>
-                    <div class="metric-info">
-                        <div>Database Size</div>
-                        <div class="metric-value">1.2 GB</div>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon" style="background-color: #fff3cd; color: var(--warning-color);">
-                        <i data-feather="upload-cloud"></i>
-                    </div>
-                    <div class="metric-info">
-                        <div>Upload Queue</div>
-                        <div class="metric-value">0 items</div>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon" style="background-color: #cce5ff; color: var(--info-color);">
-                        <i data-feather="calendar"></i>
-                    </div>
-                    <div class="metric-info">
-                        <div>Last Upload</div>
-                        <div class="metric-value">5 min ago</div>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon" style="background-color: #d1e7dd; color: var(--success-color);">
-                        <i data-feather="check-circle"></i>
-                    </div>
-                    <div class="metric-info">
-                        <div>Ingest Status</div>
-                        <div class="metric-value">Healthy</div>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon" style="background-color: #e7f0fe; color: var(--primary-color);">
-                        <i data-feather="settings"></i>
-                    </div>
-                    <div class="metric-info">
-                        <div>Config Version</div>
-                        <div class="metric-value">v2.0.0</div>
+                    <div class="p-6">
+                        <div class="space-y-3 max-h-96 overflow-y-auto" id="domainTimeline">
+                            {% if top_domains %}
+                            {% for domain in top_domains %}
+                            <div class="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border-l-4 border-primary-500 hover:bg-gray-100 transition-colors">
+                                <span class="text-sm font-bold text-primary-600 min-w-[60px]">{{ loop.index }}</span>
+                                <span class="flex-1 font-medium text-gray-900">{{ domain.domain }}</span>
+                                <span class="text-sm font-bold text-success-600">{{ domain.seconds }}s</span>
+                            </div>
+                            {% endfor %}
+                            {% else %}
+                            <div class="text-center py-8 text-gray-500 italic">No domain usage data available</div>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="refresh-info">
+        <!-- SECTION D & E: App Usage and Productivity -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <!-- App Usage Summary -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
+                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <i data-feather="pie-chart" class="w-5 h-5 text-primary-600"></i>
+                        App Usage Summary
+                    </h3>
+                </div>
+                <div class="p-6">
+                    <div class="h-72 relative">
+                        <canvas id="appChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Productivity Metrics -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
+                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                    <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <i data-feather="trending-up" class="w-5 h-5 text-primary-600"></i>
+                        Productivity Metrics
+                    </h3>
+                </div>
+                <div class="p-6 space-y-4">
+                    <div class="flex items-center gap-4 p-4 bg-primary-50 rounded-lg border border-primary-200">
+                        <div class="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
+                            <i data-feather="activity" class="w-6 h-6 text-primary-600"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="text-sm font-medium text-gray-600">Active Time</div>
+                            <div class="text-xl font-bold text-gray-900">{{ "%.2f"|format(selected_agent_details.active_time) }} minutes</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 p-4 bg-warning-50 rounded-lg border border-warning-200">
+                        <div class="w-12 h-12 bg-warning-100 rounded-lg flex items-center justify-center">
+                            <i data-feather="pause-circle" class="w-6 h-6 text-warning-600"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="text-sm font-medium text-gray-600">Idle Time</div>
+                            <div class="text-xl font-bold text-gray-900">{{ "%.2f"|format(selected_agent_details.idle_time) }} minutes</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 p-4 bg-danger-50 rounded-lg border border-danger-200">
+                        <div class="w-12 h-12 bg-danger-100 rounded-lg flex items-center justify-center">
+                            <i data-feather="lock" class="w-6 h-6 text-danger-600"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="text-sm font-medium text-gray-600">Locked Time</div>
+                            <div class="text-xl font-bold text-gray-900">0 minutes</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION F: Inventory (Installed Apps) -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow mb-8">
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <i data-feather="package" class="w-5 h-5 text-primary-600"></i>
+                    Installed Applications 
+                    <span id="inventory-count" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">0</span>
+                </h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Application</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Publisher</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inventory-body" class="bg-white divide-y divide-gray-200">
+                        <tr>
+                            <td colspan="5" class="px-6 py-4 text-center text-gray-500">Loading inventory...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- SECTION G: System Health & Core Stats -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow mb-8">
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <i data-feather="heart" class="w-5 h-5 text-primary-600"></i>
+                    System Health & Core Stats
+                </h3>
+            </div>
+            <div class="p-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="flex items-center gap-4 p-4 bg-primary-50 rounded-lg border border-primary-200">
+                        <div class="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
+                            <i data-feather="clock" class="w-6 h-6 text-primary-600"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Core Service Uptime</div>
+                            <div class="text-lg font-bold text-gray-900">24h 30m</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 p-4 bg-success-50 rounded-lg border border-success-200">
+                        <div class="w-12 h-12 bg-success-100 rounded-lg flex items-center justify-center">
+                            <i data-feather="database" class="w-6 h-6 text-success-600"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Database Size</div>
+                            <div class="text-lg font-bold text-gray-900">1.2 GB</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 p-4 bg-warning-50 rounded-lg border border-warning-200">
+                        <div class="w-12 h-12 bg-warning-100 rounded-lg flex items-center justify-center">
+                            <i data-feather="upload-cloud" class="w-6 h-6 text-warning-600"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Upload Queue</div>
+                            <div class="text-lg font-bold text-gray-900">0 items</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                            <i data-feather="calendar" class="w-6 h-6 text-blue-600"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Last Upload</div>
+                            <div class="text-lg font-bold text-gray-900">5 min ago</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 p-4 bg-success-50 rounded-lg border border-success-200">
+                        <div class="w-12 h-12 bg-success-100 rounded-lg flex items-center justify-center">
+                            <i data-feather="check-circle" class="w-6 h-6 text-success-600"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Ingest Status</div>
+                            <div class="text-lg font-bold text-gray-900">Healthy</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4 p-4 bg-primary-50 rounded-lg border border-primary-200">
+                        <div class="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
+                            <i data-feather="settings" class="w-6 h-6 text-primary-600"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Config Version</div>
+                            <div class="text-lg font-bold text-gray-900">v2.0.0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <div class="text-right text-sm text-gray-500 mb-8">
             Dashboard auto-refreshes every 10 seconds
         </div>
         {% else %}
-        <div class="summary-grid">
-            <div class="card">
-                <div class="icon"><i data-feather="users"></i></div>
-                <div class="text">
-                    <h3>Total Agents</h3>
-                    <p>{{ summary.total_agents }}</p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-shadow">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-primary-100 dark:bg-primary-900 rounded-lg flex items-center justify-center">
+                        <i data-feather="users" class="w-6 h-6 text-primary-600 dark:text-primary-400"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100">Total Agents</h3>
+                        <p class="text-2xl font-bold text-primary-600 dark:text-primary-400">{{ summary.total_agents }}</p>
+                    </div>
                 </div>
             </div>
-            <div class="card">
-                <div class="icon"><i data-feather="grid"></i></div>
-                <div class="text">
-                    <h3>Total Applications</h3>
-                    <p>{{ summary.total_applications }}</p>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-shadow">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-success-100 dark:bg-success-900 rounded-lg flex items-center justify-center">
+                        <i data-feather="grid" class="w-6 h-6 text-success-600 dark:text-success-400"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100">Total Applications</h3>
+                        <p class="text-2xl font-bold text-success-600 dark:text-success-400">{{ summary.total_applications }}</p>
+                    </div>
                 </div>
             </div>
-            <div class="card">
-                <div class="icon"><i data-feather="grid"></i></div>
-                <div class="text">
-                    <h3>Total Screen Time</h3>
-                    <p>{{ "%.2f"|format(summary.total_screen_time_hours) }} hrs</p>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-shadow">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-warning-100 dark:bg-warning-900 rounded-lg flex items-center justify-center">
+                        <i data-feather="clock" class="w-6 h-6 text-warning-600 dark:text-warning-400"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100">Total Screen Time</h3>
+                        <p class="text-2xl font-bold text-warning-600 dark:text-warning-400">{{ "%.2f"|format(summary.total_screen_time_hours) }} hrs</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -735,7 +641,7 @@
 
             if (!agentId) {
                 document.getElementById('inventory-body').innerHTML =
-                    '<tr><td colspan="5" class="text-center text-muted">Select an agent to view inventory</td></tr>';
+                    '<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">Select an agent to view inventory</td></tr>';
                 return;
             }
 
@@ -745,13 +651,14 @@
 
                 if (!result.data || result.data.length === 0) {
                     document.getElementById('inventory-body').innerHTML =
-                        '<tr><td colspan="5" class="text-center text-muted">No applications found</td></tr>';
-                    document.getElementById('inventory-count').textContent = '0 apps';
+                        '<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">No applications found</td></tr>';
+                    document.getElementById('inventory-count').textContent = '0';
                     return;
                 }
 
                 // Update count badge
-                document.getElementById('inventory-count').textContent = `${result.data.length} apps`;
+                document.getElementById('inventory-count').textContent = `${result.data.length}`;
+                document.getElementById('inventory-count').className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800';
 
                 // Fix #12: Render inventory table using XSS-safe DOM APIs
                 const tbody = document.getElementById('inventory-body');
@@ -759,31 +666,38 @@
 
                 result.data.forEach(app => {
                     const row = document.createElement('tr');
+                    row.className = 'hover:bg-gray-50';
 
                     // Column 1: Name (XSS-safe using textContent)
                     const nameCell = document.createElement('td');
+                    nameCell.className = 'px-6 py-4 whitespace-nowrap';
                     const nameStrong = document.createElement('strong');
+                    nameStrong.className = 'text-sm font-medium text-gray-900';
                     nameStrong.textContent = app.name || 'Unknown';
                     nameCell.appendChild(nameStrong);
                     row.appendChild(nameCell);
 
                     // Column 2: Version
                     const versionCell = document.createElement('td');
+                    versionCell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
                     versionCell.textContent = app.version || '-';
                     row.appendChild(versionCell);
 
                     // Column 3: Publisher
                     const publisherCell = document.createElement('td');
+                    publisherCell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
                     publisherCell.textContent = app.publisher || '-';
                     row.appendChild(publisherCell);
 
                     // Column 4: Source (controlled HTML content - safe)
                     const sourceCell = document.createElement('td');
+                    sourceCell.className = 'px-6 py-4 whitespace-nowrap';
                     sourceCell.innerHTML = getSourceBadge(app.source);
                     row.appendChild(sourceCell);
 
                     // Column 5: Last Seen
                     const lastSeenCell = document.createElement('td');
+                    lastSeenCell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
                     if (app.last_seen) {
                         try {
                             lastSeenCell.textContent = new Date(app.last_seen).toLocaleDateString();
@@ -801,18 +715,18 @@
             } catch (error) {
                 console.error('Failed to load inventory:', error);
                 document.getElementById('inventory-body').innerHTML =
-                    '<tr><td colspan="5" class="text-center text-danger">Failed to load inventory</td></tr>';
+                    '<tr><td colspan="5" class="px-6 py-4 text-center text-red-500">Failed to load inventory</td></tr>';
             }
         }
 
         // Source badge helper (matching agent_detail.html style)
         function getSourceBadge(source) {
             const badges = {
-                'Registry-HKLM': '<span class="badge badge-primary" title="System-wide installed">System</span>',
-                'Registry-HKCU': '<span class="badge badge-success" title="User-installed app">User</span>',
-                'MicrosoftStore': '<span class="badge badge-info" title="Microsoft Store app">Store</span>'
+                'Registry-HKLM': '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800" title="System-wide installed">System</span>',
+                'Registry-HKCU': '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800" title="User-installed app">User</span>',
+                'MicrosoftStore': '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800" title="Microsoft Store app">Store</span>'
             };
-            return badges[source] || '<span class="badge badge-secondary">Unknown</span>';
+            return badges[source] || '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">Unknown</span>';
         }
 
         // HTML escaping for security

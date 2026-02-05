@@ -2,194 +2,97 @@
 <html>
 <head>
     <title>Domain Classification Management</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { 
-            font-family: 'Segoe UI', Arial, sans-serif; 
-            margin: 20px; 
-            background: #f5f7fa;
-            color: #2d3748;
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'inter': ['Inter', 'sans-serif'],
+                    }
+                }
+            }
         }
-        h1 { 
-            margin-bottom: 20px; 
-            color: #1a202c;
-        }
-        h2 { 
-            margin-bottom: 15px; 
-            color: #2d3748;
-            border-bottom: 2px solid #4299e1;
-            padding-bottom: 8px;
-        }
-        .section { 
-            margin: 30px 0; 
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        table { 
-            border-collapse: collapse; 
-            width: 100%; 
-        }
-        th, td { 
-            border: 1px solid #e2e8f0; 
-            padding: 12px 15px; 
-            text-align: left; 
-        }
-        th { 
-            background-color: #4299e1; 
-            color: white;
-            font-weight: 600;
-        }
-        tr:nth-child(even) { 
-            background-color: #f7fafc; 
-        }
-        tr:hover {
-            background-color: #ebf8ff;
-        }
-        .btn { 
-            padding: 8px 16px; 
-            margin: 2px; 
-            cursor: pointer; 
-            border-radius: 4px;
-            font-size: 14px;
-            border: none;
-            transition: all 0.2s;
-        }
-        .btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .btn-primary { 
-            background: #4299e1; 
-            color: white; 
-        }
-        .btn-primary:hover {
-            background: #3182ce;
-        }
-        .btn-danger { 
-            background: #f56565; 
-            color: white; 
-        }
-        .btn-danger:hover {
-            background: #e53e3e;
-        }
-        .btn-success { 
-            background: #48bb78; 
-            color: white; 
-        }
-        .btn-success:hover {
-            background: #38a169;
-        }
-        .review-item { 
-            border: 1px solid #e2e8f0; 
-            padding: 20px; 
-            margin: 15px 0; 
-            border-radius: 8px;
-            background: #fff;
-        }
-        .review-item h4 {
-            color: #2d3748;
-            margin-bottom: 10px;
-            word-break: break-all;
-        }
-        .review-item small {
-            color: #718096;
-        }
-        .review-item input[type="text"] {
-            padding: 8px 12px;
-            border: 1px solid #e2e8f0;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        .review-item label {
-            margin: 0 15px;
-            color: #4a5568;
-        }
-        #add-rule-form {
-            background: #f7fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-        }
-        #add-rule-form h3 {
-            margin-bottom: 15px;
-            color: #2d3748;
-        }
-        #add-rule-form input,
-        #add-rule-form select {
-            padding: 8px 12px;
-            border: 1px solid #e2e8f0;
-            border-radius: 4px;
-            margin-right: 10px;
-            font-size: 14px;
-        }
-        .empty-state {
-            text-align: center;
-            padding: 40px;
-            color: #48bb78;
-            font-size: 18px;
-        }
-        .stats {
-            display: inline-block;
-            padding: 4px 8px;
-            background: #ebf8ff;
-            border-radius: 4px;
-            font-size: 12px;
-            color: #2b6cb0;
-        }
-        .back-link {
-            display: inline-block;
-            margin-bottom: 20px;
-            color: #4299e1;
-            text-decoration: none;
-        }
-        .back-link:hover {
-            text-decoration: underline;
-        }
-    </style>
+    </script>
 </head>
-<body>
-    <a href="/dashboard" class="back-link">← Back to Dashboard</a>
-    <h1>🏷️ Domain Classification Management</h1>
+<body class="font-inter bg-gray-50 text-gray-900">
+    <div class="max-w-7xl mx-auto p-6">
+        <a href="/dashboard" class="inline-flex items-center text-blue-600 hover:text-blue-700 mb-6 transition-colors">
+            ← Back to Dashboard
+        </a>
+        <h1 class="text-3xl font-bold text-gray-900 mb-8 flex items-center gap-2">
+            🏷️ Domain Classification Management
+        </h1>
 
-    <!-- Section 1: Review Queue -->
-    <div class="section">
-        <h2>📋 Review Queue (Needs Classification)</h2>
-        <div id="review-queue">
-            <p style="color: #718096;">Loading...</p>
+        <!-- Section 1: Review Queue -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 mb-8">
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                <h2 class="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                    📋 Review Queue (Needs Classification)
+                </h2>
+            </div>
+            <div class="p-6">
+                <div id="review-queue">
+                    <p class="text-gray-500">Loading...</p>
+                </div>
+            </div>
         </div>
-    </div>
 
-    <!-- Section 2: Classification Rules -->
-    <div class="section">
-        <h2>⚙️ Classification Rules</h2>
-        <button class="btn btn-primary" onclick="showAddRuleForm()">+ Add New Rule</button>
-        <div id="add-rule-form" style="display:none; margin: 15px 0; padding: 20px;">
-            <h3>Add New Rule</h3>
-            <input type="text" id="new-pattern" placeholder="Pattern (e.g., 'chatgpt')" style="width: 200px;">
-            <input type="text" id="new-classified-as" placeholder="Domain (e.g., 'chatgpt.com')" style="width: 200px;">
-            <select id="new-action">
-                <option value="map">Map to Domain</option>
-                <option value="ignore">Ignore</option>
-            </select>
-            <input type="number" id="new-priority" placeholder="Priority" value="50" style="width: 80px;">
-            <button class="btn btn-success" onclick="createRule()">Save</button>
-            <button class="btn" onclick="hideAddRuleForm()" style="background: #e2e8f0;">Cancel</button>
+        <!-- Section 2: Classification Rules -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                        ⚙️ Classification Rules
+                    </h2>
+                    <button class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors" onclick="showAddRuleForm()">
+                        + Add New Rule
+                    </button>
+                </div>
+            </div>
+            <div class="p-6">
+                <div id="add-rule-form" class="hidden bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Add New Rule</h3>
+                    <div class="flex flex-wrap items-center gap-4">
+                        <input type="text" id="new-pattern" placeholder="Pattern (e.g., 'chatgpt')" 
+                               class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <input type="text" id="new-classified-as" placeholder="Domain (e.g., 'chatgpt.com')" 
+                               class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <select id="new-action" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                            <option value="map">Map to Domain</option>
+                            <option value="ignore">Ignore</option>
+                        </select>
+                        <input type="number" id="new-priority" placeholder="Priority" value="50" 
+                               class="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <button class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors" onclick="createRule()">
+                            Save
+                        </button>
+                        <button class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors" onclick="hideAddRuleForm()">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table id="rules-table" class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pattern</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Classified As</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Matches</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Active</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rules-body" class="bg-white divide-y divide-gray-200">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-        <table id="rules-table" style="margin-top: 15px;">
-            <thead>
-                <tr>
-                    <th>Pattern</th>
-                    <th>Classified As</th>
-                    <th>Action</th>
-                    <th>Priority</th>
-                    <th>Matches</th>
-                    <th>Active</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody id="rules-body"></tbody>
-        </table>
     </div>
 
     <script>
@@ -201,29 +104,31 @@
 
                 const container = document.getElementById('review-queue');
                 if (!data.queue || data.queue.length === 0) {
-                    container.innerHTML = '<p class="empty-state">✅ No sessions need review!</p>';
+                    container.innerHTML = '<div class="text-center py-12 text-green-600 text-lg">✅ No sessions need review!</div>';
                     return;
                 }
 
                 container.innerHTML = data.queue.map(item => `
-                    <div class="review-item">
-                        <h4>${escapeHtml(item.raw_title || 'Unknown')}</h4>
-                        <p><small>Sessions: <span class="stats">${item.session_count}</span> | 
-                           Duration: <span class="stats">${Math.round((item.total_duration || 0)/60)}m</span></small></p>
-                        ${item.raw_url ? `<p><small>URL: ${escapeHtml(item.raw_url)}</small></p>` : ''}
-                        <div style="margin-top: 15px;">
+                    <div class="border border-gray-200 rounded-lg p-6 mb-4 bg-white hover:shadow-md transition-shadow">
+                        <h4 class="text-lg font-semibold text-gray-900 mb-2 break-all">${escapeHtml(item.raw_title || 'Unknown')}</h4>
+                        <p class="text-sm text-gray-600 mb-2">
+                            Sessions: <span class="inline-block px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">${item.session_count}</span> | 
+                            Duration: <span class="inline-block px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">${Math.round((item.total_duration || 0)/60)}m</span>
+                        </p>
+                        ${item.raw_url ? `<p class="text-sm text-gray-500 mb-4">URL: ${escapeHtml(item.raw_url)}</p>` : ''}
+                        <div class="flex flex-wrap items-center gap-4">
                             <input type="text" id="classify-${item.first_session_id}" 
                                    placeholder="Enter domain (e.g., google.com)" 
-                                   style="width: 300px;">
-                            <label>
-                                <input type="checkbox" id="rule-${item.first_session_id}">
+                                   class="flex-1 min-w-64 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                            <label class="flex items-center gap-2 text-sm text-gray-700">
+                                <input type="checkbox" id="rule-${item.first_session_id}" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                                 Create rule for future
                             </label>
-                            <button class="btn btn-success" 
+                            <button class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium" 
                                     onclick="classify('${escapeHtml(item.raw_title)}', ${item.first_session_id})">
                                 ✅ Classify
                             </button>
-                            <button class="btn btn-danger" 
+                            <button class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium" 
                                     onclick="ignoreSession('${escapeHtml(item.raw_title)}')">
                                 🗑️ Ignore
                             </button>
@@ -233,7 +138,7 @@
             } catch (e) {
                 console.error('Failed to load review queue:', e);
                 document.getElementById('review-queue').innerHTML = 
-                    '<p style="color: #f56565;">Failed to load review queue. Check if database tables exist.</p>';
+                    '<p class="text-red-600">Failed to load review queue. Check if database tables exist.</p>';
             }
         }
 
@@ -305,36 +210,40 @@
 
                 const tbody = document.getElementById('rules-body');
                 if (!data.rules || data.rules.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #718096;">No rules defined yet</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">No rules defined yet</td></tr>';
                     return;
                 }
 
                 tbody.innerHTML = data.rules.map(rule => `
-                    <tr>
-                        <td>${escapeHtml(rule.pattern)}</td>
-                        <td>${escapeHtml(rule.classified_as)}</td>
-                        <td><span class="stats">${rule.action}</span></td>
-                        <td>${rule.priority}</td>
-                        <td>${rule.match_count || 0}</td>
-                        <td>${rule.is_active ? '✅' : '❌'}</td>
-                        <td>
-                            <button class="btn btn-danger" onclick="deleteRule(${rule.id})">Delete</button>
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${escapeHtml(rule.pattern)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${escapeHtml(rule.classified_as)}</td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="inline-block px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">${rule.action}</span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${rule.priority}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${rule.match_count || 0}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">${rule.is_active ? '✅' : '❌'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            <button class="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-xs font-medium" onclick="deleteRule(${rule.id})">
+                                Delete
+                            </button>
                         </td>
                     </tr>
                 `).join('');
             } catch (e) {
                 console.error('Failed to load rules:', e);
                 document.getElementById('rules-body').innerHTML = 
-                    '<tr><td colspan="7" style="color: #f56565;">Failed to load rules. Run migration first.</td></tr>';
+                    '<tr><td colspan="7" class="px-6 py-4 text-center text-red-600">Failed to load rules. Run migration first.</td></tr>';
             }
         }
 
         // Show/hide add rule form
         function showAddRuleForm() {
-            document.getElementById('add-rule-form').style.display = 'block';
+            document.getElementById('add-rule-form').classList.remove('hidden');
         }
         function hideAddRuleForm() {
-            document.getElementById('add-rule-form').style.display = 'none';
+            document.getElementById('add-rule-form').classList.add('hidden');
         }
 
         // Create rule
