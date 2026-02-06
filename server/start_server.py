@@ -556,7 +556,7 @@ def start_server(app):
     logger.info("✅ AUTO-SETUP COMPLETE! All database functions installed.")
     logger.info("="*60)
     logger.info("\n🚀 Server starting...")
-    logger.info("   Dashboard: http://localhost:5050/dashboard")
+    logger.info("   Dashboard: http://localhost:5000/dashboard")
     logger.info("   Login: admin / changeme123")
     logger.info("\n⚠️  Press Ctrl+C to stop\n")
     

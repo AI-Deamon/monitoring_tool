@@ -72,13 +72,25 @@ def inject_helpers():
 # ============================================================================
 # FRONTEND ROUTES (Protected by login_required)
 # ============================================================================
-
 @bp.route('/')
 @login_required
 def dashboard_home():
-    """Render overview dashboard page."""
-    return render_template('dashboard/overview.html', 
-                           current_user=g.current_user)
+    """Render dashboard based on user role."""
+    
+    if g.current_user.role != 'admin':
+        # Non-admin users - redirect to agent detail page
+        agent_id = get_user_agent_id()
+        if agent_id:
+            return redirect(url_for('dashboard.agent_detail', agent_id=agent_id))
+        else:
+            return redirect(url_for('dashboard.agents_detail'))
+
+    # Admin users
+    return render_template(
+        'dashboard/overview.html',
+        current_user=g.current_user
+    )
+
 
 @bp.route('/agents')
 @login_required
@@ -1049,7 +1061,6 @@ def api_agent_full_report(agent_id):
             'first_seen_today': first_seen_today,
             'last_seen_today': last_seen_today,
             'total_tracked_seconds': total_tracked_seconds,
-            # Fix: Use agent.last_seen which is updated on every authenticated request
             'last_seen': agent.last_seen.isoformat() if agent.last_seen else None,
             'is_viewing_today': target_date == datetime.utcnow().date()
         }
@@ -1209,16 +1220,10 @@ def api_agent_full_report(agent_id):
         # ================================================================
         # 7. DOMAIN VISITS (Raw history) - FILTERED
         # ================================================================
-        # Fix: Timezone handling - DomainVisit timestamps are stored in UTC, 
-        # so we need to ensure our date range filter works correctly with UTC timestamps
-        from datetime import timezone
-        utc_start_dt = start_dt.replace(tzinfo=timezone.utc)
-        utc_end_dt = end_dt.replace(tzinfo=timezone.utc)
-        
         domain_visits = server_models.DomainVisit.query.filter(
             server_models.DomainVisit.agent_id == resolved_agent_id,
-            server_models.DomainVisit.visited_at >= utc_start_dt,
-            server_models.DomainVisit.visited_at <= utc_end_dt
+            server_models.DomainVisit.visited_at >= start_dt,
+            server_models.DomainVisit.visited_at <= end_dt
         ).order_by(desc(server_models.DomainVisit.visited_at)).limit(200).all()
         
         # Filter out internal domains
@@ -1403,11 +1408,6 @@ def api_agent_domain_visits(agent_id):
         start_dt = datetime.combine(target_date, datetime.min.time())
         end_dt = datetime.combine(target_date, datetime.max.time())
         
-        # Fix: Timezone handling - DomainVisit timestamps are stored in UTC
-        from datetime import timezone
-        utc_start_dt = start_dt.replace(tzinfo=timezone.utc)
-        utc_end_dt = end_dt.replace(tzinfo=timezone.utc)
-        
         # Get unique domains visited today (no duplicates, just list)
         # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         visits = db.session.query(
@@ -1416,8 +1416,8 @@ def api_agent_domain_visits(agent_id):
             func.max(server_models.DomainVisit.visited_at).label('last_visited')
         ).filter(
             server_models.DomainVisit.agent_id == agent_id,
-            server_models.DomainVisit.visited_at >= utc_start_dt,
-            server_models.DomainVisit.visited_at <= utc_end_dt
+            server_models.DomainVisit.visited_at >= start_dt,
+            server_models.DomainVisit.visited_at <= end_dt
         ).group_by(
             server_models.DomainVisit.domain,
             server_models.DomainVisit.browser

@@ -309,11 +309,22 @@ def login():
                 logger.info(f"[AUTH] Login successful: {username} (role: {user.role})")
                 flash(f'Welcome back, {username}!', 'success')
                 
-                # Redirect to intended page or dashboard
+                # Redirect based on user role
                 next_page = request.args.get('next')
                 if next_page and next_page.startswith('/'):
                     return redirect(next_page)
-                return redirect(url_for('dashboard.dashboard_home'))
+                
+                # Role-based redirect
+                if user.role == 'admin':
+                    return redirect(url_for('dashboard.dashboard_home'))
+                else:
+                    # Non-admin users: redirect to agent detail page
+                    from server_dashboard import get_user_agent_id
+                    agent_id = get_user_agent_id()
+                    if agent_id:
+                        return redirect(url_for('dashboard.agent_detail', agent_id=agent_id))
+                    else:
+                        return redirect(url_for('dashboard.agents_detail'))
             else:
                 # Wrong password
                 user.failed_login_count += 1
@@ -438,6 +449,10 @@ def add_user():
             flash('Password must be at least 8 characters.', 'danger')
             return render_template('auth/add_user.html', available_usernames=available_usernames)
         
+        if linked_username and not check_linked_username_unique(linked_username):
+            flash('This Windows username is already linked to another user.', 'danger')
+            return render_template('auth/add_user.html', available_usernames=available_usernames)
+        
         user = DashboardUser(
             username=username,
             role=role,
@@ -470,6 +485,10 @@ def edit_user(user_id):
         role = request.form.get('role', 'user')
         linked_username = request.form.get('linked_username', '').strip()
         is_active = request.form.get('is_active') == 'on'
+        
+        if linked_username and not check_linked_username_unique(linked_username, exclude_user_id=user.id):
+            flash('This Windows username is already linked to another user.', 'danger')
+            return render_template('auth/edit_user.html', user=user)
         
         user.role = role
         user.linked_username = linked_username if linked_username else None

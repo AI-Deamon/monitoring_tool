@@ -1,125 +1,144 @@
 {% extends "dashboard/base.html" %}
 
 {% block title %}Overview - SentinelEdge Dashboard{% endblock %}
-
 {% block content %}
-<div class="flex items-center justify-between mb-8">
-    <div>
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><img src="{{ url_for('static', filename='dashboard.png') }}" class="w-8 h-8 mr-4" /> Dashboard Overview</h1>
-        <p class="text-gray-600 dark:text-gray-400 mt-1">Fleet-wide activity and agent status summary</p>
+{% if current_user.role == 'admin' %}
+<div class="h-[calc(100vh-80px)] overflow-hidden">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-4">
+        <div>
+            <h1 class="text-xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                <img src="{{ url_for('static', filename='dashboard.png') }}" class="w-7 h-7 mr-2" />
+                Dashboard Overview
+            </h1>
+            <p class="text-gray-600 dark:text-gray-400 text-sm">
+                Fleet-wide activity and agent status summary
+            </p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span id="last-updated" class="text-xs text-gray-500 dark:text-gray-400">
+                Last updated: Just now
+            </span>
+            <span class="refresh-indicator" id="refresh-indicator">
+                <div class="w-4 h-4 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin"></div>
+            </span>
+        </div>
     </div>
-    <div class="flex items-center gap-4">
-        <span id="last-updated" class="text-sm text-gray-500 dark:text-gray-400">Last updated: Just now</span>
-        <span class="refresh-indicator" id="refresh-indicator">
-            <div class="w-5 h-5 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin"></div>
-        </span>
+
+    <!-- Fleet Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='agents.png') }}" class="w-8 h-8" />
+            <div>
+                <div class="text-xs font-semibold text-gray-500 uppercase">Total Agents</div>
+                <p id="total-agents" class="text-xl font-bold">-</p>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='online.png') }}" class="w-8 h-8" />
+            <div>
+                <div class="text-xs font-semibold text-gray-500 uppercase">Online Now</div>
+                <p id="active-agents" class="text-xl font-bold text-success-600">-</p>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='no.png') }}" class="w-8 h-8" />
+            <div>
+                <div class="text-xs font-semibold text-gray-500 uppercase">Offline</div>
+                <p id="offline-agents" class="text-xl font-bold text-red-600">-</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-4">
+
+        <!-- PIE CHARTS -->
+        <div class="xl:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+            <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                <h3 class="text-sm font-semibold">Agent & Screen Time Overview</h3>
+            </div>
+            <div class="p-4 grid grid-cols-2 gap-3">
+                <div class="h-50">
+                    <canvas id="agent-status-chart"></canvas>
+                </div>
+                <div class="h-50">
+                    <canvas id="screentime-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- TOP 5 AGENTS -->
+        <div class="xl:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+            <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                <h3 class="text-sm font-semibold">
+                    <img src="{{ url_for('static', filename='throphy.png') }}" class="w-4 h-4 inline mr-1" />
+                    Top 5 Agents
+                </h3>
+            </div>
+            <div class="p-4">
+                <div class="grid grid-cols-3 gap-4">
+                    <!-- Idle -->
+                    <div>
+                        <h4 class="text-xs font-semibold text-warning-600 mb-1">Idle</h4>
+                        <div class="grid grid-cols-[1fr_auto] text-xs text-gray-400 mb-1">
+                            <span>Agent</span><span class="text-right">Time</span>
+                        </div>
+                        <ul id="top-idle-list" class="space-y-1 text-sm font-mono"></ul>
+                    </div>
+                    <!-- Active -->
+                    <div>
+                        <h4 class="text-xs font-semibold text-success-600 mb-1">Active</h4>
+                        <div class="grid grid-cols-[1fr_auto] text-xs text-gray-400 mb-1">
+                            <span>Agent</span><span class="text-right">Time</span>
+                        </div>
+                        <ul id="top-active-list" class="space-y-1 text-sm font-mono"></ul>
+                    </div>
+                    <!-- Locked -->
+                    <div>
+                        <h4 class="text-xs font-semibold text-red-600 mb-1">Locked</h4>
+                        <div class="grid grid-cols-[1fr_auto] text-xs text-gray-400 mb-1">
+                            <span>Agent</span><span class="text-right">Time</span>
+                        </div>
+                        <ul id="top-locked-list" class="space-y-1 text-sm font-mono"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top App & Domain -->
+    <div class="grid grid-cols-2 gap-4">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+            <div class="text-xs font-semibold text-gray-500 uppercase mb-1">
+                <img src="{{ url_for('static', filename='throphy.png') }}" class="w-4 h-4 inline mr-1" />
+                Top App
+            </div>
+            <p id="top-app-name" class="text-base font-bold text-primary-600 truncate">-</p>
+            <div id="top-app-duration" class="text-xs text-gray-500">-</div>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+            <div class="text-xs font-semibold text-gray-500 uppercase mb-1">
+                <img src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 inline mr-1" />
+                Top Domain
+            </div>
+            <p id="top-domain-name" class="text-base font-bold text-primary-600 truncate">-</p>
+            <div id="top-domain-duration" class="text-xs text-gray-500">-</div>
+        </div>
     </div>
 </div>
-
-<!-- Fleet Summary Cards -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-shadow">
-        <div class="flex items-center gap-4">
-            <div class="w-12 h-12 bg-primary-100 dark:bg-primary-900 rounded-lg flex items-center justify-center text-2xl"><img src="{{ url_for('static', filename='agents.png') }}" class="w-8 h-8" /></div>
-            <div>
-                <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Total Agents</div>
-                <p id="total-agents" class="text-2xl font-bold text-gray-900 dark:text-gray-100">-</p>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Registered fleet size</div>
-            </div>
-        </div>
-    </div>
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-shadow">
-        <div class="flex items-center gap-4">
-            <div class="w-12 h-12 bg-success-100 dark:bg-success-900 rounded-lg flex items-center justify-center text-2xl"><img src="{{ url_for('static', filename='online.png') }}" class="w-8 h-8" /></div>
-            <div>
-                <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Online Now</div>
-                <p id="active-agents" class="text-2xl font-bold text-success-600 dark:text-success-400">-</p>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Active in last 5 mins</div>
-            </div>
-        </div>
-    </div>
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-shadow">
-        <div class="flex items-center gap-4">
-            <div class="w-12 h-12   rounded-lg flex items-center justify-center text-2xl"><img src="{{ url_for('static', filename='no.png') }}" class="w-8 h-8" /></div>
-            <div>
-                <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Offline</div>
-                <p id="offline-agents" class="text-2xl font-bold text-red-600 dark:text-red-400">-</p>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Agents currently disconnected</div>
-            </div>
-        </div>
+{% else %}
+<div class="flex items-center justify-center h-[calc(100vh-80px)]">
+    <div class="text-center">
+        <div class="text-6xl mb-4">🔒</div>
+        <h2 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Access Restricted</h2>
+        <p class="text-gray-600 dark:text-gray-400">This page is only available to administrators.</p>
     </div>
 </div>
-
-
-<!-- Charts Row -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Agent Status</h3>
-        </div>
-        <div class="p-6">
-            <div class="h-64 relative">
-                <canvas id="agent-status-chart"></canvas>
-            </div>
-        </div>
-    </div>
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Fleet Screen Time Breakdown</h3>
-        </div>
-        <div class="p-6">
-            <div class="h-64 relative">
-                <canvas id="screentime-chart"></canvas>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Top Apps & Domains -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-        <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1"><img src="{{ url_for('static', filename='throphy.png') }}" class="w-5 h-5 inline mr-2" /> Top App Today</div>
-        <p id="top-app-name" class="text-xl font-bold text-primary-600 dark:text-primary-400 mb-2">-</p>
-        <div id="top-app-duration" class="font-semibold text-gray-600 dark:text-gray-300 mb-2">-</div>
-        <div class="text-xs text-gray-500 dark:text-gray-400">Fleet-wide usage</div>
-    </div>
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-        <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1"><img src="{{ url_for('static', filename='globe.png') }}" class="w-5 h-5 inline mr-2" /> Top Domain Today</div>
-        <p id="top-domain-name" class="text-xl font-bold text-primary-600 dark:text-primary-400 mb-2">-</p>
-        <div id="top-domain-duration" class="font-semibold text-gray-600 dark:text-gray-300 mb-2">-</div>
-        <div class="text-xs text-gray-500 dark:text-gray-400">Fleet-wide usage</div>
-    </div>
-</div>
-
-<!-- Top 5 Agents Widget -->
-<div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-        <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img src="{{ url_for('static', filename='throphy.png') }}" class="w-5 h-5 inline mr-2" />Top 5 Agents</h3>
-        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Leaders by screen time category</p>
-    </div>
-    <div class="p-6">
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div>
-                <h4 class="text-sm font-semibold text-warning-600 dark:text-warning-400 mb-4 flex items-center gap-2"><img src="{{ url_for('static', filename='pause.png') }}" class="w-4 h-4 inline mr-2" />Most Idle Time</h4>
-                <ul id="top-idle-list" class="space-y-2">
-                    <li class="text-gray-500 dark:text-gray-400">Loading...</li>
-                </ul>
-            </div>
-            <div>
-                <h4 class="text-sm font-semibold text-success-600 dark:text-success-400 mb-4 flex items-center gap-2"><img src="{{ url_for('static', filename='online.png') }}" class="w-4 h-4 inline mr-2" /> Most Active Time</h4>
-                <ul id="top-active-list" class="space-y-2">
-                    <li class="text-gray-500 dark:text-gray-400">Loading...</li>
-                </ul>
-            </div>
-            <div>
-                <h4 class="text-sm font-semibold text-red-600 dark:text-red-400 mb-4 flex items-center gap-2"><img src="{{ url_for('static', filename='lock.png') }}" class="w-4 h-4 inline mr-2" /> Most Locked Time</h4>
-                <ul id="top-locked-list" class="space-y-2">
-                    <li class="text-gray-500 dark:text-gray-400">Loading...</li>
-                </ul>
-            </div>
-        </div>
-    </div>
-</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_css %}
@@ -127,164 +146,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-    function getSelectedDate() {
-        // Use global date selector from navbar
-        const dateInput = document.getElementById('global-date-select');
-        if (dateInput && dateInput.value) {
-            return dateInput.value;
-        }
-        const params = new URLSearchParams(window.location.search);
-        return params.get('date') || new Date().toISOString().split('T')[0];
-    }
-
-    // Initialize global date picker and attach listener
-    document.addEventListener('DOMContentLoaded', () => {
-        const dateInput = document.getElementById('global-date-select');
-        if (dateInput) {
-            const today = new Date().toISOString().split('T')[0];
-            dateInput.value = getSelectedDate();
-            dateInput.max = today;
-            // Attach change listener for this page
-            dateInput.addEventListener('change', () => {
-                loadOverview();
-            });
-        }
-    });
-
-    async function loadOverview() {
-        document.getElementById('refresh-indicator').classList.add('active');
-
-        const selectedDate = getSelectedDate();
-        const data = await fetchJSON(`/dashboard/api/overview?date=${selectedDate}`);
-
-        document.getElementById('refresh-indicator').classList.remove('active');
-
-        if (!data) return;
-
-        // Update metrics
-        document.getElementById('total-agents').textContent = data.total_agents;
-        document.getElementById('active-agents').textContent = data.active_agents;
-        document.getElementById('offline-agents').textContent = data.offline_agents;
-
-
-        // Update Highlights
-        document.getElementById('top-app-name').textContent = data.top_app.name;
-        document.getElementById('top-app-duration').textContent = formatTime(data.top_app.duration);
-
-        document.getElementById('top-domain-name').textContent = data.top_domain.name;
-        document.getElementById('top-domain-duration').textContent = formatTime(data.top_domain.duration);
-
-        // Update Top 5 Agents
-        renderTop5Agents(data);
-
-        // Update Last Updated
-        document.getElementById('last-updated').textContent = "Last updated: " + new Date().toLocaleTimeString();
-
-        // -- Charts --
-        renderCharts(data);
-    }
-
-
-    function renderCharts(data) {
-        // 1. Agent Status Pie Chart
-        const ctxStatus = document.getElementById('agent-status-chart');
-        if (window.statusChart) window.statusChart.destroy();
-
-        window.statusChart = new Chart(ctxStatus, {
-            type: 'doughnut',
-            data: {
-                labels: ['Online', 'Offline'],
-                datasets: [{
-                    data: [data.active_agents, data.offline_agents],
-                    backgroundColor: ['#10b981', '#ef4444']
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom' } }
-            }
-        });
-
-        // 2. Screen Time Breakdown Chart
-        const ctxScreen = document.getElementById('screentime-chart');
-        if (window.screenChart) window.screenChart.destroy();
-
-        const awayTime = data.screen_time.away || 0;
-        window.screenChart = new Chart(ctxScreen, {
-            type: 'doughnut',
-            data: {
-                labels: ['Active', 'Idle', 'Locked', 'Away'],
-                datasets: [{
-                    data: [data.screen_time.active, data.screen_time.idle, data.screen_time.locked, awayTime],
-                    backgroundColor: ['#38bdf8', '#fbbf24', '#64748b', '#334155']
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'bottom' },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => ctx.label + ': ' + formatTime(ctx.parsed)
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    function renderTop5Agents(data) {
-        // Render Top Idle Agents
-        const idleList = document.getElementById('top-idle-list');
-        if (data.top_idle_agents && data.top_idle_agents.length > 0) {
-            idleList.innerHTML = data.top_idle_agents.map((agent, index) => `
-                <li class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
-                    <span class="text-sm text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname}</span>
-                    <span class="font-mono text-sm text-warning-600 dark:text-warning-400">${formatTime(agent.idle_seconds)}</span>
-                </li>
-            `).join('');
-        } else {
-            idleList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-sm">No data</li>';
-        }
-
-        // Render Top Active Agents
-        const activeList = document.getElementById('top-active-list');
-        if (data.top_active_agents && data.top_active_agents.length > 0) {
-            activeList.innerHTML = data.top_active_agents.map((agent, index) => `
-                <li class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
-                    <span class="text-sm text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname}</span>
-                    <span class="font-mono text-sm text-success-600 dark:text-success-400">${formatTime(agent.active_seconds)}</span>
-                </li>
-            `).join('');
-        } else {
-            activeList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-sm">No data</li>';
-        }
-
-        // Render Top Locked Agents
-        const lockedList = document.getElementById('top-locked-list');
-        if (data.top_locked_agents && data.top_locked_agents.length > 0) {
-            lockedList.innerHTML = data.top_locked_agents.map((agent, index) => `
-                <li class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
-                    <span class="text-sm text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname}</span>
-                    <span class="font-mono text-sm text-red-600 dark:text-red-400">${formatTime(agent.locked_seconds)}</span>
-                </li>
-            `).join('');
-        } else {
-            lockedList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-sm">No data</li>';
-        }
-    }
-
-    // Initial Load
-    document.addEventListener('DOMContentLoaded', () => {
-        loadOverview();
-    });
-
-    // Refresh every 30s for more real-time data
-    setInterval(() => {
-        loadOverview();
-    }, 30000);
-</script>
+<script src="{{ url_for('static', filename='js/overview.js') }}"></script>
 {% endblock %}

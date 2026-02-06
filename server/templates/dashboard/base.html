@@ -67,7 +67,7 @@
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors">
     <!-- Navigation -->
     <nav class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50 transition-colors">
-        <div class="max-w-7xl mx-auto px-6">
+        <div class="max-w-7xl mx-auto px-2">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center gap-8">
                     <a href="{{ url_for('dashboard.dashboard_home') }}" class="flex items-center gap-2 text-xl font-bold text-primary-600 dark:text-primary-400">
@@ -76,12 +76,14 @@
                     </a>
                     
                     <ul class="flex items-center gap-1">
+                         {% if session.role == 'admin' %}
                         <li>
                             <a href="{{ url_for('dashboard.dashboard_home') }}"
                                 class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.dashboard_home' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
                                 Overview
                             </a>
                         </li>
+                        {% endif %}
                         {% if session.role == 'admin' %}
                         <li>
                             <a href="{{ url_for('dashboard.agents_list') }}"
@@ -95,7 +97,7 @@
                             {% if user_agent_id %}
                             <a href="{{ url_for('dashboard.agent_detail', agent_id=user_agent_id) }}"
                                 class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.agent_detail' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-                               Agent
+                               
                             </a>
                             {% else %}
                             <span class="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-500 cursor-not-allowed">
@@ -125,8 +127,7 @@
                         <option value="">Fleet Overview</option>
                         <option disabled>Loading Agents...</option>
                     </select>
-                {% else %}
-                    <button class="bg-blue-700 rounded p-2 text-white" onclick="fetchUserAgentData()">My Fleet Overview</button>
+        
                    {% endif %}
                     <input type="date" id="global-date-select" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
 
@@ -161,12 +162,12 @@
     </nav>
 
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto p-6">
+    <main class="max-w-7xl m-0 mx-auto min-h-[82vh] p-0 pt-8">
         {% block content %}{% endblock %}
     </main>
 
     <!-- Footer -->
-    <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto transition-colors">
+    <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-3 transition-colors">
         <div class="max-w-7xl mx-auto px-6 py-4">
             <div class="flex items-center justify-between">
                 <div>

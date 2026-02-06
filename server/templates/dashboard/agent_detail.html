@@ -5,38 +5,108 @@
 {% block content %}
 <!-- Header -->
 <div class="mb-6 animate-fade-in">
+    {% if session.role != 'admin' %}
+    <section class="w-full min-h-[32vh] flex items-center
+         bg-gradient-to-br from-slate-50 via-white to-slate-100
+         dark:from-gray-900 dark:via-gray-800 dark:to-gray-900
+         mb-6 border-b border-gray-200 dark:border-gray-700">
+
+        <div class="max-w-7xl mx-auto px-6 w-full">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+
+                <!-- LEFT CONTENT -->
+                <div class="space-y-4">
+
+                    <!-- Greeting -->
+                    <div class="flex">
+                        <h1 id="greeting-text" class="flex items-center gap-2
+                 text-3xl md:text-4xl font-bold
+                 text-gray-900 dark:text-gray-100">
+                        </h1>
+                        <span class="text-blue-600 dark:text-blue-400 font-semibold text-4xl">
+                            {{ session.username or 'User' }}
+                        </span>
+                    </div>
+                    <!-- Username -->
+                    <h2 class="text-lg md:text-xl font-medium text-gray-700 dark:text-gray-300 pl-10">
+                        Welcome back to the Bsol Systems <span
+                            class="text-blue-600 dark:text-blue-400">Sentinel</span><span
+                            class="text-purple-600 dark:text-purple-400">Edge</span> Dashboard!
+
+                    </h2>
+
+                    <!-- Description -->
+                    <p class="mt-2 text-base md:text-lg leading-relaxed
+                  text-gray-600 dark:text-gray-400 max-w-xl pl-10">
+                        This is your personal activity dashboard.
+                        Track screen time, applications, and productivity insights
+                        in one place.
+                    </p>
+                </div>
+
+                <!-- RIGHT ILLUSTRATION -->
+                <div class="hidden md:flex justify-end">
+                    <div class="flex items-center justify-center
+                 w-52 h-52 rounded-full
+                 bg-gradient-to-br from-blue-100 to-blue-200
+                 dark:from-blue-900/30 dark:to-blue-800/20
+                 shadow-inner">
+                        <img src="{{ url_for('static', filename='dashboard.png') }}" class="w-28 h-28 opacity-90"
+                            alt="Dashboard Illustration" />
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+    {% endif %}
+
     <div class="flex items-center justify-between">
+              
         <div>
-            <a href="{{ url_for('dashboard.dashboard_home') }}" class="inline-flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 mb-3">
+      {% if session.role == 'admin' %}
+            <a href="{{ url_for('dashboard.dashboard_home') }}"
+                class="inline-flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 mb-3">
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <path d="M19 12H5m7 7l-7-7 7-7" />
                 </svg>
                 Back to Overview
             </a>
+{% endif %}
+           
             <div class="flex items-center gap-4">
-                <h1 id="agent-title" class="text-2xl font-bold text-gray-900 dark:text-gray-100">👤 Loading...</h1>
+                <h1 id="agent-title" class="text-2xl font-bold text-gray-900 dark:text-gray-100"><img
+                        src="{{ url_for('static', filename='user-setting.png') }}"
+                        class="w-8 h-8 mr-2 inline-block" />{{ agent.hostname or agent.agent_id|string }}</h1>
                 <div id="status-badge-container"></div>
             </div>
             <p id="agent-subtitle" class="text-gray-600 dark:text-gray-300 font-medium mt-1">
-                <span id="agent-device">🖥️ {{ agent.hostname or agent.agent_id|string }}</span>
+                <span id="agent-device"><img src="{{ url_for('static', filename='monitor.png') }}"
+                        class="w-4 h-4 mr-1 inline-block" />{{ agent.hostname or agent.agent_id|string }}</span>
                 <span class="text-gray-400 dark:text-gray-500"> • </span>
                 <span id="agent-os">{{ agent.os }}</span>
             </p>
-        </div>
+        </div> 
         <div class="flex items-center gap-3">
             <div class="text-right">
-                <div class="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Current Activity</div>
-                <span id="current-activity" class="inline-block px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full font-semibold text-sm max-w-48 truncate">Loading...</span>
+                <div class="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Current Activity
+                </div>
+                <span id="current-activity"
+                    class="inline-block px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full font-semibold text-sm max-w-48 truncate">Loading...</span>
             </div>
-            <a href="{{ url_for('dashboard.agent_report', agent_id=agent.agent_id) }}" class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+            {% if session.role == 'admin' %}
+            <a href="{{ url_for('dashboard.agent_report', agent_id=agent.agent_id) }}"
+                class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
                 <img src="{{ url_for('static', filename='report.png') }}" class="w-4 h-4 mr-2" /> Report
             </a>
+            {% endif%}
         </div>
     </div>
 </div>
 
 <!-- Live Status Banner -->
-<div id="live-status-banner" class="hidden bg-gradient-to-r from-blue-500 via-purple-600 to-purple-700 rounded-xl p-4 mb-6 text-white shadow-lg">
+<div id="live-status-banner"
+    class="hidden bg-gradient-to-r from-blue-500 via-purple-600 to-purple-700 rounded-xl p-4 mb-6 text-white shadow-lg">
     <div class="flex items-center justify-between gap-6">
         <div class="flex items-center gap-3">
             <div class="flex items-center gap-2">
@@ -55,17 +125,25 @@
 <!-- Tab Navigation -->
 <div class="mb-6">
     <div class="flex bg-white dark:bg-gray-800 rounded-lg p-1 border border-gray-200 dark:border-gray-700 shadow-sm">
-        <button class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-md" data-tab="overview">
+        <button
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-md"
+            data-tab="overview">
             <img src="{{ url_for('static', filename='report.png') }}" class="w-4 h-4 inline mr-2" /> Overview
         </button>
-        <button class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700" data-tab="activity">
-            📱 Activity
+        <button
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            data-tab="activity">
+            <img src="{{ url_for('static', filename='app.png') }}" class="w-4 h-4 inline mr-2" /> Activity
         </button>
-        <button class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700" data-tab="web">
+        <button
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            data-tab="web">
             <img src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 inline mr-2" /> Web
         </button>
-        <button class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700" data-tab="inventory">
-            📦 Inventory
+        <button
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            data-tab="inventory">
+            <img src="{{ url_for('static', filename='inventory.png') }}" class="w-5 h-5 mr-2 inline-block" /> Inventory
         </button>
     </div>
 </div>
@@ -76,32 +154,47 @@
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🆔 Agent ID</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
+                        src="{{ url_for('static', filename='id.png') }}" class="w-4 h-4 mr-1 inline-block" /> Agent ID
+                </div>
                 <div class="flex items-center gap-2 font-mono">
                     <code class="text-sm text-gray-900 dark:text-gray-100">{{ (agent.agent_id|string)[:12] }}...</code>
-                    <button onclick="copyAgentId()" class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300" title="Copy full Agent ID">📋</button>
+                    <button onclick="copyAgentId()"
+                        class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                        title="Copy full Agent ID"></button>
                     <input type="hidden" id="agent-id-full" value="{{ agent.agent_id }}">
                 </div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">💻 OS Platform</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
+                        src="{{ url_for('static', filename='monitor.png') }}" class="w-4 h-4 mr-1 inline-block" /> OS
+                    Platform</div>
                 <div class="font-semibold text-gray-900 dark:text-gray-100">{{ agent.os }}</div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">📅 Registered</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
+                        src="{{ url_for('static', filename='calender.png') }}" class="w-4 h-4 mr-1 inline-block" />
+                    Registered</div>
                 <div id="registered-at" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🌅 First Seen Today</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
+                        src="{{ url_for('static', filename='seen1.png') }}" class="w-4 h-4 mr-1 inline-block" /> First
+                    Seen</div>
                 <div id="first-seen-today" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">👁️ Last Seen</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
+                        src="{{ url_for('static', filename='seen.png') }}" class="w-4 h-4 mr-1 inline-block" /> Last
+                    Seen</div>
                 <div id="last-seen" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">⚡ Current State</div>
-                <span id="current-state" class="inline-block px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full">Active</span>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
+                        src="{{ url_for('static', filename='thunder.png') }}" class="w-4 h-4 mr-1 inline-block" />
+                    Current State</div>
+                <span id="current-state"
+                    class="inline-block px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full">Active</span>
             </div>
         </div>
     </div>
@@ -111,16 +204,18 @@
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
             <div class="flex items-center">
-                <div class="text-2xl mr-3">⏱️</div>
+                <div class="text-2xl mr-3"><img src="{{ url_for('static', filename='clock.png') }}" class="w-6 h-6" />
+                </div>
                 <div>
                     <div id="quick-screen-time" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
-                    <div class="text-sm text-gray-500 dark:text-gray-400">Screen Time Today</div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400">Screen Time</div>
                 </div>
             </div>
         </div>
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
             <div class="flex items-center">
-                <div class="text-2xl mr-3">📱</div>
+                <div class="text-2xl mr-3"><img src="{{ url_for('static', filename='app.png') }}"
+                        class="w-4 h-4 inline mr-2" /></div>
                 <div>
                     <div id="quick-apps-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
                     <div class="text-sm text-gray-500 dark:text-gray-400">Apps Used</div>
@@ -129,7 +224,8 @@
         </div>
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
             <div class="flex items-center">
-                <div class="text-2xl mr-3">🌐</div>
+                <div class="text-2xl mr-3"><img src="{{ url_for('static', filename='globe.png') }}" class="w-6 h-6" />
+                </div>
                 <div>
                     <div id="quick-domains-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
                     <div class="text-sm text-gray-500 dark:text-gray-400">Domains Visited</div>
@@ -138,7 +234,8 @@
         </div>
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
             <div class="flex items-center">
-                <div class="text-2xl mr-3">🔄</div>
+                <div class="text-2xl mr-3"><img src="{{ url_for('static', filename='session.png') }}" class="w-6 h-6" />
+                </div>
                 <div>
                     <div id="quick-sessions-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
                     <div class="text-sm text-gray-500 dark:text-gray-400">App Sessions</div>
@@ -148,34 +245,42 @@
     </div>
 
     <!-- Screen Time Metrics -->
-    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">📊 Today's Screen Time</h3>
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4"><img
+            src="{{ url_for('static', filename='bar-chart.png') }}" class="w-6 h-6 mr-2 inline-block" /> Screen Time
+    </h3>
     <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        <div class="bg-gradient-to-br from-blue-50 dark:from-blue-900/20 to-blue-100 dark:to-blue-800/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-            <div class="text-2xl mb-2">🎯</div>
+        <div
+            class="bg-gradient-to-br from-blue-50 dark:from-blue-900/20 to-blue-100 dark:to-blue-800/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
+            <div class="text-2xl mb-2"><img src="{{ url_for('static', filename='online.png') }}" class="w-6 h-6" />
+            </div>
             <div class="text-sm text-blue-600 dark:text-blue-400 font-medium">Active Time</div>
             <div id="active-time" class="text-xl font-bold text-blue-900 dark:text-blue-100">--</div>
             <div id="active-pct" class="text-xs text-blue-600 dark:text-blue-400">--</div>
         </div>
-        <div class="bg-gradient-to-br from-yellow-50 dark:from-yellow-900/20 to-yellow-100 dark:to-yellow-800/20 rounded-lg p-4 border border-yellow-200 dark:border-yellow-800">
+        <div
+            class="bg-gradient-to-br from-yellow-50 dark:from-yellow-900/20 to-yellow-100 dark:to-yellow-800/20 rounded-lg p-4 border border-yellow-200 dark:border-yellow-800">
             <div class="text-2xl mb-2">💤</div>
             <div class="text-sm text-yellow-600 dark:text-yellow-400 font-medium">Idle Time</div>
             <div id="idle-time" class="text-xl font-bold text-yellow-900 dark:text-yellow-100">--</div>
             <div id="idle-pct" class="text-xs text-yellow-600 dark:text-yellow-400">--</div>
         </div>
-        <div class="bg-gradient-to-br from-gray-50 dark:from-gray-800 to-gray-100 dark:to-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-            <div class="text-2xl mb-2">🔒</div>
+        <div
+            class="bg-gradient-to-br from-gray-50 dark:from-gray-800 to-gray-100 dark:to-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+            <div class="text-2xl mb-2"><img src="{{ url_for('static', filename='lock.png') }}" class="w-6 h-6" /></div>
             <div class="text-sm text-gray-600 dark:text-gray-300 font-medium">Locked Time</div>
             <div id="locked-time" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
             <div id="locked-pct" class="text-xs text-gray-600 dark:text-gray-400">--</div>
         </div>
-        <div class="bg-gradient-to-br from-red-50 dark:from-red-900/20 to-red-100 dark:to-red-800/20 rounded-lg p-4 border border-red-200 dark:border-red-800">
-            <div class="text-2xl mb-2">⭕</div>
+        <div
+            class="bg-gradient-to-br from-red-50 dark:from-red-900/20 to-red-100 dark:to-red-800/20 rounded-lg p-4 border border-red-200 dark:border-red-800">
+            <div class="text-2xl mb-2"><img src="{{ url_for('static', filename='no.png') }}" class="w-6 h-6" /></div>
             <div class="text-sm text-red-600 dark:text-red-400 font-medium">Away Time</div>
             <div id="away-time" class="text-xl font-bold text-red-900 dark:text-red-100">--</div>
             <div id="away-pct" class="text-xs text-red-600 dark:text-red-400">--</div>
         </div>
-        <div class="bg-gradient-to-br from-purple-50 dark:from-purple-900/20 to-purple-100 dark:to-purple-800/20 rounded-lg p-4 border border-purple-200 dark:border-purple-800">
-            <div class="text-2xl mb-2">⏱️</div>
+        <div
+            class="bg-gradient-to-br from-purple-50 dark:from-purple-900/20 to-purple-100 dark:to-purple-800/20 rounded-lg p-4 border border-purple-200 dark:border-purple-800">
+            <div class="text-2xl mb-2"><img src="{{ url_for('static', filename='clock.png') }}" class="w-6 h-6" /></div>
             <div class="text-sm text-purple-600 dark:text-purple-400 font-medium">Total Productive</div>
             <div id="total-time" class="text-xl font-bold text-purple-900 dark:text-purple-100">--</div>
             <div class="text-xs text-purple-600 dark:text-purple-400">Full day activity</div>
@@ -183,7 +288,9 @@
     </div>
 
     <!-- 7-Day Chart -->
-    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">📈 Screen Time (Last 7 Days)</h3>
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4"><img
+            src="{{ url_for('static', filename='bar-chart.png') }}" class="w-6 h-6 mr-2 inline-block" /> Screen Time
+        (Last 7 Days)</h3>
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
         <div class="h-80 relative">
             <canvas id="screentime-history-chart"></canvas>
@@ -197,32 +304,49 @@
         <!-- App Usage -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">📱 Application Usage</h3>
-                <span id="apps-count" class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0 apps</span>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img
+                        src="{{ url_for('static', filename='app.png') }}" class="w-4 h-4 inline mr-2" /> Application
+                    Usage</h3>
+                <span id="apps-count"
+                    class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
+                    apps</span>
             </div>
             <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <input type="text" id="app-search" placeholder="Search apps..." class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                <input type="text" id="app-search" placeholder="Search apps..."
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
             </div>
-            <div id="app-ongoing-section" class="hidden bg-green-50 dark:bg-green-900/20 p-3 border-b border-gray-200 dark:border-gray-700">
-                <div class="text-xs font-semibold text-green-700 dark:text-green-300 uppercase tracking-wide mb-1">🎯 Currently Using</div>
+            <div id="app-ongoing-section"
+                class="hidden bg-green-50 dark:bg-green-900/20 p-3 border-b border-gray-200 dark:border-gray-700">
+                <div class="text-xs font-semibold text-green-700 dark:text-green-300 uppercase tracking-wide mb-1">🎯
+                    Currently Using</div>
                 <div class="flex justify-between items-center">
                     <span id="ongoing-app-name" class="font-semibold text-gray-900 dark:text-gray-100">--</span>
-                    <span id="ongoing-app-duration" class="font-mono font-semibold text-green-600 dark:text-green-400">--</span>
+                    <span id="ongoing-app-duration"
+                        class="font-mono font-semibold text-green-600 dark:text-green-400">--</span>
                 </div>
             </div>
             <div class="max-h-96 overflow-y-auto">
                 <table class="w-full" id="apps-table">
                     <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
                         <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Application</th>
-                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Sessions</th>
-                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
-                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">%</th>
+                            <th
+                                class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Application</th>
+                            <th
+                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Sessions</th>
+                            <th
+                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Duration</th>
+                            <th
+                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                %</th>
                         </tr>
                     </thead>
                     <tbody id="apps-body" class="divide-y divide-gray-200 dark:divide-gray-600">
                         <tr>
-                            <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...</td>
+                            <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -232,32 +356,48 @@
         <!-- Domain Usage -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🌐 Domain Usage</h3>
-                <span id="domains-count" class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0 domains</span>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img
+                        src="{{ url_for('static', filename='globe.png') }}" class="w-6 h-6" /> Domain Usage</h3>
+                <span id="domains-count"
+                    class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
+                    domains</span>
             </div>
             <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <input type="text" id="domain-search" placeholder="Search domains..." class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                <input type="text" id="domain-search" placeholder="Search domains..."
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
             </div>
-            <div id="domain-ongoing-section" class="hidden bg-green-50 dark:bg-green-900/20 p-3 border-b border-gray-200 dark:border-gray-700">
-                <div class="text-xs font-semibold text-green-700 dark:text-green-300 uppercase tracking-wide mb-1">🌍 Currently Browsing</div>
+            <div id="domain-ongoing-section"
+                class="hidden bg-green-50 dark:bg-green-900/20 p-3 border-b border-gray-200 dark:border-gray-700">
+                <div class="text-xs font-semibold text-green-700 dark:text-green-300 uppercase tracking-wide mb-1">🌍
+                    Currently Browsing</div>
                 <div class="flex justify-between items-center">
                     <span id="ongoing-domain-name" class="font-semibold text-gray-900 dark:text-gray-100">--</span>
-                    <span id="ongoing-domain-duration" class="font-mono font-semibold text-green-600 dark:text-green-400">--</span>
+                    <span id="ongoing-domain-duration"
+                        class="font-mono font-semibold text-green-600 dark:text-green-400">--</span>
                 </div>
             </div>
             <div class="max-h-96 overflow-y-auto">
                 <table class="w-full" id="domains-table">
                     <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
                         <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Domain</th>
-                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Sessions</th>
-                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Duration</th>
-                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">%</th>
+                            <th
+                                class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Domain</th>
+                            <th
+                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Sessions</th>
+                            <th
+                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                Duration</th>
+                            <th
+                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                %</th>
                         </tr>
                     </thead>
                     <tbody id="domains-body" class="divide-y divide-gray-200 dark:divide-gray-600">
                         <tr>
-                            <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...</td>
+                            <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -270,11 +410,15 @@
 <div id="tab-web" class="tab-content hidden">
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
         <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🕐 Browser History (Today)</h3>
-            <span id="visits-count" class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full">0 visits</span>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img
+                    src="{{ url_for('static', filename='globe.png') }}" class="w-6 h-6" /> Browser History</h3>
+            <span id="visits-count"
+                class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full">0
+                visits</span>
         </div>
         <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-            <input type="text" id="visits-search" placeholder="Search sites..." class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <input type="text" id="visits-search" placeholder="Search sites..."
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
         </div>
         <div id="visits-list" class="max-h-96 overflow-y-auto">
             <div class="p-8 text-center text-gray-500 dark:text-gray-400">Loading...</div>
@@ -286,27 +430,45 @@
 <div id="tab-inventory" class="tab-content hidden">
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
         <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">📦 Installed Applications</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img
+                    src="{{ url_for('static', filename='inventory.png') }}" class="w-5 h-5 mr-2 inline-block" />
+                Installed Applications</h3>
             <div class="flex items-center gap-3">
-                <span id="inventory-count" class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0 apps</span>
-                <button onclick="exportTableToCSV('inventory-table', 'inventory.csv')" class="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <span id="inventory-count"
+                    class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
+                    apps</span>
+                <button onclick="exportTableToCSV('inventory-table', 'inventory.csv')"
+                    class="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                     Export CSV
                 </button>
             </div>
         </div>
         <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-            <input type="text" id="inventory-search" placeholder="Search applications..." class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <input type="text" id="inventory-search" placeholder="Search applications..."
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
         </div>
         <div class="max-h-96 overflow-y-auto">
             <table class="w-full table-fixed" id="inventory-table">
-                <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
+                <thead class="bg-gray-300 dark:bg-gray-700 sticky top-0">
                     <tr>
-                        <th class="w-1/5 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-                        <th class="w-16 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Version</th>
-                        <th class="w-1/6 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Publisher</th>
-                        <th class="w-1/3 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Install Location</th>
-                        <th class="w-24 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Install Date</th>
-                        <th class="w-20 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Source</th>
+                        <th
+                            class="w-1/5 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Name</th>
+                        <th
+                            class="w-16 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Version</th>
+                        <th
+                            class="w-1/6 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Publisher</th>
+                        <th
+                            class="w-1/3 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Install Location</th>
+                        <th
+                            class="w-24 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Install Date</th>
+                        <th
+                            class="w-20 px-9 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                            Source</th>
                     </tr>
                 </thead>
                 <tbody id="inventory-body" class="divide-y divide-gray-200 dark:divide-gray-600">
@@ -324,420 +486,10 @@
 {% block extra_js %}
 <script>
     const AGENT_ID = "{{ agent.agent_id }}";
-    let reportData = null;
-
-    // Tab Navigation
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tabName = btn.dataset.tab;
-            // Update button styles
-            document.querySelectorAll('.tab-btn').forEach(b => {
-                b.classList.remove('bg-gradient-to-r', 'from-blue-500', 'to-purple-600', 'text-white', 'shadow-md');
-                b.classList.add('text-gray-600', 'dark:text-gray-300', 'hover:text-gray-900', 'dark:hover:text-gray-100', 'hover:bg-gray-50', 'dark:hover:bg-gray-700');
-            });
-            btn.classList.remove('text-gray-600', 'dark:text-gray-300', 'hover:text-gray-900', 'dark:hover:text-gray-100', 'hover:bg-gray-50', 'dark:hover:bg-gray-700');
-            btn.classList.add('bg-gradient-to-r', 'from-blue-500', 'to-purple-600', 'text-white', 'shadow-md');
-            
-            // Show/hide content
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
-            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
-        });
-    });
-
-    // Search Filtering
-    function setupSearch(inputId, containerId, selector) {
-        const input = document.getElementById(inputId);
-        if (!input) return;
-        input.addEventListener('input', () => {
-            const term = input.value.toLowerCase();
-            document.querySelectorAll(`#${containerId} ${selector}`).forEach(el => {
-                el.style.display = el.textContent.toLowerCase().includes(term) ? '' : 'none';
-            });
-        });
-    }
-    
-    document.addEventListener('DOMContentLoaded', () => {
-        setupSearch('app-search', 'apps-body', 'tr');
-        setupSearch('domain-search', 'domains-body', 'tr');
-        setupSearch('inventory-search', 'inventory-body', 'tr');
-        setupSearch('visits-search', 'visits-list', '.site-item');
-    });
-
-    // Utility functions
-    function formatTime(seconds) {
-        if (!seconds || seconds < 0) return '0s';
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = Math.floor(seconds % 60);
-        if (h > 0) return `${h}h ${m}m`;
-        if (m > 0) return `${m}m ${s}s`;
-        return `${s}s`;
-    }
-
-    function formatTimeShort(seconds) {
-        if (!seconds || seconds < 0) return '0s';
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        if (h > 0) return h + 'h';
-        if (m > 0) return m + 'm';
-        return Math.floor(seconds % 60) + 's';
-    }
-
-    function getSelectedDate() {
-        const el = document.getElementById('global-date-select');
-        return el ? el.value : new Date().toISOString().split('T')[0];
-    }
-
-    async function fetchJSON(url) {
-        try {
-            const res = await fetch(url);
-            if (!res.ok) throw new Error(res.statusText);
-            return await res.json();
-        } catch (e) {
-            console.error('Fetch error:', e);
-            return null;
-        }
-    }
-
-    // Copy Agent ID
-    function copyAgentId() {
-        const agentId = document.getElementById('agent-id-full').value;
-        if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(agentId).then(() => {
-                showToast('Agent ID copied to clipboard!', 'success');
-            }).catch(() => fallbackCopy(agentId));
-        } else {
-            fallbackCopy(agentId);
-        }
-    }
-
-    function fallbackCopy(text) {
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-            document.execCommand('copy');
-            showToast('Agent ID copied to clipboard!', 'success');
-        } catch {
-            showToast('Copy failed - please copy manually', 'error');
-        }
-        document.body.removeChild(textArea);
-    }
-
-    function showToast(message, type = 'success') {
-        const toast = document.createElement('div');
-        toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg text-white font-medium z-50 ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`;
-        toast.textContent = message;
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
-    }
-
-    // Main data loader
-    async function loadFullReport() {
-        const selectedDate = getSelectedDate();
-        const data = await fetchJSON(`/dashboard/api/agent/${AGENT_ID}/full-report?date=${selectedDate}`);
-        if (!data) return;
-        reportData = data;
-
-        // Update agent info
-        if (data.agent) {
-            if (data.agent.username) {
-                document.getElementById('agent-title').textContent = `👤 ${data.agent.username}`;
-            }
-            document.getElementById('registered-at').textContent = data.agent.registered_at ? new Date(data.agent.registered_at).toLocaleDateString() : '-';
-            document.getElementById('first-seen-today').textContent = data.agent.first_seen_today ? new Date(data.agent.first_seen_today).toLocaleTimeString() : 'No activity';
-            document.getElementById('last-seen').textContent = data.agent.last_seen ? new Date(data.agent.last_seen).toLocaleString() : 'No activity';
-        }
-
-        // Live status
-        if (data.live_status && data.live_status.current_app) {
-            document.getElementById('live-status-banner').classList.remove('hidden');
-            document.getElementById('live-app-name').textContent = data.live_status.current_app;
-            document.getElementById('live-window-title').textContent = data.live_status.window_title || '';
-            document.getElementById('live-duration').textContent = formatTime(data.live_status.duration_seconds || 0);
-            document.getElementById('current-activity').textContent = data.live_status.current_app;
-            document.getElementById('current-state').textContent = 'Active';
-            document.getElementById('current-state').className = 'inline-block px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full';
-        } else {
-            document.getElementById('live-status-banner').classList.add('hidden');
-            document.getElementById('current-activity').innerHTML = '<span class="opacity-70">Offline</span>';
-            document.getElementById('current-state').textContent = 'Offline';
-            document.getElementById('current-state').className = 'inline-block px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full';
-        }
-
-        // Screen time
-        const st = data.screen_time || {};
-        const activeSeconds = st.active_seconds || 0;
-        const idleSeconds = st.idle_seconds || 0;
-        const lockedSeconds = st.locked_seconds || 0;
-        const awaySeconds = st.away_seconds || 0;
-        const totalTracked = activeSeconds + idleSeconds + lockedSeconds + awaySeconds;
-
-        document.getElementById('active-time').textContent = formatTime(activeSeconds);
-        document.getElementById('idle-time').textContent = formatTime(idleSeconds);
-        document.getElementById('locked-time').textContent = formatTime(lockedSeconds);
-        document.getElementById('away-time').textContent = formatTime(awaySeconds);
-        document.getElementById('total-time').textContent = formatTime(totalTracked);
-
-        if (totalTracked > 0) {
-            document.getElementById('active-pct').textContent = Math.round((activeSeconds / totalTracked) * 100) + '%';
-            document.getElementById('idle-pct').textContent = Math.round((idleSeconds / totalTracked) * 100) + '%';
-            document.getElementById('locked-pct').textContent = Math.round((lockedSeconds / totalTracked) * 100) + '%';
-            document.getElementById('away-pct').textContent = Math.round((awaySeconds / totalTracked) * 100) + '%';
-        }
-
-        // Update Quick Stats
-        const totalScreenSeconds = activeSeconds + idleSeconds;
-        document.getElementById('quick-screen-time').textContent = formatTime(totalScreenSeconds);
-        document.getElementById('quick-apps-count').textContent = data.app_usage?.count || 0;
-        document.getElementById('quick-domains-count').textContent = data.domain_usage?.count || 0;
-        document.getElementById('quick-sessions-count').textContent = data.app_sessions?.count || 0;
-
-        // Render tables
-        renderAppUsage(data.app_usage, data.live_status);
-        renderDomainUsage(data.domain_usage, data.live_status);
-        renderDomainVisits(data.domain_visits);
-        renderInventory(data.inventory);
-        loadScreenTimeHistory();
-    }
-
-    function renderAppUsage(appData, liveStatus) {
-        const tbody = document.getElementById('apps-body');
-        tbody.innerHTML = '';
-        document.getElementById('apps-count').textContent = `${appData?.count || 0} apps`;
-
-        if (liveStatus?.current_app) {
-            document.getElementById('app-ongoing-section').classList.remove('hidden');
-            document.getElementById('ongoing-app-name').textContent = liveStatus.current_app;
-            document.getElementById('ongoing-app-duration').textContent = formatTime(liveStatus.duration_seconds || 0);
-        } else {
-            document.getElementById('app-ongoing-section').classList.add('hidden');
-        }
-
-        if (!appData?.data?.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No data</td></tr>';
-            return;
-        }
-
-        appData.data.forEach(app => {
-            const pct = parseFloat(app.percentage) || 0;
-            const tr = document.createElement('tr');
-            tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
-            tr.innerHTML = `
-                <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${app.app}</td>
-                <td class="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-300">${app.session_count || '-'}</td>
-                <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(app.duration_seconds)}</td>
-                <td class="px-4 py-3 text-right">
-                    <div class="flex items-center justify-end gap-2">
-                        <div class="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-full" style="width:${Math.min(pct, 100)}%"></div>
-                        </div>
-                        <span class="text-sm font-medium w-10 text-right">${app.percentage}%</span>
-                    </div>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-
-    function renderDomainUsage(domainData, liveStatus) {
-        const tbody = document.getElementById('domains-body');
-        tbody.innerHTML = '';
-        document.getElementById('domains-count').textContent = `${domainData?.count || 0} domains`;
-
-        if (liveStatus?.current_domain) {
-            document.getElementById('domain-ongoing-section').classList.remove('hidden');
-            document.getElementById('ongoing-domain-name').textContent = liveStatus.current_domain;
-            document.getElementById('ongoing-domain-duration').textContent = formatTime(liveStatus.domain_duration || 0);
-        } else {
-            document.getElementById('domain-ongoing-section').classList.add('hidden');
-        }
-
-        if (!domainData?.data?.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No data</td></tr>';
-            return;
-        }
-
-        const total = domainData.data.reduce((sum, d) => sum + (d.duration_seconds || 0), 0);
-        domainData.data.forEach(d => {
-            const pct = total > 0 ? ((d.duration_seconds || 0) / total * 100).toFixed(1) : 0;
-            const tr = document.createElement('tr');
-            tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
-            tr.innerHTML = `
-                <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${d.domain}</td>
-                <td class="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-300">${d.session_count || '-'}</td>
-                <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(d.duration_seconds)}</td>
-                <td class="px-4 py-3 text-right">
-                    <div class="flex items-center justify-end gap-2">
-                        <div class="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-green-500 to-blue-500 rounded-full" style="width:${Math.min(pct, 100)}%"></div>
-                        </div>
-                        <span class="text-sm font-medium w-10 text-right">${pct}%</span>
-                    </div>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-
-    function renderDomainVisits(visitsData) {
-        const list = document.getElementById('visits-list');
-        list.innerHTML = '';
-        document.getElementById('visits-count').textContent = `${visitsData?.count || 0} visits`;
-
-        if (!visitsData?.data?.length) {
-            list.innerHTML = '<div class="p-8 text-center text-gray-500">No browser history</div>';
-            return;
-        }
-
-        visitsData.data.slice(0, 100).forEach(v => {
-            const div = document.createElement('div');
-            div.className = 'site-item flex items-center gap-4 p-3 border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700';
-            div.innerHTML = `
-                <span class="text-xs text-gray-500 dark:text-gray-400 font-mono w-20">${v.visited_at ? new Date(v.visited_at).toLocaleTimeString() : ''}</span>
-                <span class="font-medium flex-1 text-gray-900 dark:text-gray-100">${v.domain}</span>
-                <span class="text-sm text-gray-500 dark:text-gray-400">${v.browser || ''}</span>
-            `;
-            list.appendChild(div);
-        });
-    }
-
-    function renderInventory(invData) {
-        const tbody = document.getElementById('inventory-body');
-        tbody.innerHTML = '';
-        document.getElementById('inventory-count').textContent = `${invData?.count || 0} apps`;
-
-        if (!invData?.data?.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No inventory data</td></tr>';
-            return;
-        }
-
-        invData.data.forEach(app => {
-            const tr = document.createElement('tr');
-            tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
-            tr.innerHTML = `
-                <td class="px-3 py-2 font-medium text-sm break-words text-gray-900 dark:text-gray-100">${escapeHtml(app.name)}</td>
-                <td class="px-3 py-2 text-xs text-gray-600 dark:text-gray-300 font-mono break-all">${escapeHtml(app.version || '-')}</td>
-                <td class="px-3 py-2 text-xs break-words text-gray-900 dark:text-gray-100">${escapeHtml(cleanPublisher(app.publisher))}</td>
-                <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 font-mono break-all">${app.install_location || '-'}</td>
-                <td class="px-3 py-2 text-xs text-gray-900 dark:text-gray-100">${app.install_date ? new Date(app.install_date).toLocaleDateString() : '-'}</td>
-                <td class="px-3 py-2 text-center">${getSourceBadge(app.source)}</td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-
-    function cleanPublisher(publisher) {
-        if (!publisher || publisher === '-') return 'Unknown';
-        const cnMatch = publisher.match(/CN=([^,]+)/);
-        const oMatch = publisher.match(/O=([^,]+)/);
-        if (cnMatch && cnMatch[1]) return cnMatch[1].trim();
-        if (oMatch && oMatch[1]) return oMatch[1].trim();
-        return publisher.length > 40 ? publisher.substring(0, 37) + '...' : publisher;
-    }
-
-    function cleanInstallLocation(location) {
-        if (!location || location === '-') return '-';
-        const parts = location.split('\\\\');
-        if (parts.length > 4) return `${parts[0]}\\\\...\\\\${parts[parts.length - 1]}`;
-        if (location.length > 40) return '...' + location.slice(-37);
-        return location;
-    }
-
-    function formatInstallDate(dateStr) {
-        if (!dateStr || dateStr === '-') return '-';
-        try {
-            const date = new Date(dateStr);
-            if (isNaN(date.getTime())) return dateStr;
-            return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-        } catch {
-            return dateStr;
-        }
-    }
-
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    function getSourceBadge(source) {
-        if (!source) return '<span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs rounded-full">Unknown</span>';
-        if (source.includes('HKLM')) return '<span class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs rounded-full">System</span>';
-        if (source.includes('HKCU')) return '<span class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 text-xs rounded-full">User</span>';
-        if (source.includes('Store')) return '<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs rounded-full">Store</span>';
-        return `<span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs rounded-full">${escapeHtml(source)}</span>`;
-    }
-
-    async function loadScreenTimeHistory() {
-        const data = await fetchJSON(`/dashboard/api/agent/${AGENT_ID}/screentime`);
-        if (!data) return;
-
-        const ctx = document.getElementById('screentime-history-chart');
-        if (!ctx) return;
-
-        if (window.screentimeChart) window.screentimeChart.destroy();
-
-        window.screentimeChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: data.labels,
-                datasets: [
-                    { label: 'Active', data: data.active, backgroundColor: '#3b82f6', stack: 'Stack 0', borderRadius: 4 },
-                    { label: 'Idle', data: data.idle, backgroundColor: '#f59e0b', stack: 'Stack 0', borderRadius: 4 },
-                    { label: 'Locked', data: data.locked, backgroundColor: '#6b7280', stack: 'Stack 0', borderRadius: 4 }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: { callback: (val) => formatTimeShort(val) },
-                        stacked: true,
-                        title: { display: true, text: 'Usage Time' }
-                    },
-                    x: { stacked: true, grid: { display: false } }
-                },
-                plugins: {
-                    legend: { position: 'top' },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => ctx.dataset.label + ': ' + formatTime(ctx.parsed.y)
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    function exportTableToCSV(tableId, filename) {
-        const table = document.getElementById(tableId);
-        let csv = [];
-        table.querySelectorAll('tr').forEach(row => {
-            let cols = [];
-            row.querySelectorAll('th, td').forEach(col => cols.push('"' + col.textContent.trim().replace(/"/g, '""') + '"'));
-            csv.push(cols.join(','));
-        });
-        const blob = new Blob([csv.join('\\n')], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-    }
-
-    // Initialize
-    document.addEventListener('DOMContentLoaded', () => {
-        loadFullReport();
-    });
-
-    const dateSelect = document.getElementById('global-date-select');
-    if (dateSelect) dateSelect.addEventListener('change', loadFullReport);
 </script>
+<script>
+    window.USER_ICON_URL = "{{ url_for('static', filename='user-setting.png') }}";
+</script>
+
+<script src="{{ url_for('static', filename='js/agent_detail.js') }}"></script>
 {% endblock %}
