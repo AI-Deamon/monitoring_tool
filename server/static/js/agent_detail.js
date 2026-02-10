@@ -139,38 +139,47 @@ document.addEventListener("DOMContentLoaded", setGreeting);
         // Update agent info
         if (data.agent) {
             if (data.agent.username) {
-document.getElementById('agent-title').innerHTML = `
-  <img src="${window.USER_ICON_URL}"
-       class="w-8 h-8 mr-2 inline-block" />
-  ${data.agent.username}
-`;
-
- 
-
-
+                document.getElementById('agent-title').innerHTML = `
+                    <img src="${window.USER_ICON_URL}" class="w-8 h-8 mr-2 inline-block" />
+                    ${data.agent.username}
+                `;
             }
             document.getElementById('registered-at').textContent = data.agent.registered_at ? new Date(data.agent.registered_at).toLocaleDateString() : '-';
-document.getElementById('first-seen-today').textContent =
-  data.agent.first_seen_today
-    ? new Date(data.agent.first_seen_today).toLocaleTimeString('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    : 'No activity';
-
-document.getElementById('last-seen').textContent =
-  data.agent.last_seen
-    ? new Date(data.agent.last_seen).toLocaleString('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    : 'No activity';
-
+            document.getElementById('first-seen-today').textContent = data.agent.first_seen_today
+                ? new Date(data.agent.first_seen_today).toLocaleTimeString('en-IN', {
+               year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                })
+                : 'No activity';
+            document.getElementById('last-seen').textContent = data.agent.last_seen
+                ? new Date(data.agent.last_seen).toLocaleString('en-IN', {
+                 
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                })
+                : 'No activity';
+            
+            // Update current state - show detailed state for admin users
+            const stateEl = document.getElementById('current-state');
+            const currentState = data.live_status?.current_state || (data.agent.is_online ? 'active' : 'offline');
+            
+            // Map states to display text and colors
+            const stateConfig = {
+                'active': { text: 'Active', class: 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' },
+                'idle': { text: 'Idle', class: 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' },
+                'locked': { text: 'Locked', class: 'bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200' },
+                'offline': { text: 'Offline', class: 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200' }
+            };
+            
+            const config = stateConfig[currentState] || stateConfig['offline'];
+            stateEl.textContent = config.text;
+            stateEl.className = `inline-block px-2 py-1 ${config.class} text-xs font-medium rounded-full`;
         }
 
         // Live status
@@ -180,13 +189,9 @@ document.getElementById('last-seen').textContent =
             document.getElementById('live-window-title').textContent = data.live_status.window_title || '';
             document.getElementById('live-duration').textContent = formatTime(data.live_status.duration_seconds || 0);
             document.getElementById('current-activity').textContent = data.live_status.current_app;
-            document.getElementById('current-state').textContent = 'Active';
-            document.getElementById('current-state').className = 'inline-block px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full';
         } else {
             document.getElementById('live-status-banner').classList.add('hidden');
             document.getElementById('current-activity').innerHTML = '<span class="opacity-70">Offline</span>';
-            document.getElementById('current-state').textContent = 'Offline';
-            document.getElementById('current-state').className = 'inline-block px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full';
         }
 
         // Screen time

@@ -49,12 +49,13 @@ async function loadSelectors() {
         const path = window.location.pathname;
         if (path.includes('/dashboard/agent/')) {
             // Extract Agent ID from path: /dashboard/agent/UUID-Here
-            // or /dashboard/agent/UUID-Here/details etc.
             const parts = path.split('/');
             const agentIndex = parts.indexOf('agent');
             if (agentIndex !== -1 && parts[agentIndex + 1]) {
                 const currentAgentId = parts[agentIndex + 1];
+                // Set the dropdown to show the current agent
                 agentSelect.value = currentAgentId;
+                console.log('Selected agent:', currentAgentId);
             }
         } else {
             agentSelect.value = ""; // Overview
