@@ -320,7 +320,7 @@ def login():
                 else:
                     # Non-admin users: redirect to agent detail page
                     from server_dashboard import get_user_agent_id
-                    agent_id = get_user_agent_id()
+                    agent_id = get_user_agent_id(user)
                     if agent_id:
                         return redirect(url_for('dashboard.agent_detail', agent_id=agent_id))
                     else:

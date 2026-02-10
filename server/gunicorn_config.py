@@ -4,6 +4,8 @@ Usage: gunicorn -c gunicorn_config.py server_main:application
 """
 import os
 import multiprocessing
+import sys
+from pathlib import Path
 
 # Server socket
 bind = os.getenv("GUNICORN_BIND", "0.0.0.0:5050")
@@ -56,6 +58,28 @@ def on_starting(server):
     print("=" * 70)
     print(" SentinelEdge Server Starting")
     print("=" * 70)
+    
+    # NEW: Run automatic database setup and procedure installation
+    print("[INIT] Running database and procedure setup...")
+    try:
+        # Add current directory to path so start_server can be imported
+        server_dir = str(Path(__file__).parent.absolute())
+        if server_dir not in sys.path:
+            sys.path.insert(0, server_dir)
+            
+        from start_server import main as run_setup
+        # Mock sys.argv to pass --no-start
+        old_argv = sys.argv
+        sys.argv = ['start_server.py', '--no-start']
+        run_setup()
+        sys.argv = old_argv
+        print("[INIT] Database setup complete.")
+    except Exception as e:
+        print(f"[ERROR] Database setup failed: {e}")
+        # In a real production environment, we might want to exit here
+        # sys.exit(1)
+    
+    print("-" * 70)
 
 def on_reload(server):
     """Called to recycle workers during a reload via SIGHUP."""

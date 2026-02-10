@@ -6,11 +6,23 @@ Now includes authentication - users must log in to access dashboard.
 """
 
 import logging
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from flask import Blueprint, render_template, jsonify, request, redirect, url_for, g, session
 from sqlalchemy import func, desc, case
 from extensions import db
 import server_models
+
+# Helper function to convert UTC to IST
+def utc_to_ist(utc_dt):
+    """Convert UTC datetime to IST (UTC+5:30)"""
+    if not utc_dt:
+        return None
+    # If datetime is naive, assume it's UTC
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+    # Convert to IST (UTC+5:30)
+    ist_dt = utc_dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    return ist_dt.isoformat()
 
 # ============================================================================
 # AUTHENTICATION IMPORTS
@@ -54,15 +66,49 @@ bp = Blueprint('dashboard', __name__,
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
-
-def get_user_agent_id():
+ 
+def get_user_agent_id(user_obj=None):
     """Get the agent_id for the current user (for non-admin users)"""
-    # For now, just return the first available agent
-    # This is a simple solution for single-agent setups
-    agent = server_models.Agent.query.first()
-    if agent:
-        return str(agent.agent_id)
+    # 1. Use provided user or fall back to g.current_user
+    user = user_obj or (g.current_user if hasattr(g, 'current_user') else None)
+   
+    if not user or not user.linked_username:
+        logger.warning(f"[DASHBOARD] Cannot find agent_id: No user or no linked_username for {user.username if user else 'Unknown'}")
+        return None
+       
+    user_filter = user.linked_username
+    from sqlalchemy import or_
+   
+    # Try multiple approaches to find agent data for this user
+    # (Matching logic from agents_detail)
+    agent_status = None
+   
+    # 1. Exact match
+    agent_status = server_models.AgentCurrentStatus.query.filter(
+        server_models.AgentCurrentStatus.username == user_filter
+    ).first()
+   
+    # 2. Case-insensitive match
+    if not agent_status:
+        agent_status = server_models.AgentCurrentStatus.query.filter(
+            server_models.AgentCurrentStatus.username.ilike(user_filter)
+        ).first()
+   
+    # 3. Domain\username format match
+    if not agent_status:
+        agent_status = server_models.AgentCurrentStatus.query.filter(
+            or_(
+                server_models.AgentCurrentStatus.username.ilike(f'%\\{user_filter}'),
+                server_models.AgentCurrentStatus.username.ilike(f'{user_filter}%')
+            )
+        ).first()
+   
+    if agent_status:
+        return str(agent_status.agent_id)
+       
     return None
+ 
+ 
 
 # Make helper function available in templates
 @bp.app_context_processor
@@ -613,7 +659,7 @@ def api_agents():
                 'status': 'online' if is_online else 'offline',
                 'is_online': is_online,
                 'first_seen': agent.created_at.isoformat() if agent.created_at else None,
-                'last_seen': agent.last_seen.isoformat() if agent.last_seen else None,
+                'last_seen': utc_to_ist(agent.last_seen),#if agent.last_seen else None
                 
                 # NEW: Telemetry tracking for silent failure detection
                 'last_telemetry_time': agent.last_telemetry_time.isoformat() if agent.last_telemetry_time else None,
@@ -1056,12 +1102,12 @@ def api_agent_full_report(agent_id):
             'username': username,
             'status': 'online' if is_online else 'offline',
             'is_online': is_online,
-            'registered_at': agent.created_at.isoformat() if agent.created_at else None,
-            'first_seen': agent.created_at.isoformat() if agent.created_at else None,
+            'registered_at': utc_to_ist(agent.created_at),
+            'first_seen': utc_to_ist(agent.created_at),
             'first_seen_today': first_seen_today,
             'last_seen_today': last_seen_today,
             'total_tracked_seconds': total_tracked_seconds,
-            'last_seen': agent.last_seen.isoformat() if agent.last_seen else None,
+            'last_seen': utc_to_ist(agent.last_seen),
             'is_viewing_today': target_date == datetime.utcnow().date()
         }
         
@@ -1083,7 +1129,7 @@ def api_agent_full_report(agent_id):
                 'current_state': 'offline' if live_is_stale else (live_status.current_state or 'offline'),
                 'session_start': live_status.session_start.isoformat() if live_status.session_start else None,
                 'duration_seconds': live_status.duration_seconds if not live_is_stale else 0,
-                'last_seen': live_status.last_seen.isoformat() if live_status.last_seen else None,
+                'last_seen': utc_to_ist(live_status.last_seen),
                 'is_stale': live_is_stale
             }
         elif live_status:
@@ -1095,7 +1141,7 @@ def api_agent_full_report(agent_id):
                 'current_state': 'offline',
                 'session_start': None,
                 'duration_seconds': 0,
-                'last_seen': live_status.last_seen.isoformat() if live_status.last_seen else None,
+                'last_seen': utc_to_ist(live_status.last_seen),
                 'is_stale': True
             }
         
@@ -1232,7 +1278,7 @@ def api_agent_full_report(agent_id):
             'domain': v.domain,
             'url': v.url,
             'browser': v.browser,
-            'visited_at': v.visited_at.isoformat() if v.visited_at else None
+            'visited_at': utc_to_ist(v.visited_at)
         } for v in filtered_visits[:100]]
         
         # ================================================================
@@ -1250,7 +1296,7 @@ def api_agent_full_report(agent_id):
             'install_location': a.install_location,
             'install_date': a.install_date.isoformat() if a.install_date else None,
             'source': a.source,
-            'last_seen': a.last_seen.isoformat() if a.last_seen else None
+            'last_seen': utc_to_ist(a.last_seen)      #.isoformat() if a.last_seen else None
         } for a in inventory if not server_models.is_system_inventory_app(a.name)]
         
         # Consolidate Python versions (e.g., merge "Python 3.11.9 Core Interpreter" into "Python 3.11.9")
@@ -1657,7 +1703,7 @@ def api_agent_today(agent_id):
                 'os': agent.os,
                 'username': screen_time.username if screen_time else None,
                 'status': agent.status,
-                'last_seen': agent.last_seen.isoformat() if agent.last_seen else None
+                'last_seen': ust_to_ist(agent.last_seen)#if agent.last_seen else None
             },
             'screen_time': {
                 'active': active_s,
@@ -1728,7 +1774,7 @@ def get_agent_current_activity(agent_id):
                 'current_app': None,
                 'duration_seconds': 0,
                 'state': 'offline',
-                'timestamp': live_status.last_seen.isoformat() if live_status.last_seen else None
+                'timestamp': utc_to_ist(live_status.last_seen) #if live_status.last_seen else None
             })
         
         # Get friendly app name
@@ -1739,7 +1785,7 @@ def get_agent_current_activity(agent_id):
             'current_app_exe': live_status.current_app,
             'duration_seconds': live_status.duration_seconds or 0,
             'state': live_status.current_state or 'active',
-            'timestamp': live_status.session_start.isoformat() if live_status.session_start else None,
+            'timestamp': utc_to_ist(live_status.session_start),   #if live_status.session_start else None,
             'window_title': live_status.window_title
         })
         
@@ -2240,7 +2286,7 @@ def api_stale_agents():
             stale_agents.append({
                 'agent_id': agent_id[:8] + '...' if agent_id else 'Unknown',
                 'hostname': hostname or 'Unknown',
-                'last_seen': last_seen.isoformat() if last_seen else None,
+                'last_seen': utc_to_ist(last_seen),
                 'minutes_since': minutes_since
             })
         
