@@ -266,6 +266,16 @@
                         agentSelect.appendChild(option);
                     });
                     
+                    // Set selected agent if on agent detail page
+                    const path = window.location.pathname;
+                    if (path.includes('/dashboard/agent/')) {
+                        const parts = path.split('/');
+                        const agentIndex = parts.indexOf('agent');
+                        if (agentIndex !== -1 && parts[agentIndex + 1]) {
+                            agentSelect.value = parts[agentIndex + 1];
+                        }
+                    }
+                    
                     // Add change event listener
                     agentSelect.addEventListener('change', (e) => {
                         if (e.target.value) {
