@@ -187,7 +187,7 @@ document.addEventListener("DOMContentLoaded", setGreeting);
             document.getElementById('live-status-banner').classList.remove('hidden');
             document.getElementById('live-app-name').textContent = data.live_status.current_app;
             document.getElementById('live-window-title').textContent = data.live_status.window_title || '';
-            document.getElementById('live-duration').textContent = formatTime(data.live_status.duration_seconds || 0);
+            document.getElementById('live-duration').textContent = formatTime(data.live_status.duration_seconds);
             document.getElementById('current-activity').textContent = data.live_status.current_app;
         } else {
             document.getElementById('live-status-banner').classList.add('hidden');
