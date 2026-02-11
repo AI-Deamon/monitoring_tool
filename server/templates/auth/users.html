@@ -7,16 +7,14 @@
 
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: { inter: ['Inter', 'sans-serif'] },
-        }
-      }
-    }
-  </script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
+  <style>
+      * {
+    font-family: "Space Grotesk", sans-serif !important;
+  }
+  </style>
 </head>
 
 <body class="font-inter bg-slate-100 text-slate-900 min-h-screen flex flex-col">
@@ -26,9 +24,7 @@
     <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
       <!-- Brand -->
       <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-lg bg-blue-600 text-white font-extrabold flex items-center justify-center">
-          SE
-        </div>
+        <img src="{{ url_for('static', filename='bsol.png') }}" class="h-10 w-14"/>
         <span class="text-lg font-bold text-slate-900">SentinelEdge</span>
       </div>
 
