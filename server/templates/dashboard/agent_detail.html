@@ -118,7 +118,7 @@
             <div id="live-app-name" class="font-bold text-lg truncate"></div>
             <div id="live-window-title" class="text-sm opacity-85 truncate"></div>
         </div>
-        <div id="live-duration" class="font-mono font-bold text-lg bg-white/20 px-3 py-2 rounded-lg">--</div>
+        <div id="live-duration" class="font-mono font-bold text-lg bg-white/20 px-3 py-2 rounded-lg"></div>
     </div>
 </div>
 
@@ -410,8 +410,8 @@
 <div id="tab-web" class="tab-content hidden">
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
         <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img
-                    src="{{ url_for('static', filename='globe.png') }}" class="w-6 h-6" /> Browser History</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"> Browser History</h3><img
+                    src="{{ url_for('static', filename='globe.png') }}" class="w-6 h-6" />
             <span id="visits-count"
                 class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full">0
                 visits</span>
