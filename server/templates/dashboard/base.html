@@ -20,6 +20,62 @@
             font-style: normal;
         }
     </style>
+<style>
+/* ================= PRINT MODE ================= */
+@media print {
+
+  /* Remove dashboard layout/header/sidebar */
+  nav,
+  header,
+  footer,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Remove dark backgrounds for clean PDF */
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Align report full width */
+  #report-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+
+  /* Prevent weird page breaks */
+  section,
+  table,
+  canvas,
+  .rounded-xl {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Fix Tailwind dark mode colors in print */
+  .dark\:bg-gray-800,
+  .dark\:bg-gray-700 {
+    background: #ffffff !important;
+  }
+
+  .dark\:text-gray-100 {
+    color: #000000 !important;
+  }
+
+  /* Page margin */
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+}
+</style>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>

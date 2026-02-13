@@ -589,34 +589,54 @@
         window.print();
     }
 
-    function exportAllCSV() {
-        if (!reportData) return;
+   function exportAllCSV() {
+    if (!reportData) return;
 
-        // Generate combined CSV
-        let csv = 'AGENT ACTIVITY REPORT\\n';
-        csv += `Date,${reportData.date}\\n`;
-        csv += `Agent ID,${reportData.agent?.agent_id || ''}\\n`;
-        csv += `Hostname,${reportData.agent?.hostname || ''}\\n`;
-        csv += `Username,${reportData.agent?.username || ''}\\n\\n`;
+    let csv = '';
 
-        // Screen Time
-        csv += 'SCREEN TIME\\n';
-        csv += 'Type,Seconds,Formatted\\n';
-        csv += `Active,${reportData.screen_time?.active_seconds || 0},"${formatTime(reportData.screen_time?.active_seconds || 0)}"\\n`;
-        csv += `Idle,${reportData.screen_time?.idle_seconds || 0},"${formatTime(reportData.screen_time?.idle_seconds || 0)}"\\n`;
-        csv += `Locked,${reportData.screen_time?.locked_seconds || 0},"${formatTime(reportData.screen_time?.locked_seconds || 0)}"\\n`;
+    /* ================= HEADER ================= */
+    csv += 'AGENT ACTIVITY REPORT\n';
+    csv += '---------------------------------------\n';
+    csv += `Date,${reportData.date}\n`;
+    csv += `Agent ID,${reportData.agent?.agent_id || ''}\n`;
+    csv += `Hostname,${reportData.agent?.hostname || ''}\n`;
+    csv += `Username,${reportData.agent?.username || ''}\n\n`;
 
-        // App Usage
-        csv += '\\nAPPLICATION USAGE\\n';
-        csv += 'Application,Duration (seconds),Duration (formatted),Sessions,Percentage\\n';
-        if (reportData.app_usage?.data) {
-            reportData.app_usage.data.forEach(a => {
-                csv += `"${a.app}",${a.duration_seconds},"${formatTime(a.duration_seconds)}",${a.session_count},${a.percentage}%\\n`;
-            });
-        }
+    /* ================= SCREEN TIME ================= */
+    csv += 'SCREEN TIME BREAKDOWN\n';
+    csv += 'Type,Seconds,Formatted\n';
 
-        downloadCSV(csv, `agent_report_${reportData.agent?.hostname || AGENT_ID}_${reportData.date}.csv`);
+    csv += `Active,${reportData.screen_time?.active_seconds || 0},"${formatTime(reportData.screen_time?.active_seconds || 0)}"\n`;
+    csv += `Idle,${reportData.screen_time?.idle_seconds || 0},"${formatTime(reportData.screen_time?.idle_seconds || 0)}"\n`;
+    csv += `Locked,${reportData.screen_time?.locked_seconds || 0},"${formatTime(reportData.screen_time?.locked_seconds || 0)}"\n`;
+
+    csv += '\n';
+
+    /* ================= APPLICATION USAGE ================= */
+    csv += 'APPLICATION USAGE\n';
+    csv += 'Application,Duration (seconds),Duration (formatted),Sessions,Percentage\n';
+
+    if (reportData.app_usage?.data) {
+        reportData.app_usage.data.forEach(a => {
+            csv += `"${a.app || ''}",${a.duration_seconds || 0},"${formatTime(a.duration_seconds || 0)}",${a.session_count || 0},${a.percentage || 0}%\n`;
+        });
     }
+
+    csv += '\n';
+
+    /* ================= DOMAIN USAGE ================= */
+    csv += 'DOMAIN USAGE\n';
+    csv += 'Domain,Duration (seconds),Duration (formatted),Sessions\n';
+
+    if (reportData.domain_usage?.data) {
+        reportData.domain_usage.data.forEach(d => {
+            csv += `"${d.domain || ''}",${d.duration_seconds || 0},"${formatTime(d.duration_seconds || 0)}",${d.session_count || 0}\n`;
+        });
+    }
+
+    downloadCSV(csv, `agent_report_${reportData.agent?.hostname || AGENT_ID}_${reportData.date}.csv`);
+}
+
 
     function downloadCSV(content, filename) {
         const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
