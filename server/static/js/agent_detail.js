@@ -207,13 +207,16 @@ document.addEventListener("DOMContentLoaded", setGreeting);
         document.getElementById('locked-time').textContent = formatTime(lockedSeconds);
         document.getElementById('away-time').textContent = formatTime(awaySeconds);
         document.getElementById('total-time').textContent = formatTime(totalTracked);
+const pct = (value, total) => {
+  if (!total || total <= 0) return "0%";
+  const percent = Math.round((value / total) * 100);
+  return (isNaN(percent) ? 0 : percent) + "%";
+};
 
-        if (totalTracked > 0) {
-            document.getElementById('active-pct').textContent = Math.round((activeSeconds / totalTracked) * 100) + '%';
-            document.getElementById('idle-pct').textContent = Math.round((idleSeconds / totalTracked) * 100) + '%';
-            document.getElementById('locked-pct').textContent = Math.round((lockedSeconds / totalTracked) * 100) + '%';
-            document.getElementById('away-pct').textContent = Math.round((awaySeconds / totalTracked) * 100) + '%';
-        }
+document.getElementById('active-pct').textContent = pct(activeSeconds, totalTracked);
+document.getElementById('idle-pct').textContent = pct(idleSeconds, totalTracked);
+document.getElementById('locked-pct').textContent = pct(lockedSeconds, totalTracked);
+document.getElementById('away-pct').textContent = pct(awaySeconds, totalTracked);
 
         // Update Quick Stats
         const totalScreenSeconds = activeSeconds + idleSeconds;
