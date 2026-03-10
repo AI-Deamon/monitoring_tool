@@ -9,7 +9,7 @@
     <!-- Left -->
     <div>
       <a href="{{ url_for('dashboard.dashboard_home') }}"
-         class="inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+        class="inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors no-print">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M19 12H5m7 7l-7-7 7-7" />
         </svg>
@@ -26,19 +26,17 @@
     </div>
 
     <!-- Right -->
-    <div class="flex flex-wrap items-center gap-3">
-      <input type="date"
-             id="report-date"
-             onchange="changeDate()"
-             class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+    <div class="flex flex-wrap items-center gap-3 no-print">
+      <input type="date" id="report-date" onchange="changeDate()"
+        class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
 
       <button onclick="printReport()"
-              class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-primary-600 rounded-lg shadow hover:bg-primary-700 transition-colors">
+        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-primary-600 rounded-lg shadow hover:bg-primary-700 transition-colors">
         Print / PDF
       </button>
 
       <button onclick="exportAllCSV()"
-              class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-primary-700 dark:text-primary-300 bg-primary-100 dark:bg-primary-900 rounded-lg hover:bg-primary-200 dark:hover:bg-primary-800 transition-colors">
+        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-primary-700 dark:text-primary-300 bg-primary-100 dark:bg-primary-900 rounded-lg hover:bg-primary-200 dark:hover:bg-primary-800 transition-colors">
         Export CSV
       </button>
     </div>
@@ -46,16 +44,18 @@
 </div>
 
 <!-- Report Container -->
-<div id="report-container" class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+<div id="report-container"
+  class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
 
   <!-- Report Header -->
-  <div class="p-8 border-b border-gray-200 dark:border-gray-700  bg-gradient-to-r from-primary-50 dark:from-black to-white dark:to-gray-800">
+  <div
+    class="p-8 border-b border-gray-200 dark:border-gray-700  bg-gradient-to-r from-primary-50 dark:from-black to-white dark:to-gray-800">
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
 
       <div class="flex items-center gap-4">
-<img src="{{ url_for('static', filename='report.png') }}" class="w-12 h-12" />
+        <img src="{{ url_for('static', filename='report.png') }}" class="w-12 h-12" />
         <div>
-       
+
           <p class="text-lg text-gray-500 dark:text-white font-extrabold">Employee Activity Report</p>
         </div>
       </div>
@@ -63,7 +63,8 @@
       <div class="text-sm text-gray-600 dark:text-gray-300">
         <div id="report-date-display" class="font-semibold text-gray-900 dark:text-gray-100">Loading...</div>
         <div>Generated: <span id="report-generated-time"></span></div>
-        <div class="text-xs text-gray-400 dark:text-gray-500 mt-1"><img src="{{ url_for('static', filename='clock.png') }}" class="w-4 h-4 inline mr-1" /> IST (UTC+5:30)</div>
+        <div class="text-xs text-gray-400 dark:text-gray-500 mt-1"><img
+            src="{{ url_for('static', filename='clock.png') }}" class="w-4 h-4 inline mr-1" /> IST (UTC+5:30)</div>
       </div>
     </div>
   </div>
@@ -73,29 +74,37 @@
 
     <!-- Executive Summary -->
     <section>
-      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6"><img src="{{ url_for('static', filename='bar-chart.png') }}" class="w-4 h-4 inline mr-1" /> Executive Summary</h3>
+      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6"><img
+          src="{{ url_for('static', filename='bar-chart.png') }}" class="w-4 h-4 inline mr-1" /> Executive Summary</h3>
 
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
-        <div class="dark:bg-gray-700 bg-gradient-to-br   border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
-          <div class="text-2xl mb-1"><img src="{{ url_for('static', filename='clock.png') }}" class="w-4 h-4 inline mr-1" /></div>
+        <div
+          class="dark:bg-gray-700 bg-gradient-to-br   border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
+          <div class="text-2xl mb-1"><img src="{{ url_for('static', filename='clock.png') }}"
+              class="w-4 h-4 inline mr-1" /></div>
           <div id="exec-screen-time" class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</div>
           <div class="text-sm text-gray-500 dark:text-gray-400">Total Screen Time</div>
         </div>
 
-        <div class="bg-gradient-to-br from-emerald-50 dark:from-emerald-900/20 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
+        <div
+          class="bg-gradient-to-br from-emerald-50 dark:from-emerald-900/20 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
           <div class="text-2xl mb-1">📱</div>
           <div id="exec-apps-count" class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</div>
           <div class="text-sm text-gray-500 dark:text-gray-400">Applications Used</div>
         </div>
 
-        <div class="bg-gradient-to-br from-sky-50 dark:from-sky-900/20 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
-          <div class="text-2xl mb-1"><img src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 inline mr-1" /></div>
+        <div
+          class="bg-gradient-to-br from-sky-50 dark:from-sky-900/20 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
+          <div class="text-2xl mb-1"><img src="{{ url_for('static', filename='globe.png') }}"
+              class="w-4 h-4 inline mr-1" /></div>
           <div id="exec-domains-count" class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</div>
           <div class="text-sm text-gray-500 dark:text-gray-400">Domains Visited</div>
         </div>
 
-        <div class="bg-gradient-to-br from-purple-50 dark:from-purple-900/20 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
-          <div class="text-2xl mb-1"><img src="{{ url_for('static', filename='bar-chart.png') }}" class="w-4 h-4 inline mr-1" /></div>
+        <div
+          class="bg-gradient-to-br from-purple-50 dark:from-purple-900/20 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
+          <div class="text-2xl mb-1"><img src="{{ url_for('static', filename='bar-chart.png') }}"
+              class="w-4 h-4 inline mr-1" /></div>
           <div id="exec-productivity" class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</div>
           <div class="text-sm text-gray-500 dark:text-gray-400">Productivity Score</div>
         </div>
@@ -138,46 +147,51 @@
     <section>
       <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">⏱️ Screen Time Breakdown</h3>
 
-     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-  <!-- LEFT : METRIC CARDS -->
-  <div class="lg:col-span-2">
-    <div class="grid grid-cols-2 gap-6">
+        <!-- LEFT : METRIC CARDS -->
+        <div class="lg:col-span-2">
+          <div class="grid grid-cols-2 gap-6">
 
-      <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-5 text-center">
-        <div class="text-lg">🟢 Active</div>
-        <div id="r-active-time" class="text-xl font-bold mt-1 text-gray-900 dark:text-gray-100"></div>
-        <div id="r-active-pct" class="text-sm text-green-600 dark:text-green-400"></div>
+            <div
+              class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-5 text-center">
+              <div class="text-lg">🟢 Active</div>
+              <div id="r-active-time" class="text-xl font-bold mt-1 text-gray-900 dark:text-gray-100"></div>
+              <div id="r-active-pct" class="text-sm text-green-600 dark:text-green-400"></div>
+            </div>
+
+            <div
+              class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-5 text-center">
+              <div class="text-lg">🟡 Idle</div>
+              <div id="r-idle-time" class="text-xl font-bold mt-1 text-gray-900 dark:text-gray-100"></div>
+              <div id="r-idle-pct" class="text-sm text-yellow-600 dark:text-yellow-400"></div>
+            </div>
+
+            <div
+              class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-5 text-center">
+              <div class="text-lg">🔴 Locked</div>
+              <div id="r-locked-time" class="text-xl font-bold mt-1 text-gray-900 dark:text-gray-100"></div>
+              <div id="r-locked-pct" class="text-sm text-red-600 dark:text-red-400"></div>
+            </div>
+
+            <div
+              class="bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl p-5 text-center">
+              <div class="text-lg"><img src="{{ url_for('static', filename='bar-chart.png') }}"
+                  class="w-4 h-4 inline mr-1" /> Total</div>
+              <div id="r-total-time" class="text-xl font-bold mt-1 text-gray-900 dark:text-gray-100"></div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- RIGHT : PIE CHART -->
+        <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl  flex items-center justify-center">
+          <div class="relative h-56 w-full max-w-xs">
+            <canvas id="screentime-pie-chart" class="absolute inset-0"></canvas>
+          </div>
+        </div>
+
       </div>
-
-      <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-5 text-center">
-        <div class="text-lg">🟡 Idle</div>
-        <div id="r-idle-time" class="text-xl font-bold mt-1 text-gray-900 dark:text-gray-100"></div>
-        <div id="r-idle-pct" class="text-sm text-yellow-600 dark:text-yellow-400"></div>
-      </div>
-
-      <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-5 text-center">
-        <div class="text-lg">🔴 Locked</div>
-        <div id="r-locked-time" class="text-xl font-bold mt-1 text-gray-900 dark:text-gray-100"></div>
-        <div id="r-locked-pct" class="text-sm text-red-600 dark:text-red-400"></div>
-      </div>
-
-      <div class="bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl p-5 text-center">
-        <div class="text-lg"><img src="{{ url_for('static', filename='bar-chart.png') }}" class="w-4 h-4 inline mr-1" /> Total</div>
-        <div id="r-total-time" class="text-xl font-bold mt-1 text-gray-900 dark:text-gray-100"></div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- RIGHT : PIE CHART -->
-  <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl  flex items-center justify-center">
-    <div class="relative h-56 w-full max-w-xs">
-      <canvas id="screentime-pie-chart" class="absolute inset-0"></canvas>
-    </div>
-  </div>
-
-</div>
 
     </section>
 
@@ -241,7 +255,8 @@
     </section>
 
     <!-- Insights Box -->
-    <div id="insights-box" class="hidden bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-6 rounded-lg">
+    <div id="insights-box"
+      class="hidden bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-6 rounded-lg">
       <h4 class="text-sm font-semibold text-yellow-800 dark:text-yellow-200 mb-3 flex items-center gap-2">
         💡 Key Insights
       </h4>
@@ -252,7 +267,8 @@
   </div>
 
   <!-- Footer -->
-  <div class="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-8 py-6 flex flex-col md:flex-row md:justify-between text-sm text-gray-600 dark:text-gray-300">
+  <div
+    class="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-8 py-6 flex flex-col md:flex-row md:justify-between text-sm text-gray-600 dark:text-gray-300">
     <div>
       <p class="font-semibold text-gray-800 dark:text-gray-200">SentinelEdge</p>
       <p>Generated on <span id="footer-generated-time"></span></p>
@@ -261,7 +277,8 @@
   </div>
 
   <!-- Confidential -->
-  <div class="bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800 px-8 py-4 text-sm text-red-700 dark:text-red-300">
+  <div
+    class="bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800 px-8 py-4 text-sm text-red-700 dark:text-red-300">
     <strong>⚠️ CONFIDENTIAL</strong> – This report contains sensitive employee activity data.
     Unauthorized distribution is prohibited.
   </div>
@@ -272,362 +289,389 @@
 
 {% block extra_js %}
 <script>
-    const AGENT_ID = "{{ agent_id }}";
-    let reportData = null;
+  const AGENT_ID = "{{ agent_id }}";
+  let reportData = null;
 
-    document.addEventListener('DOMContentLoaded', () => {
-        // Set date picker to selected date
-        const params = new URLSearchParams(window.location.search);
-        const dateParam = params.get('date') || new Date().toISOString().split('T')[0];
-        document.getElementById('report-date').value = dateParam;
+  document.addEventListener('DOMContentLoaded', () => {
+    // Set date picker to selected date
+    const params = new URLSearchParams(window.location.search);
+    const dateParam = params.get('date') || new Date().toISOString().split('T')[0];
+    document.getElementById('report-date').value = dateParam;
 
-        // Load report
-        loadReport(dateParam);
-    });
+    // Load report
+    loadReport(dateParam);
+  });
 
-    function changeDate() {
-        const date = document.getElementById('report-date').value;
-        window.location.href = `/dashboard/agent/${AGENT_ID}/report?date=${date}`;
+  function changeDate() {
+    const date = document.getElementById('report-date').value;
+    window.location.href = `/dashboard/agent/${AGENT_ID}/report?date=${date}`;
+  }
+
+  async function loadReport(dateStr) {
+    console.log('[REPORT] Loading report for date:', dateStr, 'agent:', AGENT_ID);
+
+    // Show loading state
+    document.getElementById('report-date-display').textContent = formatDateLong(dateStr);
+    const generatedTime = getCurrentTimeIST();
+    document.getElementById('report-generated-time').textContent = generatedTime;
+    const footerTime = document.getElementById('footer-generated-time');
+    if (footerTime) footerTime.textContent = generatedTime;
+
+    // Fetch full report
+    const url = `/dashboard/api/agent/${AGENT_ID}/full-report?date=${dateStr}`;
+    console.log('[REPORT] Fetching:', url);
+
+    const data = await fetchJSON(url);
+    console.log('[REPORT] Data received:', data);
+
+    if (!data) {
+      console.error('[REPORT] No data returned!');
+      alert('Failed to load report data');
+      return;
     }
+    reportData = data;
 
-    async function loadReport(dateStr) {
-        console.log('[REPORT] Loading report for date:', dateStr, 'agent:', AGENT_ID);
+    // Render all sections
+    renderExecutiveSummary(data);
+    renderAgentInfo(data.agent);
+    renderScreenTime(data.screen_time);
+    renderAppUsage(data.app_usage);
+    renderDomainUsage(data.domain_usage);
+    generateInsights(data);
+  }
 
-        // Show loading state
-        document.getElementById('report-date-display').textContent = formatDateLong(dateStr);
-        const generatedTime = getCurrentTimeIST();
-        document.getElementById('report-generated-time').textContent = generatedTime;
-        const footerTime = document.getElementById('footer-generated-time');
-        if (footerTime) footerTime.textContent = generatedTime;
+  function renderExecutiveSummary(data) {
+    const st = data.screen_time || {};
+    const totalScreenSeconds = (st.active_seconds || 0) + (st.idle_seconds || 0);
 
-        // Fetch full report
-        const url = `/dashboard/api/agent/${AGENT_ID}/full-report?date=${dateStr}`;
-        console.log('[REPORT] Fetching:', url);
+    // Screen Time
+    document.getElementById('exec-screen-time').textContent = formatTime(totalScreenSeconds);
 
-        const data = await fetchJSON(url);
-        console.log('[REPORT] Data received:', data);
+    // Apps Used
+    document.getElementById('exec-apps-count').textContent = data.app_usage?.count || 0;
 
-        if (!data) {
-            console.error('[REPORT] No data returned!');
-            alert('Failed to load report data');
-            return;
+    // Domains Visited
+    document.getElementById('exec-domains-count').textContent = data.domain_usage?.count || 0;
+
+    // Productivity Score (based on active vs total ratio)
+    const activeSeconds = st.active_seconds || 0;
+    const totalSeconds = (st.active_seconds || 0) + (st.idle_seconds || 0) + (st.locked_seconds || 0) || 1;
+    const productivity = Math.round((activeSeconds / totalSeconds) * 100);
+    document.getElementById('exec-productivity').textContent = productivity + '%';
+  }
+
+  function renderAgentInfo(agent) {
+    if (!agent) return;
+    document.getElementById('r-hostname').textContent = agent.hostname || 'Unknown';
+    document.getElementById('r-username').textContent = agent.username || 'N/A';
+    document.getElementById('r-os').textContent = agent.os || 'Unknown';
+    document.getElementById('r-agent-id').textContent = agent.agent_id || '';
+    document.getElementById('r-first-seen').textContent = agent.registered_at ?
+      new Date(agent.registered_at).toLocaleDateString() : 'N/A';
+    document.getElementById('r-last-seen').textContent = agent.last_seen ?
+      new Date(agent.last_seen).toLocaleString() : 'N/A';
+  }
+
+  function renderScreenTime(st) {
+    if (!st) return;
+
+    const activeSeconds = st.active_seconds || 0;
+    const idleSeconds = st.idle_seconds || 0;
+    const lockedSeconds = st.locked_seconds || 0;
+    const total = activeSeconds + idleSeconds + lockedSeconds || 1;
+
+    const activePct = Math.round((activeSeconds / total) * 100);
+    const idlePct = Math.round((idleSeconds / total) * 100);
+    const lockedPct = Math.round((lockedSeconds / total) * 100);
+
+    document.getElementById('r-active-time').textContent = formatTime(activeSeconds);
+    document.getElementById('r-idle-time').textContent = formatTime(idleSeconds);
+    document.getElementById('r-locked-time').textContent = formatTime(lockedSeconds);
+    document.getElementById('r-total-time').textContent = formatTime(total);
+
+    document.getElementById('r-active-pct').textContent = activePct + '%';
+    document.getElementById('r-idle-pct').textContent = idlePct + '%';
+    document.getElementById('r-locked-pct').textContent = lockedPct + '%';
+
+    // Pie Chart
+    const ctx = document.getElementById('screentime-pie-chart');
+    if (ctx) {
+      new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Active', 'Idle', 'Locked'],
+          datasets: [{
+            data: [activeSeconds, idleSeconds, lockedSeconds],
+            backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { position: 'bottom' },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ctx.label + ': ' + formatTime(ctx.raw)
+              }
+            }
+          }
         }
-        reportData = data;
+      });
+    }
+  }
 
-        // Render all sections
-        renderExecutiveSummary(data);
-        renderAgentInfo(data.agent);
-        renderScreenTime(data.screen_time);
-        renderAppUsage(data.app_usage);
-        renderDomainUsage(data.domain_usage);
-        generateInsights(data);
+  function renderAppUsage(appData) {
+    if (!appData) return;
+
+    const tbody = document.getElementById('apps-tbody');
+    tbody.innerHTML = '';
+
+    if (!appData.data || appData.data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 dark:text-gray-500 py-6">No app data</td></tr>';
+      return;
     }
 
-    function renderExecutiveSummary(data) {
-        const st = data.screen_time || {};
-        const totalScreenSeconds = (st.active_seconds || 0) + (st.idle_seconds || 0);
+    const top10 = appData.data.slice(0, 10);
 
-        // Screen Time
-        document.getElementById('exec-screen-time').textContent = formatTime(totalScreenSeconds);
-
-        // Apps Used
-        document.getElementById('exec-apps-count').textContent = data.app_usage?.count || 0;
-
-        // Domains Visited
-        document.getElementById('exec-domains-count').textContent = data.domain_usage?.count || 0;
-
-        // Productivity Score (based on active vs total ratio)
-        const activeSeconds = st.active_seconds || 0;
-        const totalSeconds = (st.active_seconds || 0) + (st.idle_seconds || 0) + (st.locked_seconds || 0) || 1;
-        const productivity = Math.round((activeSeconds / totalSeconds) * 100);
-        document.getElementById('exec-productivity').textContent = productivity + '%';
-    }
-
-    function renderAgentInfo(agent) {
-        if (!agent) return;
-        document.getElementById('r-hostname').textContent = agent.hostname || 'Unknown';
-        document.getElementById('r-username').textContent = agent.username || 'N/A';
-        document.getElementById('r-os').textContent = agent.os || 'Unknown';
-        document.getElementById('r-agent-id').textContent = agent.agent_id || '';
-        document.getElementById('r-first-seen').textContent = agent.registered_at ? 
-            new Date(agent.registered_at).toLocaleDateString() : 'N/A';
-        document.getElementById('r-last-seen').textContent = agent.last_seen ? 
-            new Date(agent.last_seen).toLocaleString() : 'N/A';
-    }
-
-    function renderScreenTime(st) {
-        if (!st) return;
-
-        const activeSeconds = st.active_seconds || 0;
-        const idleSeconds = st.idle_seconds || 0;
-        const lockedSeconds = st.locked_seconds || 0;
-        const total = activeSeconds + idleSeconds + lockedSeconds || 1;
-        
-        const activePct = Math.round((activeSeconds / total) * 100);
-        const idlePct = Math.round((idleSeconds / total) * 100);
-        const lockedPct = Math.round((lockedSeconds / total) * 100);
-
-        document.getElementById('r-active-time').textContent = formatTime(activeSeconds);
-        document.getElementById('r-idle-time').textContent = formatTime(idleSeconds);
-        document.getElementById('r-locked-time').textContent = formatTime(lockedSeconds);
-        document.getElementById('r-total-time').textContent = formatTime(total);
-
-        document.getElementById('r-active-pct').textContent = activePct + '%';
-        document.getElementById('r-idle-pct').textContent = idlePct + '%';
-        document.getElementById('r-locked-pct').textContent = lockedPct + '%';
-
-        // Pie Chart
-        const ctx = document.getElementById('screentime-pie-chart');
-        if (ctx) {
-            new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Active', 'Idle', 'Locked'],
-                    datasets: [{
-                        data: [activeSeconds, idleSeconds, lockedSeconds],
-                        backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: { position: 'bottom' },
-                        tooltip: {
-                            callbacks: {
-                                label: (ctx) => ctx.label + ': ' + formatTime(ctx.raw)
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    }
-
-    function renderAppUsage(appData) {
-        if (!appData) return;
-
-        const tbody = document.getElementById('apps-tbody');
-        tbody.innerHTML = '';
-
-        if (!appData.data || appData.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 dark:text-gray-500 py-6">No app data</td></tr>';
-            return;
-        }
-
-        const top10 = appData.data.slice(0, 10);
-
-        top10.forEach((app, i) => {
-            const tr = document.createElement('tr');
-            tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-600';
-            tr.innerHTML = `
+    top10.forEach((app, i) => {
+      const tr = document.createElement('tr');
+      tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-600';
+      tr.innerHTML = `
                 <td class="px-4 py-3 text-gray-900 dark:text-gray-100">${i + 1}</td>
                 <td class="px-4 py-3 text-gray-900 dark:text-gray-100">${app.app}</td>
                 <td class="px-4 py-3 text-right font-mono text-gray-900 dark:text-gray-100">${formatTime(app.duration_seconds)}</td>
                 <td class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">${app.session_count}</td>
                 <td class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">${app.percentage}%</td>
             `;
-            tbody.appendChild(tr);
-        });
+      tbody.appendChild(tr);
+    });
 
-        // Bar Chart
-        const ctx = document.getElementById('apps-bar-chart');
-        if (ctx) {
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: top10.map(a => a.app.substring(0, 15)),
-                    datasets: [{
-                        label: 'Duration (seconds)',
-                        data: top10.map(a => a.duration_seconds),
-                        backgroundColor: '#6366f1',
-                        borderRadius: 4
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                label: (ctx) => formatTime(ctx.raw)
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            ticks: { callback: (val) => formatTimeShort(val) }
-                        }
-                    }
-                }
-            });
+    // Bar Chart
+    const ctx = document.getElementById('apps-bar-chart');
+    if (ctx) {
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: top10.map(a => a.app.substring(0, 15)),
+          datasets: [{
+            label: 'Duration (seconds)',
+            data: top10.map(a => a.duration_seconds),
+            backgroundColor: '#6366f1',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => formatTime(ctx.raw)
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { callback: (val) => formatTimeShort(val) },
+              grid: { display: false }
+            },
+            y: {
+              grid: { display: false }
+            }
+          }
         }
+      });
+    }
+  }
+
+  function renderDomainUsage(domainData) {
+    if (!domainData) return;
+
+    const tbody = document.getElementById('domains-tbody');
+    tbody.innerHTML = '';
+
+    if (!domainData.data || domainData.data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray-400 dark:text-gray-500 py-6">No domain data</td></tr>';
+      return;
     }
 
-    function renderDomainUsage(domainData) {
-        if (!domainData) return;
+    const top10 = domainData.data.slice(0, 10);
 
-        const tbody = document.getElementById('domains-tbody');
-        tbody.innerHTML = '';
-
-        if (!domainData.data || domainData.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray-400 dark:text-gray-500 py-6">No domain data</td></tr>';
-            return;
-        }
-
-        const top10 = domainData.data.slice(0, 10);
-
-        top10.forEach((d, i) => {
-            const tr = document.createElement('tr');
-            tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-600';
-            tr.innerHTML = `
+    top10.forEach((d, i) => {
+      const tr = document.createElement('tr');
+      tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-600';
+      tr.innerHTML = `
                 <td class="px-4 py-3 text-gray-900 dark:text-gray-100">${i + 1}</td>
                 <td class="px-4 py-3 text-gray-900 dark:text-gray-100">${d.domain}</td>
                 <td class="px-4 py-3 text-right font-mono text-gray-900 dark:text-gray-100">${formatTime(d.duration_seconds)}</td>
                 <td class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">${d.session_count}</td>
             `;
-            tbody.appendChild(tr);
-        });
+      tbody.appendChild(tr);
+    });
 
-        // Bar Chart
-        const ctx = document.getElementById('domains-bar-chart');
-        if (ctx) {
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: top10.map(d => d.domain.substring(0, 20)),
-                    datasets: [{
-                        label: 'Duration (seconds)',
-                        data: top10.map(d => d.duration_seconds),
-                        backgroundColor: '#10b981',
-                        borderRadius: 4
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                label: (ctx) => formatTime(ctx.raw)
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            ticks: { callback: (val) => formatTimeShort(val) }
-                        }
-                    }
-                }
-            });
-        }
-    }
-
-    function generateInsights(data) {
-        const insights = [];
-        const st = data.screen_time || {};
-        const apps = data.app_usage?.data || [];
-        const totalAppTime = data.app_usage?.total_duration || 0;
-
-        // Insight 1: Top app usage
-        if (apps.length > 0) {
-            const topApp = apps[0];
-            const pct = totalAppTime > 0 ? Math.round((topApp.duration_seconds / totalAppTime) * 100) : 0;
-            insights.push(`<strong>${topApp.app}</strong> was the most used application (${pct}% of app usage time)`);
-        }
-
-        // Insight 2: Top 3 apps concentration
-        if (apps.length >= 3) {
-            const top3Time = apps.slice(0, 3).reduce((sum, a) => sum + (a.duration_seconds || 0), 0);
-            const pct = totalAppTime > 0 ? Math.round((top3Time / totalAppTime) * 100) : 0;
-            insights.push(`Top 3 applications account for <strong>${pct}%</strong> of total app usage`);
-        }
-
-        // Insight 3: Active vs Idle balance
-        const activeSeconds = st.active_seconds || 0;
-        const idleSeconds = st.idle_seconds || 0;
-        const totalTracked = activeSeconds + idleSeconds;
-        if (totalTracked > 0) {
-            const activeRatio = Math.round((activeSeconds / totalTracked) * 100);
-            if (activeRatio >= 80) {
-                insights.push(`Excellent engagement: <strong>${activeRatio}%</strong> active time (highly productive day)`);
-            } else if (activeRatio >= 60) {
-                insights.push(`Good engagement: <strong>${activeRatio}%</strong> active time`);
-            } else {
-                insights.push(`Active time was <strong>${activeRatio}%</strong> - consider reviewing idle periods`);
+    // Bar Chart
+    const ctx = document.getElementById('domains-bar-chart');
+    if (ctx) {
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: top10.map(d => d.domain.substring(0, 20)),
+          datasets: [{
+            label: 'Duration (seconds)',
+            data: top10.map(d => d.duration_seconds),
+            backgroundColor: '#10b981',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => formatTime(ctx.raw)
+              }
             }
+          },
+          scales: {
+            x: {
+              ticks: { callback: (val) => formatTimeShort(val) },
+              grid: { display: false }
+            },
+            y: {
+              grid: { display: false }
+            }
+          }
         }
+      });
+    }
+  }
 
-        // Show insights if any
-        if (insights.length > 0) {
-            document.getElementById('insights-box').classList.remove('hidden');
-            document.getElementById('insights-list').innerHTML = insights.map(i => `<li>${i}</li>`).join('');
-        }
+  function generateInsights(data) {
+    const insights = [];
+    const st = data.screen_time || {};
+    const apps = data.app_usage?.data || [];
+    const totalAppTime = data.app_usage?.total_duration || 0;
+
+    // Insight 1: Top app usage
+    if (apps.length > 0) {
+      const topApp = apps[0];
+      const pct = totalAppTime > 0 ? Math.round((topApp.duration_seconds / totalAppTime) * 100) : 0;
+      insights.push(`<strong>${topApp.app}</strong> was the most used application (${pct}% of app usage time)`);
     }
 
-    function formatDateLong(dateStr) {
-        const date = new Date(dateStr + 'T00:00:00');
-        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata' };
-        return date.toLocaleDateString('en-IN', options);
+    // Insight 2: Top 3 apps concentration
+    if (apps.length >= 3) {
+      const top3Time = apps.slice(0, 3).reduce((sum, a) => sum + (a.duration_seconds || 0), 0);
+      const pct = totalAppTime > 0 ? Math.round((top3Time / totalAppTime) * 100) : 0;
+      insights.push(`Top 3 applications account for <strong>${pct}%</strong> of total app usage`);
     }
 
-    function formatTimeShort(seconds) {
-        if (!seconds || seconds < 0) return '0s';
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        if (h > 0) return h + 'h';
-        if (m > 0) return m + 'm';
-        return Math.floor(seconds % 60) + 's';
+    // Insight 3: Active vs Idle balance
+    const activeSeconds = st.active_seconds || 0;
+    const idleSeconds = st.idle_seconds || 0;
+    const totalTracked = activeSeconds + idleSeconds;
+    if (totalTracked > 0) {
+      const activeRatio = Math.round((activeSeconds / totalTracked) * 100);
+      if (activeRatio >= 80) {
+        insights.push(`Excellent engagement: <strong>${activeRatio}%</strong> active time (highly productive day)`);
+      } else if (activeRatio >= 60) {
+        insights.push(`Good engagement: <strong>${activeRatio}%</strong> active time`);
+      } else {
+        insights.push(`Active time was <strong>${activeRatio}%</strong> - consider reviewing idle periods`);
+      }
     }
 
-    function printReport() {
-        window.print();
+    // Show insights if any
+    if (insights.length > 0) {
+      document.getElementById('insights-box').classList.remove('hidden');
+      document.getElementById('insights-list').innerHTML = insights.map(i => `<li>${i}</li>`).join('');
+    }
+  }
+
+  function formatDateLong(dateStr) {
+    const date = new Date(dateStr + 'T00:00:00');
+    const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata' };
+    return date.toLocaleDateString('en-IN', options);
+  }
+
+  function formatTimeShort(seconds) {
+    if (!seconds || seconds < 0) return '0s';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return h + 'h';
+    if (m > 0) return m + 'm';
+    return Math.floor(seconds % 60) + 's';
+  }
+
+  function printReport() {
+    window.print();
+  }
+
+  function exportAllCSV() {
+    if (!reportData) return;
+
+    // Helper to escape CSV fields
+    const esc = (val) => {
+      if (val === null || val === undefined) return '""';
+      let str = String(val).replace(/"/g, '""');
+      if (str.includes(',') || str.includes('\n') || str.includes('"')) {
+        return `"${str}"`;
+      }
+      return `"${str}"`; // Always quote for consistency
+    };
+
+    // Generate combined CSV
+    let csv = 'AGENT ACTIVITY REPORT\n';
+    csv += `Date,${reportData.date}\n`;
+    csv += `Agent ID,${reportData.agent?.agent_id || ''}\n`;
+    csv += `Hostname,${reportData.agent?.hostname || ''}\n`;
+    csv += `Username,${reportData.agent?.username || ''}\n\n`;
+
+    // Screen Time
+    csv += 'SCREEN TIME\n';
+    csv += 'Type,Seconds,Formatted\n';
+    csv += `Active,${reportData.screen_time?.active_seconds || 0},"${formatTime(reportData.screen_time?.active_seconds || 0)}"\n`;
+    csv += `Idle,${reportData.screen_time?.idle_seconds || 0},"${formatTime(reportData.screen_time?.idle_seconds || 0)}"\n`;
+    csv += `Locked,${reportData.screen_time?.locked_seconds || 0},"${formatTime(reportData.screen_time?.locked_seconds || 0)}"\n`;
+
+    // App Usage
+    csv += '\nAPPLICATION USAGE\n';
+    csv += 'Application,Duration (seconds),Duration (formatted),Sessions,Percentage\n';
+    if (reportData.app_usage?.data) {
+      reportData.app_usage.data.forEach(a => {
+        csv += `${esc(a.app)},${a.duration_seconds},${esc(formatTime(a.duration_seconds))},${a.session_count},${a.percentage}%\n`;
+      });
     }
 
-    function exportAllCSV() {
-        if (!reportData) return;
-
-        // Generate combined CSV
-        let csv = 'AGENT ACTIVITY REPORT\\n';
-        csv += `Date,${reportData.date}\\n`;
-        csv += `Agent ID,${reportData.agent?.agent_id || ''}\\n`;
-        csv += `Hostname,${reportData.agent?.hostname || ''}\\n`;
-        csv += `Username,${reportData.agent?.username || ''}\\n\\n`;
-
-        // Screen Time
-        csv += 'SCREEN TIME\\n';
-        csv += 'Type,Seconds,Formatted\\n';
-        csv += `Active,${reportData.screen_time?.active_seconds || 0},"${formatTime(reportData.screen_time?.active_seconds || 0)}"\\n`;
-        csv += `Idle,${reportData.screen_time?.idle_seconds || 0},"${formatTime(reportData.screen_time?.idle_seconds || 0)}"\\n`;
-        csv += `Locked,${reportData.screen_time?.locked_seconds || 0},"${formatTime(reportData.screen_time?.locked_seconds || 0)}"\\n`;
-
-        // App Usage
-        csv += '\\nAPPLICATION USAGE\\n';
-        csv += 'Application,Duration (seconds),Duration (formatted),Sessions,Percentage\\n';
-        if (reportData.app_usage?.data) {
-            reportData.app_usage.data.forEach(a => {
-                csv += `"${a.app}",${a.duration_seconds},"${formatTime(a.duration_seconds)}",${a.session_count},${a.percentage}%\\n`;
-            });
-        }
-
-        downloadCSV(csv, `agent_report_${reportData.agent?.hostname || AGENT_ID}_${reportData.date}.csv`);
+    // Domain Usage
+    csv += '\nDOMAIN USAGE\n';
+    csv += 'Domain,Duration (seconds),Duration (formatted),Sessions\n';
+    if (reportData.domain_usage?.data) {
+      reportData.domain_usage.data.forEach(d => {
+        csv += `${esc(d.domain)},${d.duration_seconds},${esc(formatTime(d.duration_seconds))},${d.session_count}\n`;
+      });
     }
 
-    function downloadCSV(content, filename) {
-        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', filename);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    }
+    downloadCSV(csv, `agent_report_${reportData.agent?.hostname || AGENT_ID}_${reportData.date}.csv`);
+  }
+
+  function downloadCSV(content, filename) {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
 </script>
 {% endblock %}

@@ -555,11 +555,26 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
             elif self.path == "/inventory":
                 return self._handle_inventory(data)
             
+            elif self.path == "/hardware":
+                return self._handle_hardware(data)
+            
             elif self.path == "/telemetry/state-change":
                 return self._handle_state_change(data)
 
             elif self.path == "/screentime_spans":
                 return self._handle_screentime_spans(data)
+
+            elif self.path == "/extended-inventory":
+                return self._handle_extended_inventory(data)
+
+            elif self.path == "/security-indicators":
+                return self._handle_security_indicators(data)
+
+            elif self.path == "/system-visibility":
+                return self._handle_system_visibility(data)
+            
+            elif self.path == "/eol-data":
+                return self._handle_eol_data(data)
 
             else:
                 return self._send_error("Unknown endpoint", 404)
@@ -659,6 +674,15 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
             logger.error(f"Inventory error: {e}")
             self._send_error("Storage failed", 500)
     
+    def _handle_hardware(self, data):
+        """Handle hardware asset data from Helper"""
+        try:
+            row_id = self.server.buffer.store_hardware(data)
+            self._send_json({"status": "ok", "id": row_id})
+        except Exception as e:
+            logger.error(f"Hardware storage error: {e}")
+            self._send_error("Storage failed", 500)
+    
     def _handle_state_change(self, data):
         """
         Handle immediate state-change telemetry from Helper.
@@ -730,6 +754,46 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
 
         except Exception as e:
             logger.error(f"Screentime spans storage error: {e}")
+            self._send_error("Storage failed", 500)
+
+    def _handle_extended_inventory(self, data):
+        """Handle extended inventory data from Helper"""
+        try:
+            row_id = self.server.buffer.store_extended_inventory(data)
+            logger.info(f"[INGEST] Extended inventory stored (id={row_id})")
+            self._send_json({"status": "ok", "id": row_id})
+        except Exception as e:
+            logger.error(f"Extended inventory storage error: {e}")
+            self._send_error("Storage failed", 500)
+
+    def _handle_security_indicators(self, data):
+        """Handle security indicator data from Helper"""
+        try:
+            row_id = self.server.buffer.store_security_indicators(data)
+            logger.info(f"[INGEST] Security indicators stored (id={row_id})")
+            self._send_json({"status": "ok", "id": row_id})
+        except Exception as e:
+            logger.error(f"Security indicators storage error: {e}")
+            self._send_error("Storage failed", 500)
+
+    def _handle_system_visibility(self, data):
+        """Handle raw system visibility snapshot from Helper."""
+        try:
+            row_id = self.server.buffer.store_system_visibility(data)
+            logger.info(f"[INGEST] System visibility stored (id={row_id})")
+            self._send_json({"status": "ok", "id": row_id})
+        except Exception as e:
+            logger.error(f"System visibility storage error: {e}")
+            self._send_error("Storage failed", 500)
+    
+    def _handle_eol_data(self, data):
+        """Handle EOL (End of Life) data from Helper"""
+        try:
+            row_id = self.server.buffer.store_eol_data(data)
+            logger.info(f"[INGEST] EOL data stored (id={row_id})")
+            self._send_json({"status": "ok", "id": row_id})
+        except Exception as e:
+            logger.error(f"EOL data storage error: {e}")
             self._send_error("Storage failed", 500)
 
 
@@ -825,6 +889,25 @@ class IngestServer:
         address = (self.config.listen_host, self.config.listen_port)
 
         self.server = HTTPServer(address, HelperRequestHandler)
+        
+        # mTLS support for local communication (Helper -> Core)
+        if self.config.ssl_enabled:
+            try:
+                import ssl
+                context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                if os.path.exists(self.config.local_cert_path):
+                    context.load_cert_chain(
+                        certfile=self.config.local_cert_path,
+                        keyfile=self.config.local_key_path
+                    )
+                    context.load_verify_locations(cafile=self.config.ca_cert_path)
+                    context.verify_mode = ssl.CERT_REQUIRED
+                    self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+                    self.logger.info("[SECURITY] mTLS enabled for local ingest server")
+                else:
+                    self.logger.warning(f"[SECURITY] Local mTLS cert not found: {self.config.local_cert_path}")
+            except Exception as e:
+                self.logger.error(f"[SECURITY] Failed to enable mTLS for ingest: {e}")
         self.server.config = self.config
         self.server.buffer = self.buffer
         self.server.replay_cache = self.replay_cache
@@ -844,4 +927,3 @@ class IngestServer:
             self.server.shutdown()
             self.server = None
             self.thread = None
-            logger.info("Ingest server stopped")

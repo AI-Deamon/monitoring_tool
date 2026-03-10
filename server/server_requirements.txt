@@ -35,3 +35,6 @@ gunicorn>=21.0.0
 
 # Rate limiting
 Flask-Limiter>=3.5.0
+
+# Email Processing
+Flask-Mail==0.10.0

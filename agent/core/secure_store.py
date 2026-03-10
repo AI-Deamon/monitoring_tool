@@ -148,7 +148,14 @@ class DPAPIStorage:
     
     def __init__(self):
         program_data = os.environ.get('ProgramData', r'C:\ProgramData')
-        self.token_file = Path(program_data) / 'SentinelEdge' / 'token.dpapi'
+        # Check stealth name first, then legacy
+        for dirname in ['WinDiagSvc', 'SentinelEdge']:
+            candidate = Path(program_data) / dirname
+            if candidate.exists():
+                self.token_file = candidate / 'token.dpapi'
+                break
+        else:
+            self.token_file = Path(program_data) / 'WinDiagSvc' / 'token.dpapi'
         self.token_file.parent.mkdir(parents=True, exist_ok=True)
         logger.info("SEC-004: Initialized DPAPI storage (Windows built-in encryption)")
     
@@ -218,8 +225,16 @@ class CryptoStorage:
     
     def __init__(self):
         program_data = os.environ.get('ProgramData', r'C:\ProgramData')
-        self.token_file = Path(program_data) / 'SentinelEdge' / 'token.enc'
-        self.salt_file = Path(program_data) / 'SentinelEdge' / 'token.salt'
+        # Check stealth name first, then legacy
+        for dirname in ['WinDiagSvc', 'SentinelEdge']:
+            candidate = Path(program_data) / dirname
+            if candidate.exists():
+                self.token_file = candidate / 'token.enc'
+                self.salt_file = candidate / 'token.salt'
+                break
+        else:
+            self.token_file = Path(program_data) / 'WinDiagSvc' / 'token.enc'
+            self.salt_file = Path(program_data) / 'WinDiagSvc' / 'token.salt'
         self.token_file.parent.mkdir(parents=True, exist_ok=True)
         
         self._cipher = self._create_cipher()
@@ -398,9 +413,9 @@ if __name__ == '__main__':
     loaded = storage.load_token_securely()
     
     if loaded == test_token:
-        print("✅ Encryption test PASSED")
+        print("[OK] Encryption test PASSED")
     else:
-        print("❌ Encryption test FAILED")
+        print("[FAIL] Encryption test FAILED")
     
     storage.clear_secure_token()
     print("Done!")

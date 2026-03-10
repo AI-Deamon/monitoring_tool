@@ -71,7 +71,7 @@ class ScreentimeSchema(BaseModel):
     Validates:
     - Duration fields are within 0-86400 (24 hours)
     - No NaN or Infinity values
-    - State is one of: active, idle, locked
+    - State is one of: active, idle, locked, away
     """
     agent_id: str
     username: Optional[str] = None
@@ -80,15 +80,16 @@ class ScreentimeSchema(BaseModel):
     active_seconds: int = Field(0, ge=0, le=86400)
     idle_seconds: int = Field(0, ge=0, le=86400)
     locked_seconds: int = Field(0, ge=0, le=86400)
+    away_seconds: int = Field(0, ge=0, le=86400)
     current_state: str = 'active'  # active, idle, locked
     
-    @validator('active_seconds', 'idle_seconds', 'locked_seconds', pre=True)
+    @validator('active_seconds', 'idle_seconds', 'locked_seconds', 'away_seconds', pre=True)
     def validate_duration(cls, v):
         return validate_duration_seconds(v, max_seconds=86400)
     
     @validator('current_state')
     def validate_state(cls, v):
-        valid_states = {'active', 'idle', 'locked'}
+        valid_states = {'active', 'idle', 'locked', 'away'}
         if v and v.lower() not in valid_states:
             # Default to 'active' if invalid
             return 'active'
@@ -195,7 +196,7 @@ class StateChangeSchema(BaseModel):
     
     @validator('previous_state', 'current_state')
     def validate_state(cls, v):
-        valid_states = {'active', 'idle', 'locked', 'unknown'}
+        valid_states = {'active', 'idle', 'locked', 'away', 'unknown'}
         if v and v.lower() not in valid_states:
             return 'active'
         return v.lower() if v else 'active'
@@ -210,6 +211,18 @@ class StateChangeSchema(BaseModel):
         extra = 'allow'
 
 
+class AppInventoryItemSchema(BaseModel):
+    """Schema for a single application in the inventory."""
+    name: str
+    version: Optional[str] = "Unknown"
+    publisher: Optional[str] = "Unknown"
+    install_location: Optional[str] = None
+    install_date: Optional[str] = None
+    source: Optional[str] = None
+    architecture: Optional[str] = None
+    uninstall_command: Optional[str] = None
+    estimated_size_kb: Optional[int] = None
+
 class AppInventorySchema(BaseModel):
     """App inventory update."""
     agent_id: str
@@ -218,7 +231,7 @@ class AppInventorySchema(BaseModel):
     inventory_hash: Optional[str] = None
     is_full_inventory: bool = False
     changes: Dict[str, Any] = {}
-    apps: List[Dict[str, Any]] = []
+    apps: List[AppInventoryItemSchema] = []
 
 
 class DomainUsageSchema(BaseModel):

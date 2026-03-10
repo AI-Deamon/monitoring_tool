@@ -19,6 +19,7 @@ All other modules MUST call this, never calculate independently.
 import json
 import time
 import logging
+import threading
 from enum import Enum
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,9 @@ class ScreenTimeEngine:
         self.last_timestamp = time.time()
         self.last_event = LastEvent.NORMAL
         
+        # RACE-002 FIX: Thread lock for state mutation safety
+        self._lock = threading.Lock()
+        
         # Daily counters (seconds) - ONLY place these exist
         self.active_seconds = 0.0
         self.idle_seconds = 0.0
@@ -94,108 +98,104 @@ class ScreenTimeEngine:
         Returns:
             Transition info dict (for logging only)
         """
-        now = time.time()
-        delta = now - self.last_timestamp
-        
-        # Sanity check: cap delta at 24 hours (clock jump protection)
-        if delta > 86400:
-            logger.warning(
-                f"[STATE_MACHINE] Suspicious delta: {delta:.1f}s (>24h), "
-                f"capping to 86400s"
-            )
-            delta = 86400
-        elif delta < 0:
-            logger.error(
-                f"[STATE_MACHINE] Negative delta: {delta:.1f}s (clock went backward), "
-                f"ignoring"
-            )
-            delta = 0
-        
-        # Update counter for PREVIOUS state
-        old_state = self.current_state
-        
-        if old_state == ScreenState.ACTIVE:
-            self.active_seconds += delta
-        elif old_state == ScreenState.IDLE:
-            self.idle_seconds += delta
-        elif old_state == ScreenState.LOCKED:
-            self.locked_seconds += delta
-        elif old_state == ScreenState.AWAY:
-            self.away_seconds += delta
-        
-        # Transition
-        self.current_state = new_state
-        self.last_timestamp = now
-        self.last_event = event_type
-        
-        # Persist immediately
-        self._persist()
-        
-        # Log transition
-        if old_state != new_state:
-            logger.info(
-                f"[STATE_MACHINE] {old_state.value} → {new_state.value} "
-                f"(+{delta:.1f}s to {old_state.value.lower()}_seconds)"
-            )
-        
-        return {
-            "from": old_state.value,
-            "to": new_state.value,
-            "delta_seconds": delta,
-            "event_type": event_type.value
-        }
+        with self._lock:
+            now = time.time()
+            delta = now - self.last_timestamp
+            
+            # Sanity check: cap delta at 24 hours (clock jump protection)
+            if delta > 86400:
+                logger.warning(
+                    f"[STATE_MACHINE] Suspicious delta: {delta:.1f}s (>24h), "
+                    f"capping to 86400s"
+                )
+                delta = 86400
+            elif delta < 0:
+                logger.error(
+                    f"[STATE_MACHINE] Negative delta: {delta:.1f}s (clock went backward), "
+                    f"ignoring"
+                )
+                delta = 0
+            
+            # Update counter for PREVIOUS state
+            old_state = self.current_state
+            
+            if old_state == ScreenState.ACTIVE:
+                self.active_seconds += delta
+            elif old_state == ScreenState.IDLE:
+                self.idle_seconds += delta
+            elif old_state == ScreenState.LOCKED:
+                self.locked_seconds += delta
+            elif old_state == ScreenState.AWAY:
+                self.away_seconds += delta
+            
+            # Transition
+            self.current_state = new_state
+            self.last_timestamp = now
+            self.last_event = event_type
+            
+            # Persist immediately
+            self._persist()
+            
+            # Log transition
+            if old_state != new_state:
+                logger.info(
+                    f"[STATE_MACHINE] {old_state.value} -> {new_state.value} "
+                    f"(+{delta:.1f}s to {old_state.value.lower()}_seconds)"
+                )
+            
+            return {
+                "from": old_state.value,
+                "to": new_state.value,
+                "delta_seconds": delta,
+                "event_type": event_type.value
+            }
     
     def tick(self):
         """
         Update counter for current state (MANDATORY - prevents time freezing).
         
-        CRITICAL: Must be called periodically (every 5-10 seconds) to ensure
-        time advances even when no state transitions occur.
+        CRITICAL: This is the SOLE place that updates time counters between
+        state transitions. Must be called before get_daily_totals().
         
-        Without this, if user stays ACTIVE for 30 minutes without a state change,
-        NO TIME IS ADDED (silent bug).
+        Called every heartbeat (~30s) by state_detector.get_cumulative_totals().
         """
-        now = time.time()
-        delta = now - self.last_timestamp
-        
-        # Sanity check: cap delta at 24 hours (clock jump protection)
-        if delta > 86400:
-            logger.warning(
-                f"[STATE_MACHINE] Tick delta too large: {delta:.1f}s (>24h), "
-                f"capping to 86400s"
-            )
-            delta = 86400
-        elif delta < 0:
-            logger.error(
-                f"[STATE_MACHINE] Negative tick delta: {delta:.1f}s (clock went backward), "
-                f"ignoring"
-            )
-            return
-        
-        # Skip if delta is too small (avoid excessive updates)
-        if delta < 1.0:
-            return
-        
-        # Add to current state's counter
-        if self.current_state == ScreenState.ACTIVE:
-            self.active_seconds += delta
-        elif self.current_state == ScreenState.IDLE:
-            self.idle_seconds += delta
-        elif self.current_state == ScreenState.LOCKED:
-            self.locked_seconds += delta
-        elif self.current_state == ScreenState.AWAY:
-            self.away_seconds += delta
-        
-        # Update timestamp
-        self.last_timestamp = now
-        
-        # Persist periodically (every 60 seconds to reduce I/O)
-        if int(now) % 60 < 10:  # Within 10-second window of minute boundary
+        with self._lock:
+            now = time.time()
+            delta = now - self.last_timestamp
+            
+            # Sanity check: cap delta at 24 hours (clock jump protection)
+            if delta > 86400:
+                logger.warning(
+                    f"[STATE_MACHINE] Tick delta too large: {delta:.1f}s (>24h), "
+                    f"capping to 86400s"
+                )
+                delta = 86400
+            elif delta < 0:
+                logger.error(
+                    f"[STATE_MACHINE] Negative tick delta: {delta:.1f}s (clock went backward), "
+                    f"ignoring"
+                )
+                return
+            
+            # Add to current state's counter (no threshold — tick is sole updater)
+            if self.current_state == ScreenState.ACTIVE:
+                self.active_seconds += delta
+            elif self.current_state == ScreenState.IDLE:
+                self.idle_seconds += delta
+            elif self.current_state == ScreenState.LOCKED:
+                self.locked_seconds += delta
+            elif self.current_state == ScreenState.AWAY:
+                self.away_seconds += delta
+            
+            # Update timestamp
+            self.last_timestamp = now
+            
+            # Persist on every tick (called ~30s, acceptable I/O)
             self._persist()
-        
-        logger.debug(
-            f"[STATE_MACHINE] Tick: +{delta:.1f}s to {self.current_state.value.lower()}_seconds"
-        )
+            
+            logger.debug(
+                f"[STATE_MACHINE] Tick: +{delta:.1f}s to {self.current_state.value.lower()}_seconds"
+            )
     
     def handle_startup(self, persisted_state: Optional[Dict] = None) -> Dict:
         """
@@ -307,43 +307,20 @@ class ScreenTimeEngine:
     
     def get_daily_totals(self) -> Dict:
         """
-        Get current daily totals.
+        Get current daily totals (READ-ONLY).
         
-        This is the ONLY method server should receive.
-        Server stores these values using GREATEST() for deduplication.
+        CRITICAL: tick() MUST be called before this to flush current state time.
+        This method only reads persisted counters — no on-the-fly calculation.
         
         Returns:
             Daily totals dict with all counters
         """
-        # Add time spent in CURRENT state since last update
-        now = time.time()
-        current_delta = now - self.last_timestamp
-        
-        # Sanity check
-        if current_delta > 86400:
-            logger.warning(f"[STATE_MACHINE] Current delta too large: {current_delta:.1f}s, capping")
-            current_delta = 86400
-        elif current_delta < 0:
-            logger.error(f"[STATE_MACHINE] Negative current delta: {current_delta:.1f}s, ignoring")
-            current_delta = 0
-        
-        # Calculate totals including current state
         totals = {
             "active_seconds": int(self.active_seconds),
             "idle_seconds": int(self.idle_seconds),
             "locked_seconds": int(self.locked_seconds),
             "away_seconds": int(self.away_seconds)
         }
-        
-        # Add current state's delta
-        if self.current_state == ScreenState.ACTIVE:
-            totals["active_seconds"] += int(current_delta)
-        elif self.current_state == ScreenState.IDLE:
-            totals["idle_seconds"] += int(current_delta)
-        elif self.current_state == ScreenState.LOCKED:
-            totals["locked_seconds"] += int(current_delta)
-        elif self.current_state == ScreenState.AWAY:
-            totals["away_seconds"] += int(current_delta)
         
         # Calculate total
         totals["total_seconds"] = (
@@ -384,7 +361,7 @@ class ScreenTimeEngine:
         if current_date != self.current_date:
             logger.info(
                 f"[STATE_MACHINE] Daily boundary crossed: "
-                f"{self.current_date} → {current_date}"
+                f"{self.current_date} -> {current_date}"
             )
             
             # Get final totals for yesterday (before reset)

@@ -25,10 +25,43 @@ class IdentitySynchronizer:
             True if sync successful, False otherwise
         """
         try:
-            url = f"http://{self.config.core_host}:{self.config.core_port}/identity"
+            import os
+            url = f"{self.config.core_url}/identity"
             logger.info(f"[SYNC] Requesting identity from Core: {url}")
             
-            response = urllib.request.urlopen(url, timeout=5)
+            # mTLS support
+            context = None
+            if url.startswith('https://') and self.config.ssl_enabled:
+                import ssl
+                context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+                if os.path.exists(self.config.client_cert_path):
+                    try:
+                        context.load_cert_chain(
+                            certfile=self.config.client_cert_path,
+                            keyfile=self.config.client_key_path
+                        )
+                        context.load_verify_locations(cafile=self.config.ca_cert_path)
+                        context.verify_mode = ssl.CERT_REQUIRED
+                        context.check_hostname = False
+                        logger.debug("[SECURITY] Loaded mTLS certificates for identity sync")
+                    except Exception as e:
+                        logger.error(f"[SECURITY] Failed to load mTLS certificates: {e}")
+                else:
+                    logger.warning(f"[SECURITY] mTLS cert not found: {self.config.client_cert_path}")
+            
+            try:
+                response = urllib.request.urlopen(url, timeout=5, context=context)
+            except urllib.error.URLError as e:
+                # SSL/protocol mismatch: Core may be running HTTP while we tried HTTPS
+                if 'WRONG_VERSION_NUMBER' in str(e) or 'SSL' in str(e):
+                    http_url = url.replace('https://', 'http://')
+                    logger.warning(f"[SYNC] SSL error, falling back to HTTP: {http_url}")
+                    response = urllib.request.urlopen(http_url, timeout=5)
+                    # Update config for future calls
+                    self.config.core_url = self.config.core_url.replace('https://', 'http://')
+                    self.config.ssl_enabled = False
+                else:
+                    raise
             identity = json.loads(response.read().decode('utf-8'))
             
             old_agent_id = self.config.agent_id
@@ -47,7 +80,7 @@ class IdentitySynchronizer:
             
             # Cleanup if ID changed
             if old_agent_id and old_agent_id != identity['agent_id']:
-                logger.warning(f"[SYNC] Agent ID changed: {old_agent_id[:16]}... → {identity['agent_id'][:16]}...")
+                logger.warning(f"[SYNC] Agent ID changed: {old_agent_id[:16]}... -> {identity['agent_id'][:16]}...")
                 self._cleanup_old_state()
             
             logger.info(f"[SYNC] Identity synced with Core - Agent ID: {identity['agent_id'][:16]}...")

@@ -24,6 +24,7 @@ from core.ingest import IngestServer
 from core.aggregator import HeartbeatAggregator
 from core.uploader import ServerUploader
 from core.live_telemetry import LiveTelemetryTracker
+from core.updater import AgentUpdater
 
 # psutil for process monitoring
 try:
@@ -83,6 +84,8 @@ class HelperMonitor:
         self.running = False
         self.monitor_thread: Optional[Thread] = None
         self.shutdown_event = Event()
+        self.helper_task_names = ["SysHealthMon", "SentinelEdgeUserHelper"]
+        self.helper_exe_names = {"syshealth.exe", "sentinel_helper.exe"}
         
         self.logger.info("[HelperMonitor] Initialized")
     
@@ -166,7 +169,7 @@ class HelperMonitor:
             self._attempt_restart("Helper not sending heartbeats")
     
     def _find_helper_process(self) -> bool:
-        """Find Helper process by looking for pythonw running sentinel_helper"""
+        """Find Helper process for both EXE and legacy Python helpers."""
         if not HAS_PSUTIL:
             return True  # Assume running if we can't check
         
@@ -174,14 +177,21 @@ class HelperMonitor:
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
                     name = proc.info['name'] or ''
+                    name_lower = name.lower()
                     cmdline = proc.info['cmdline'] or []
+                    cmdline_str = ' '.join(cmdline).lower()
                     
-                    # Check for pythonw/python running sentinel_helper
-                    if 'python' in name.lower():
-                        cmdline_str = ' '.join(cmdline).lower()
-                        if 'sentinel_helper' in cmdline_str or 'helper' in cmdline_str:
+                    # EXE helper path
+                    if name_lower in self.helper_exe_names:
+                        self.helper_pid = proc.info['pid']
+                        self.logger.debug(f"[HelperMonitor] Found Helper EXE: PID {self.helper_pid}")
+                        return True
+
+                    # Legacy python helper path
+                    if 'python' in name_lower:
+                        if 'sentinel_helper' in cmdline_str or 'helper\\main.py' in cmdline_str:
                             self.helper_pid = proc.info['pid']
-                            self.logger.debug(f"[HelperMonitor] Found Helper: PID {self.helper_pid}")
+                            self.logger.debug(f"[HelperMonitor] Found Helper Python: PID {self.helper_pid}")
                             return True
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
@@ -248,21 +258,42 @@ class HelperMonitor:
                 self._enter_degraded_mode(reason)
     
     def _restart_helper(self) -> bool:
-        """Restart Helper via Task Scheduler"""
-        try:
-            # Method 1: Run the scheduled task
-            result = subprocess.run(
-                ['schtasks', '/run', '/tn', 'SentinelEdgeUserHelper'],
+        """Restart Helper via Task Scheduler with hard pre-cleanup."""
+        def _run_schtasks(args):
+            return subprocess.run(
+                ['schtasks', *args],
                 capture_output=True,
                 text=True,
                 timeout=30
             )
-            
-            if result.returncode == 0:
-                self.logger.info("[HelperMonitor] Helper restarted via Task Scheduler")
-                return True
-            else:
-                self.logger.warning(f"[HelperMonitor] schtasks failed: {result.stderr}")
+
+        try:
+            # 1) End helper scheduled tasks first (stuck task instances are common after sleep/wake).
+            for task_name in self.helper_task_names:
+                try:
+                    _run_schtasks(['/end', '/tn', task_name])
+                except Exception:
+                    pass
+
+            # 2) Kill stale helper processes (best-effort).
+            if HAS_PSUTIL:
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        name = (proc.info.get('name') or '').lower()
+                        cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
+                        if name in self.helper_exe_names or ('python' in name and 'sentinel_helper' in cmdline):
+                            self.logger.warning(f"[HelperMonitor] Terminating stale helper PID {proc.pid}")
+                            proc.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+
+            # 3) Start preferred task first, fallback to legacy task name.
+            for task_name in self.helper_task_names:
+                result = _run_schtasks(['/run', '/tn', task_name])
+                if result.returncode == 0:
+                    self.logger.info(f"[HelperMonitor] Helper restarted via Task Scheduler: {task_name}")
+                    return True
+                self.logger.warning(f"[HelperMonitor] schtasks /run failed for {task_name}: {result.stderr.strip()}")
                 
         except subprocess.TimeoutExpired:
             self.logger.error("[HelperMonitor] schtasks timeout")
@@ -485,6 +516,14 @@ class PowerEventMonitor:
             elif wparam == win32con.PBT_APMRESUMEAUTOMATIC:
                 self.logger.info("System auto-resume from sleep")
                 self.callback('resume')
+        elif msg == win32con.WM_QUERYENDSESSION:
+            self.logger.info("System shutdown query - preparing for shutdown")
+            self.callback('shutdown')
+            return 1  # Allow shutdown
+        elif msg == win32con.WM_ENDSESSION:
+            if wparam:
+                self.logger.info("System shutdown confirmed")
+                self.callback('shutdown')
         
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
@@ -540,19 +579,24 @@ class SentinelCore:
         self.last_wake_time = datetime.now(timezone.utc)
         self.startup_time = datetime.now(timezone.utc)
         
+        # Auto-updater (runs in Core — Core updates both core/ and helper/)
+        self.updater = AgentUpdater(self.config)
+        
         # Worker threads
         self.shutdown_event = Event()
         self.aggregator_thread = None
         self.uploader_thread = None
         self.health_check_thread = None
         self.config_reload_thread = None
+        self.update_check_thread = None
         
         # Power management
         self.power_monitor = PowerEventMonitor(self._handle_power_event)
         
         self.logger.info("="*70)
-        self.logger.info("SentinelEdge Core Service v2.1 - With Helper Monitoring")
+        self.logger.info("SentinelEdge Core Service v2.2 - Auto-Update Enabled")
         self.logger.info(f"Agent ID: {self.config.agent_id}")
+        self.logger.info(f"Agent Version: {self.updater.current_version}")
         self.logger.info(f"Server URL: {self.config.server_url}")
         self.logger.info(f"Listening on: {self.config.listen_host}:{self.config.listen_port}")
         self.logger.info(f"Database: {self.config.db_path}")
@@ -564,52 +608,24 @@ class SentinelCore:
         self.logger.info(f"Aggregator enabled: {self.config.enable_aggregator}")
         self.logger.info(f"Uploader enabled: {self.config.enable_uploader}")
         self.logger.info(f"Dynamic reload: {self.config.dynamic_reload_enabled}")
-        self.logger.info(f"Live Telemetry: DISABLED (Batch Mode Only)")
+        self.logger.info(f"Auto-update: {self.config.auto_update_enabled}")
         self.logger.info("="*70)
         
     def _setup_logging(self):
-        """Configure logging with rotation"""
+        """Configure structured JSON logging with rotation"""
         self.config.logs_dir.mkdir(parents=True, exist_ok=True)
         
         log_file = self.config.logs_dir / 'core.log'
         
-        # Create formatter
-        formatter = logging.Formatter(
-            '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-        )
-        
-        # Get root logger and configure it directly
-        # (basicConfig doesn't work if logging has already been used)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
-        
-        # Remove any existing handlers (clears default StreamHandler)
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
-        
-        # Console handler (for NSSM stderr capture)
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        console_handler.setLevel(logging.INFO)
-        root_logger.addHandler(console_handler)
-        
-        # File handler
         try:
-            from logging.handlers import RotatingFileHandler
-            file_handler = RotatingFileHandler(
-                log_file,
-                maxBytes=10*1024*1024,  # 10MB
-                backupCount=5,
-                encoding='utf-8'
-            )
-            file_handler.setFormatter(formatter)
-            file_handler.setLevel(logging.INFO)
-            root_logger.addHandler(file_handler)
-            print(f"[LOGGING] File handler created: {log_file}")
-        except Exception as e:
-            print(f"[LOGGING] Warning: Could not create file handler: {e}")
-        
-        self.logger = logging.getLogger('SentinelCore')
+            from logger import setup_logger
+        except ImportError:
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from logger import setup_logger
+            
+        self.logger = setup_logger('SentinelCore', str(log_file), logging.INFO)
         self.logger.info(f"Logging configured - file: {log_file}")
         
     def _handle_power_event(self, event_type: str):
@@ -637,6 +653,16 @@ class SentinelCore:
                     self.logger.info("[OK] Re-registered with server after resume")
             except Exception as e:
                 self.logger.warning(f"Failed to re-register after resume: {e}")
+                
+        elif event_type == 'shutdown':
+            self.logger.info("[SHUTDOWN] System shutting down - flushing final data")
+            # Flush any pending data before OS kills process
+            try:
+                self.logger.info("Flushing pending data before shutdown...")
+                self.aggregator.process_heartbeats()
+                self.uploader.upload_batch()
+            except Exception as e:
+                self.logger.error(f"Error flushing data on shutdown: {e}")
     
     def _on_config_change(self, config: CoreConfig):
         """Handle configuration changes dynamically"""
@@ -677,6 +703,14 @@ class SentinelCore:
     def start(self):
         """Start all components with enhanced registration flow"""
         try:
+            # Check if we just restarted after an update
+            pending_update = self.updater.check_pending_update()
+            if pending_update:
+                self.logger.info("=" * 70)
+                self.logger.info("[UPDATER] Post-update startup detected")
+                self.updater.complete_update(pending_update)
+                self.logger.info("=" * 70)
+            
             # Check for pending data from previous run
             self._check_pending_data()
             
@@ -842,6 +876,22 @@ class SentinelCore:
             self.helper_monitor.start()
             self.logger.info("[OK] Helper monitor started")
             
+            # Start auto-update checker (if enabled)
+            if self.config.auto_update_enabled and self.auto_upgrade_enabled:
+                self.logger.info("Starting update checker...")
+                self.update_check_thread = Thread(
+                    target=self._update_check_worker,
+                    daemon=True,
+                    name="UpdateChecker"
+                )
+                self.update_check_thread.start()
+                self.logger.info(
+                    f"[OK] Update checker started "
+                    f"(interval: {self.config.update_check_interval}s)"
+                )
+            else:
+                self.logger.info("Auto-update disabled")
+            
             self.logger.info("="*70)
             self.logger.info("[OK] All components started successfully!")
             self.logger.info("Core service is now running...")
@@ -982,6 +1032,16 @@ class SentinelCore:
                 if self.config.db_path.exists():
                     db_size_mb = self.config.db_path.stat().st_size / (1024 * 1024)
                     self.logger.info(f"[HEALTH] Database size: {db_size_mb:.2f} MB")
+                try:
+                    diag = self.buffer.get_buffer_diagnostics()
+                    self.logger.info(f"[HEALTH] Buffer pending: {diag.get('pending_counts')}")
+                    self.logger.info(
+                        f"[HEALTH] Buffer oldest_pending_age_seconds={diag.get('oldest_pending_age_seconds')} "
+                        f"duplicates={diag.get('duplicate_drops')} ack_failures={diag.get('upload_ack_failures')} "
+                        f"integrity_ok={diag.get('integrity_ok')}"
+                    )
+                except Exception as e:
+                    self.logger.warning(f"[HEALTH] Buffer diagnostics unavailable: {e}")
                 
                 # Check registration status
                 if self.config.is_registered():
@@ -1009,6 +1069,54 @@ class SentinelCore:
                 self.logger.error(f"Health check error: {e}")
         
         self.logger.info("Health check worker stopped")
+    
+    def _update_check_worker(self):
+        """Worker thread for periodic update checking.
+        
+        Enhanced to handle server-triggered force_update_check:
+        - Normal: checks every update_check_interval (default 6h)
+        - Force mode: immediately runs update cycle when server signals
+        """
+        self.logger.info("[UPDATER] Update check worker running")
+        
+        # Initial delay — let agent stabilize before checking
+        self.shutdown_event.wait(300)  # 5 min after startup
+        
+        while not self.shutdown_event.is_set():
+            try:
+                if self.is_suspended:
+                    self.shutdown_event.wait(60)
+                    continue
+                
+                self.logger.info("[UPDATER] Checking for updates...")
+                
+                # Run full update cycle (check + download + apply)
+                if self.updater.run_update_cycle():
+                    self.logger.info(
+                        "[UPDATER] Update applied, service will restart"
+                    )
+                    # run_update_cycle triggers restart via NSSM or EXE swapper
+                    return
+                else:
+                    self.logger.debug("[UPDATER] No updates available")
+                
+                # Clean up old backups periodically
+                self.updater.cleanup_old_backups(keep_count=2)
+                
+            except Exception as e:
+                self.logger.error(f"[UPDATER] Update check error: {e}")
+            
+            # Wait for next check cycle
+            # Use shorter intervals to detect force_update_check sooner
+            # Break interval into smaller chunks so forced checks are picked up faster
+            total_wait = self.config.update_check_interval
+            chunk = min(300, total_wait)  # Check every 5 min at most
+            waited = 0
+            while waited < total_wait and not self.shutdown_event.is_set():
+                self.shutdown_event.wait(chunk)
+                waited += chunk
+        
+        self.logger.info("[UPDATER] Update check worker stopped")
     
     def run(self):
         """Run the service"""
@@ -1068,7 +1176,8 @@ class SentinelCore:
             (self.aggregator_thread, "Aggregator"),
             (self.uploader_thread, "Uploader"),
             (self.health_check_thread, "HealthCheck"),
-            (self.config_reload_thread, "ConfigReload")
+            (self.config_reload_thread, "ConfigReload"),
+            (self.update_check_thread, "UpdateChecker")
         ]
         
         for thread, name in threads:

@@ -54,7 +54,19 @@ class WindowTracker:
         self._brief_switches = 0  # App switches < threshold
         
         # State persistence
-        self._state_file = state_file or Path(r'C:\ProgramData\SentinelEdge\window_state.json')
+        if state_file:
+            self._state_file = state_file
+        else:
+            # Check stealth name first, then legacy
+            import os
+            program_data = os.environ.get('ProgramData', r'C:\ProgramData')
+            for dirname in ['WinDiagSvc', 'SentinelEdge']:
+                candidate = Path(program_data) / dirname
+                if candidate.exists():
+                    self._state_file = candidate / 'window_state.json'
+                    break
+            else:
+                self._state_file = Path(program_data) / 'WinDiagSvc' / 'window_state.json'
         self.duration_lock = threading.Lock()  # Protect cumulative_app_usage updates
         
         # FIX: Initialize Windows APIs BEFORE _load_state() which may call _do_initial_sample()

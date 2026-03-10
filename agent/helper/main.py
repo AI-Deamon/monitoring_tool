@@ -49,6 +49,7 @@ class SentinelHelper:
         # Watchdog for detecting stuck main loop
         self._watchdog_counter = 0
         self._last_watchdog_check = 0
+        self._stuck_count = 0  # Consecutive stuck detections for self-heal
         
         # Connection state
         self.core_connected = False
@@ -69,11 +70,23 @@ class SentinelHelper:
         self.collector.state_detector = self.state_detector
         self.state_detector.collector = self.collector # Link for event emission
         
+        # Wire suspend checker so inventory can abort during sleep
+        if hasattr(self.collector, 'inventory_tracker'):
+            self.collector.inventory_tracker._is_suspended_check = lambda: self.state_detector._suspended
+        
         self.logger.info("="*60)
         self.logger.info("SentinelEdge Helper v2.0 - Enhanced")
         self.logger.info(f"Agent ID: {self.communicator.agent_id}")
         self.logger.info(f"Core URL: {self.config.core_url}")
         self.logger.info(f"Heartbeat Interval: {self.config.heartbeat_interval}s")
+        self.logger.info(
+            f"Security Collection: enabled={self.config.enable_security_collection}, "
+            f"interval={self.config.security_collection_interval_seconds}s"
+        )
+        self.logger.info(
+            f"System Visibility: enabled={self.config.enable_system_visibility_collection}, "
+            f"interval={self.config.system_visibility_interval_seconds}s"
+        )
         self.logger.info(f"Startup: {self.startup_time.isoformat()}")
         self.logger.info("="*60)
         
@@ -172,8 +185,11 @@ class SentinelHelper:
         """
         Watchdog thread to detect when main loop is stuck.
         Runs independently and logs CRITICAL warning if no progress detected.
+        After 3 consecutive stuck detections (~6 minutes), forces process exit
+        so the Windows scheduled task can restart the helper automatically.
         """
         WATCHDOG_INTERVAL = 120  # Check every 2 minutes
+        MAX_STUCK_BEFORE_EXIT = 3  # Force exit after this many consecutive detections
         
         while self.running and not self.shutdown_event.is_set():
             try:
@@ -186,10 +202,12 @@ class SentinelHelper:
                 
                 # Check if main loop has progressed
                 if current_counter == self._last_watchdog_check and current_counter > 0:
+                    self._stuck_count += 1
                     # Main loop is STUCK!
                     self.logger.critical("=" * 70)
                     self.logger.critical("[WATCHDOG] MAIN LOOP APPEARS STUCK!")
                     self.logger.critical(f"[WATCHDOG] Loop counter stuck at: {current_counter}")
+                    self.logger.critical(f"[WATCHDOG] Stuck detection #{self._stuck_count}/{MAX_STUCK_BEFORE_EXIT}")
                     self.logger.critical(f"[WATCHDOG] Heartbeat counter: {self.heartbeat_counter}")
                     self.logger.critical(f"[WATCHDOG] Core connected: {self.core_connected}")
                     
@@ -208,8 +226,18 @@ class SentinelHelper:
                         self.logger.critical(f"[WATCHDOG] Could not get stack traces: {e}")
                     
                     self.logger.critical("=" * 70)
+                    
+                    # SELF-HEAL: Force exit after repeated stuck detections
+                    if self._stuck_count >= MAX_STUCK_BEFORE_EXIT:
+                        self.logger.critical(
+                            f"[WATCHDOG] Main loop stuck for {self._stuck_count * WATCHDOG_INTERVAL}s "
+                            f"— forcing process exit for scheduled-task restart"
+                        )
+                        import os as _os
+                        _os._exit(1)  # Hard exit — scheduled task will restart us
                 else:
-                    # Main loop is progressing
+                    # Main loop is progressing — reset stuck counter
+                    self._stuck_count = 0
                     self.logger.debug(f"[WATCHDOG] Main loop healthy: {current_counter} iterations")
                 
                 self._last_watchdog_check = current_counter
@@ -218,27 +246,19 @@ class SentinelHelper:
                 self.logger.error(f"[WATCHDOG] Error: {e}")
     
     def _setup_logging(self):
-        """Configure logging with rotation"""
+        """Configure structured JSON logging with rotation"""
         self.config.state_dir.mkdir(parents=True, exist_ok=True)
         self.config.log_file.parent.mkdir(parents=True, exist_ok=True)
         
-        from logging.handlers import RotatingFileHandler
-        
-        handlers = [
-            RotatingFileHandler(
-                self.config.log_file,
-                maxBytes=5*1024*1024,  # 5MB
-                backupCount=3
-            ),
-            logging.StreamHandler()
-        ]
-        
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s [%(levelname)s] %(message)s',
-            handlers=handlers
-        )
-        self.logger = logging.getLogger('SentinelHelper')
+        try:
+            from logger import setup_logger
+        except ImportError:
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from logger import setup_logger
+            
+        self.logger = setup_logger('SentinelHelper', str(self.config.log_file), logging.INFO)
     
     def _wait_for_core(self, timeout: int = 60) -> bool:
         """Wait for core service to be ready"""
@@ -324,9 +344,18 @@ class SentinelHelper:
         else:
             self.core_connected = True
         
-        # Send initial inventory if connected
         if self.core_connected:
             self._send_initial_inventory()
+            self._send_initial_hardware()
+            self._send_initial_extended_inventory()
+            if self.config.enable_security_collection:
+                self._send_initial_security_indicators()
+            else:
+                self.logger.info("[SECURITY] Initial collection disabled by config")
+            if self.config.enable_system_visibility_collection:
+                self._send_initial_system_visibility()
+            else:
+                self.logger.info("[VISIBILITY] Initial collection disabled by config")
             
             # ============================================================
             # CRITICAL FIX: Send startup state event
@@ -341,7 +370,7 @@ class SentinelHelper:
                     'timestamp': datetime.now(timezone.utc).isoformat(),
                     'duration_seconds': 0  # No duration for startup event
                 }
-                self.logger.info(f"[STATE] Sending startup state: startup → {current_state.value}")
+                self.logger.info(f"[STATE] Sending startup state: startup -> {current_state.value}")
                 success = self.communicator.send_state_change(startup_payload)
                 if success:
                     self.logger.info("[STATE] Startup state event sent successfully")
@@ -354,8 +383,14 @@ class SentinelHelper:
         last_heartbeat = time.time()
         last_domain_check = time.time()
         last_inventory_check = time.time()
+        last_hardware_check = time.time()
+        last_ext_inventory_check = time.time()
+        last_security_check = time.time()
+        last_system_visibility_check = time.time()
+        last_eol_check = time.time()
         last_connection_check = time.time()
         last_resource_check = time.time()
+        was_suspended = False  # Track suspend→resume transitions
         
         consecutive_heartbeat_failures = 0
         max_consecutive_failures = 5
@@ -374,6 +409,17 @@ class SentinelHelper:
                 loop_iteration += 1
                 self._watchdog_counter = loop_iteration  # Update watchdog counter
                 now = time.time()
+                
+                # ── Post-resume reconnection ────────────────────────
+                # After sleep/wake the network likely changed (office→home).
+                # Force a reconnection check so we don't silently fail.
+                currently_suspended = self.state_detector._suspended
+                if was_suspended and not currently_suspended:
+                    self.logger.info("[RESUME] System resumed from sleep — forcing reconnection check")
+                    self.core_connected = False  # Force re-validate
+                    was_suspended = False
+                elif currently_suspended:
+                    was_suspended = True
                 
                 # Periodic connection check (every 30 seconds)
                 if now - last_connection_check >= 30:
@@ -461,6 +507,38 @@ class SentinelHelper:
                     if self.core_connected:
                         self._check_inventory()
                     last_inventory_check = now
+                
+                # Hardware check (every 24 hours)
+                if now - last_hardware_check >= 86400:  # 24h
+                    if self.core_connected:
+                        self._check_hardware()
+                    last_hardware_check = now
+                
+                # EOL data check (every 24 hours)
+                if now - last_eol_check >= 86400:  # 24h
+                    if self.core_connected:
+                        self._check_eol_data()
+                    last_eol_check = now
+                
+                # Extended inventory check (every 6 hours)
+                if now - last_ext_inventory_check >= 21600:  # 6h
+                    if self.core_connected:
+                        self._check_extended_inventory()
+                    last_ext_inventory_check = now
+                
+                # Security indicators check (configurable, default every 6 hours)
+                security_interval = max(600, int(self.config.security_collection_interval_seconds))
+                if now - last_security_check >= security_interval:
+                    if self.core_connected and self.config.enable_security_collection:
+                        self._check_security_indicators()
+                    last_security_check = now
+
+                # Raw system visibility check (configurable, default every 6 hours)
+                visibility_interval = max(600, int(self.config.system_visibility_interval_seconds))
+                if now - last_system_visibility_check >= visibility_interval:
+                    if self.core_connected and self.config.enable_system_visibility_collection:
+                        self._check_system_visibility()
+                    last_system_visibility_check = now
                 
                 # Log health status every 30 iterations
                 if loop_iteration % 30 == 0:
@@ -587,7 +665,7 @@ class SentinelHelper:
             duration_seconds: Time spent in previous state
         """
         self.system_state = new_state
-        self.logger.info(f"[STATE] Transition: {old_state.value} → {new_state.value} (Δ{duration_seconds:.1f}s)")
+        self.logger.info(f"[STATE] Transition: {old_state.value} -> {new_state.value} (d={duration_seconds:.1f}s)")
         
         # Send immediate state change via CoreCommunicator (already has auth)
         try:
@@ -606,7 +684,7 @@ class SentinelHelper:
             
             if success:
                 self.logger.info(
-                    f"[STATE] State-change sent: {old_state.value} → {new_state.value} "
+                    f"[STATE] State-change sent: {old_state.value} -> {new_state.value} "
                     f"(duration={int(duration_seconds)}s)"
                 )
             else:
@@ -674,11 +752,202 @@ class SentinelHelper:
         except Exception as e:
             self.logger.error(f"Inventory check error: {e}", exc_info=True)
     
+    def _send_initial_hardware(self):
+        """Send initial hardware info on startup"""
+        try:
+            self.logger.info("Collecting initial hardware info...")
+            hardware = self.collector.collect_hardware(force=True)
+            
+            if hardware:
+                if self.communicator.send_hardware(hardware):
+                    self.logger.info(
+                        f"[OK] Initial hardware sent: "
+                        f"{hardware.get('identity', {}).get('manufacturer', '')} "
+                        f"{hardware.get('identity', {}).get('model', '')}"
+                    )
+                else:
+                    self.logger.warning("[FAIL] Failed to send initial hardware")
+            else:
+                self.logger.warning("No hardware data collected")
+                
+        except Exception as e:
+            self.logger.error(f"Error sending initial hardware: {e}", exc_info=True)
+    
+    def _send_initial_extended_inventory(self):
+        """Send initial extended inventory on startup"""
+        try:
+            self.logger.info("Collecting initial extended inventory...")
+            data = self.collector.collect_extended_inventory(force=True)
+            
+            if data:
+                if self.communicator.send_extended_inventory(data):
+                    counts = {k: len(v) for k, v in data.items() if isinstance(v, list)}
+                    self.logger.info(f"[OK] Initial extended inventory sent: {counts}")
+                else:
+                    self.logger.warning("[FAIL] Failed to send initial extended inventory")
+            else:
+                self.logger.warning("No extended inventory data collected")
+                
+        except Exception as e:
+            self.logger.error(f"Error sending initial extended inventory: {e}", exc_info=True)
+    
+    def _check_extended_inventory(self):
+        """Check and send extended inventory if due"""
+        try:
+            data = self.collector.collect_extended_inventory()
+            if data:
+                if self.communicator.send_extended_inventory(data):
+                    counts = {k: len(v) for k, v in data.items() if isinstance(v, list)}
+                    self.logger.info(f"[OK] Extended inventory update sent: {counts}")
+                else:
+                    self.logger.warning("Failed to send extended inventory update")
+        except Exception as e:
+            self.logger.error(f"Extended inventory check error: {e}")
+    
+    def _send_initial_security_indicators(self):
+        """Send initial security analysis on startup"""
+        if not self.config.enable_security_collection:
+            self.logger.debug("[SECURITY] Initial collection skipped (disabled)")
+            return
+
+        try:
+            self.logger.info("Running initial security analysis...")
+            # Get extended inventory data to pass to security analyzer
+            ext_data = None
+            if hasattr(self.collector, '_ext_collector'):
+                ext_data = self.collector._ext_collector.collect_all()
+            
+            data = self.collector.collect_security_indicators(force=True, ext_data=ext_data)
+            
+            if data:
+                total = len(data.get('indicators', []))
+                if self.communicator.send_security_indicators(data):
+                    self.logger.info(f"[OK] Initial security indicators sent: {total} indicators")
+                else:
+                    self.logger.warning("[FAIL] Failed to send initial security indicators")
+            else:
+                self.logger.info("No security indicators found (clean state)")
+                
+        except Exception as e:
+            self.logger.error(f"Error sending initial security indicators: {e}", exc_info=True)
+    
+    def _check_security_indicators(self):
+        """Check and send security indicators if due"""
+        if not self.config.enable_security_collection:
+            return
+
+        try:
+            # Pass cached ext inventory if available
+            ext_data = None
+            if hasattr(self.collector, '_ext_collector'):
+                try:
+                    ext_data = self.collector._ext_collector.collect_all()
+                except Exception:
+                    pass
+            
+            data = self.collector.collect_security_indicators(ext_data=ext_data)
+            if data:
+                total = len(data.get('indicators', []))
+                if self.communicator.send_security_indicators(data):
+                    self.logger.info(f"[OK] Security indicators update sent: {total} indicators")
+                else:
+                    self.logger.warning("Failed to send security indicators update")
+        except Exception as e:
+            self.logger.error(f"Security indicators check error: {e}")
+
+    def _send_initial_system_visibility(self):
+        """Send initial raw system visibility snapshot on startup."""
+        if not self.config.enable_system_visibility_collection:
+            self.logger.debug("[VISIBILITY] Initial collection skipped (disabled)")
+            return
+
+        try:
+            self.logger.info("Running initial raw system visibility collection...")
+            data = self.collector.collect_system_visibility(force=True)
+            if data:
+                counts = data.get('counts', {})
+                if self.communicator.send_system_visibility(data):
+                    self.logger.info(f"[OK] Initial system visibility sent: {counts}")
+                else:
+                    self.logger.warning("[FAIL] Failed to send initial system visibility")
+            else:
+                self.logger.info("No system visibility snapshot generated")
+        except Exception as e:
+            self.logger.error(f"Error sending initial system visibility: {e}", exc_info=True)
+
+    def _check_system_visibility(self):
+        """Check and send raw system visibility snapshot if due."""
+        if not self.config.enable_system_visibility_collection:
+            return
+
+        try:
+            data = self.collector.collect_system_visibility()
+            if data:
+                counts = data.get('counts', {})
+                if self.communicator.send_system_visibility(data):
+                    self.logger.info(f"[OK] System visibility update sent: {counts}")
+                else:
+                    self.logger.warning("Failed to send system visibility update")
+        except Exception as e:
+            self.logger.error(f"System visibility check error: {e}")
+
+    def _check_eol_data(self):
+        """Check and send EOL data"""
+        try:
+            eol_data = self.collector.collect_eol_data()
+            
+            if eol_data:
+                if self.communicator.send_eol_data(eol_data):
+                    # Count items for logging
+                    counts = {}
+                    if 'updates' in eol_data:
+                        counts['updates'] = len(eol_data['updates'])
+                    if 'metering' in eol_data:
+                        counts['metering'] = len(eol_data['metering'])
+                    if 'product_keys' in eol_data:
+                        counts['product_keys'] = len(eol_data['product_keys'])
+                    if 'esu' in eol_data:
+                        counts['esu'] = 1
+                    if 'warranty' in eol_data:
+                        counts['warranty'] = 1
+                    self.logger.info(f"[OK] EOL data sent: {counts}")
+                else:
+                    self.logger.warning("Failed to send EOL data")
+            else:
+                self.logger.debug("No EOL data to send (not due yet)")
+                    
+        except Exception as e:
+            self.logger.error(f"EOL data check error: {e}", exc_info=True)
+    
+    def _check_hardware(self):
+        """Check and send hardware if changed"""
+        try:
+            hardware = self.collector.collect_hardware()
+            
+            if hardware:
+                if self.communicator.send_hardware(hardware):
+                    self.logger.info("[OK] Hardware update sent")
+                else:
+                    self.logger.warning("Failed to send hardware update")
+            else:
+                self.logger.debug("No hardware changes detected")
+                    
+        except Exception as e:
+            self.logger.error(f"Hardware check error: {e}", exc_info=True)
+    
     def stop(self):
         """Stop helper gracefully"""
         self.logger.info("Stopping helper...")
         self.running = False
         self.shutdown_event.set()
+        
+        # Mark shutdown in state machine BEFORE stopping state detector
+        # This ensures handle_startup() ignores the gap on next boot
+        try:
+            self.state_detector.screen_time_engine.mark_shutdown()
+            self.logger.info("[STATE] Marked SHUTDOWN in state machine")
+        except Exception as e:
+            self.logger.error(f"Error marking shutdown: {e}")
         
         # Stop state detector
         try:
@@ -725,7 +994,14 @@ def write_crash_dump(exc_type, exc_value, exc_traceback):
     import os
     
     program_data = os.environ.get('ProgramData', r'C:\ProgramData')
-    crash_dir = os.path.join(program_data, 'SentinelEdge', 'logs')
+    # Check stealth name first, then legacy
+    for dirname in ['WinDiagSvc', 'SentinelEdge']:
+        candidate = os.path.join(program_data, dirname, 'logs')
+        if os.path.isdir(candidate):
+            crash_dir = candidate
+            break
+    else:
+        crash_dir = os.path.join(program_data, 'WinDiagSvc', 'logs')
     os.makedirs(crash_dir, exist_ok=True)
     
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -734,7 +1010,7 @@ def write_crash_dump(exc_type, exc_value, exc_traceback):
     try:
         with open(crash_file, 'w') as f:
             f.write("=" * 70 + "\n")
-            f.write("SentinelEdge Helper - CRASH DUMP\n")
+            f.write("Agent Helper - CRASH DUMP\n")
             f.write(f"Time: {datetime.now().isoformat()}\n")
             f.write("=" * 70 + "\n\n")
             
@@ -796,6 +1072,7 @@ def main():
             print(f"Crash dump written to: {crash_file}", file=sys.stderr)
         
         sys.exit(1)
+
 
 
 if __name__ == '__main__':

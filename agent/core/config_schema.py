@@ -66,6 +66,11 @@ CONFIG_SCHEMA_V2 = {
             "heartbeat_interval": {"type": int, "required": True, "default": 10, "min": 5},
             "domain_interval": {"type": int, "required": True, "default": 60, "min": 10},
             "inventory_interval": {"type": int, "required": True, "default": 3600, "min": 60},
+            "enable_security_collection": {"type": bool, "required": False, "default": True},
+            "security_collection_interval_seconds": {"type": int, "required": False, "default": 21600, "min": 600},
+            "enable_disk_usage_indicator": {"type": bool, "required": False, "default": True},
+            "enable_system_visibility_collection": {"type": bool, "required": False, "default": True},
+            "system_visibility_interval_seconds": {"type": int, "required": False, "default": 21600, "min": 600},
             "features": {
                 "type": dict,
                 "required": True,
@@ -112,6 +117,15 @@ CONFIG_SCHEMA_V2 = {
         "fields": {
             "enabled": {"type": bool, "required": True, "default": True},
             "check_interval": {"type": int, "required": True, "default": 30, "min": 5}
+        }
+    },
+    "updates": {
+        "type": dict,
+        "required": False,
+        "fields": {
+            "enabled": {"type": bool, "required": False, "default": True},
+            "check_interval": {"type": int, "required": False, "default": 21600, "min": 600},
+            "signing_key": {"type": str, "required": False, "default": ""}
         }
     }
 }

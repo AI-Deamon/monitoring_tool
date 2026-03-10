@@ -122,7 +122,7 @@ class LiveTelemetryTracker:
 
                 if downtime_seconds > 120:  # More than 2 minutes
                     downtime_minutes = downtime_seconds / 60
-                    logger.warning(f"[LIVE] ⚠️  AGENT DOWNTIME DETECTED: {downtime_minutes:.1f} minutes")
+                    logger.warning(f"[LIVE] [WARN] AGENT DOWNTIME DETECTED: {downtime_minutes:.1f} minutes")
                     logger.warning(f"[LIVE] Last heartbeat: {last_time.isoformat()}")
                     logger.warning(f"[LIVE] Current time:   {now.isoformat()}")
                     logger.warning(f"[LIVE] This gap will NOT be counted in screen time.")

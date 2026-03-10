@@ -62,9 +62,9 @@
     {% endif %}
 
     <div class="flex items-center justify-between">
-              
+
         <div>
-      {% if session.role == 'admin' %}
+            {% if session.role == 'admin' %}
             <a href="{{ url_for('dashboard.dashboard_home') }}"
                 class="inline-flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 mb-3">
                 <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -72,8 +72,8 @@
                 </svg>
                 Back to Overview
             </a>
-{% endif %}
-           
+            {% endif %}
+
             <div class="flex items-center gap-4">
                 <h1 id="agent-title" class="text-2xl font-bold text-gray-900 dark:text-gray-100"><img
                         src="{{ url_for('static', filename='user-setting.png') }}"
@@ -86,7 +86,7 @@
                 <span class="text-gray-400 dark:text-gray-500"> • </span>
                 <span id="agent-os">{{ agent.os }}</span>
             </p>
-        </div> 
+        </div>
         <div class="flex items-center gap-3">
             <div class="text-right">
                 <div class="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Current Activity
@@ -145,6 +145,21 @@
             data-tab="inventory">
             <img src="{{ url_for('static', filename='inventory.png') }}" class="w-5 h-5 mr-2 inline-block" /> Inventory
         </button>
+        <button
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            data-tab="hardware">
+            🖥️ Hardware
+        </button>
+        <button
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            data-tab="extended">
+            🔧 Extended
+        </button>
+        <button
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            data-tab="security">
+            🛡️ Security
+        </button>
     </div>
 </div>
 
@@ -160,8 +175,15 @@
                 <div class="flex items-center gap-2 font-mono">
                     <code class="text-sm text-gray-900 dark:text-gray-100">{{ (agent.agent_id|string)[:12] }}...</code>
                     <button onclick="copyAgentId()"
-                        class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-                        title="Copy full Agent ID"></button>
+                        class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded p-1 transition-colors"
+                        title="Copy full Agent ID" aria-label="Copy full Agent ID">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z">
+                            </path>
+                        </svg>
+                    </button>
                     <input type="hidden" id="agent-id-full" value="{{ agent.agent_id }}">
                 </div>
             </div>
@@ -198,9 +220,8 @@
             </div>
         </div>
     </div>
-
     <!-- Quick Stats -->
-    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">⚡ Quick Stats</h3>
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Quick Stats</h3>
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
             <div class="flex items-center">
@@ -477,6 +498,638 @@
                     </tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- Tab: Hardware -->
+<div id="tab-hardware" class="tab-content hidden">
+    <div id="hardware-loading" class="p-8 text-center text-gray-500 dark:text-gray-400">Loading hardware info...</div>
+    <div id="hardware-empty" class="hidden p-8 text-center text-gray-500 dark:text-gray-400">
+        <p class="text-lg">No hardware data available yet.</p>
+        <p class="text-sm mt-2">Hardware information will appear after the agent collects and uploads it.</p>
+    </div>
+    <div id="hardware-content" class="hidden space-y-6">
+
+        <!-- Identity Card -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">🏷️ System Identity</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Hostname</div>
+                    <div id="hw-hostname" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Manufacturer</div>
+                    <div id="hw-manufacturer" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Model</div>
+                    <div id="hw-model" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Serial Number</div>
+                    <div id="hw-serial" class="font-mono text-sm text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">OS Version</div>
+                    <div id="hw-os-version" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">OS Build</div>
+                    <div id="hw-os-build" class="font-mono text-sm text-gray-900 dark:text-gray-100">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hardware Specs Card -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">⚙️ Hardware Specifications</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <div class="text-xs text-blue-600 dark:text-blue-400 mb-1">CPU</div>
+                    <div id="hw-cpu" class="font-semibold text-blue-900 dark:text-blue-100 text-sm">-</div>
+                </div>
+                <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <div class="text-xs text-blue-600 dark:text-blue-400 mb-1">CPU Cores</div>
+                    <div id="hw-cpu-cores" class="font-semibold text-blue-900 dark:text-blue-100">-</div>
+                </div>
+                <div
+                    class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                    <div class="text-xs text-green-600 dark:text-green-400 mb-1">Total RAM</div>
+                    <div id="hw-ram" class="font-semibold text-green-900 dark:text-green-100">-</div>
+                </div>
+                <div
+                    class="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                    <div class="text-xs text-yellow-600 dark:text-yellow-400 mb-1">GPU</div>
+                    <div id="hw-gpu" class="font-semibold text-yellow-900 dark:text-yellow-100 text-sm">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Total Disk</div>
+                    <div id="hw-disk" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">BIOS Version</div>
+                    <div id="hw-bios" class="font-mono text-sm text-gray-900 dark:text-gray-100">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network Card -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">🌐 Network</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">IP Address</div>
+                    <div id="hw-ip" class="font-mono text-sm text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">MAC Address</div>
+                    <div id="hw-mac" class="font-mono text-sm text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Domain</div>
+                    <div id="hw-domain" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security Card -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">🛡️ Security</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Antivirus</div>
+                    <div id="hw-antivirus" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Firewall</div>
+                    <div id="hw-firewall" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+                </div>
+                <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">BitLocker</div>
+                    <div id="hw-bitlocker" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Collection Meta -->
+        <div class="text-xs text-gray-400 dark:text-gray-500 text-right">
+            Last collected: <span id="hw-collected-at">-</span> | Hash: <span id="hw-hash">-</span>
+        </div>
+    </div>
+</div>
+
+<!-- Tab: Security Indicators -->
+<div id="tab-security" class="tab-content hidden">
+            <div id="security-loading" class="p-8 text-center text-gray-500 dark:text-gray-400">
+                <div class="flex flex-col items-center gap-2">
+                    <svg class="w-8 h-8 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                        </path>
+                    </svg>
+                    <span>Analyzing security indicators...</span>
+                </div>
+            </div>
+
+            <div id="security-empty" class="hidden p-8 text-center text-gray-500 dark:text-gray-400">
+                <div class="flex flex-col items-center gap-3">
+                    <div class="text-5xl">🛡️</div>
+                    <p class="text-lg font-semibold">No security indicators found</p>
+                    <p class="text-sm">The agent hasn't reported any risk indicators for this period.</p>
+                </div>
+            </div>
+
+            <div id="security-content" class="hidden space-y-6">
+                <!-- Summary Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 flex flex-col justify-between overflow-hidden relative">
+                        <div class="absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 bg-blue-500/10 rounded-full"></div>
+                        <div>
+                            <div class="text-sm text-gray-500 dark:text-gray-400 font-medium">Security Score</div>
+                            <div id="security-score" class="text-4xl font-bold text-gray-900 dark:text-gray-100 mt-1">--
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <div id="security-score-bar-bg"
+                                class="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div id="security-score-bar"
+                                    class="h-full bg-gradient-to-r from-blue-500 to-purple-600 transition-all duration-1000"
+                                    style="width: 0%"></div>
+                            </div>
+                            <div id="security-score-label" class="text-xs text-gray-500 mt-2">Overall risk assessment
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                        <div class="text-sm text-gray-500 dark:text-gray-400 font-medium">Critical Issues</div>
+                        <div id="critical-count" class="text-4xl font-bold text-red-600 dark:text-red-500 mt-1">0</div>
+                        <div class="text-xs text-red-500/80 mt-2 flex items-center gap-1">
+                            <span>🚨 Immediate attention required</span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                        <div class="text-sm text-gray-500 dark:text-gray-400 font-medium">Total Warnings</div>
+                        <div id="warning-count" class="text-4xl font-bold text-yellow-600 dark:text-yellow-500 mt-1">0
+                        </div>
+                        <div class="text-xs text-yellow-500/80 mt-2 flex items-center gap-1">
+                            <span>⚠️ Potential risks detected</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Critical & High Priority Section -->
+                <div
+                    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div
+                        class="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
+                        <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                            <span>🚨 High Priority Alerts</span>
+                        </h3>
+                        <span id="critical-badge"
+                            class="hidden px-2 py-0.5 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 text-xs font-bold rounded-full border border-red-200 dark:border-red-800 animate-pulse">ACTION
+                            REQUIRED</span>
+                    </div>
+                    <div id="critical-issues-body" class="divide-y divide-gray-100 dark:divide-gray-700">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Network Security -->
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+                        <div
+                            class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                            <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                <span>🌐 Network Security</span>
+                            </h3>
+                            <span id="network-count" class="text-xs text-gray-500">0 indicators</span>
+                        </div>
+                        <div class="overflow-x-auto max-h-80">
+                            <table class="w-full text-left">
+                                <thead
+                                    class="bg-gray-50 dark:bg-gray-900/50 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0">
+                                    <tr>
+                                        <th class="px-4 py-3">Type</th>
+                                        <th class="px-4 py-3">Process/Port</th>
+                                        <th class="px-4 py-3 text-right">Risk</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="network-body" class="divide-y divide-gray-100 dark:divide-gray-700">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Browser Extensions -->
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+                        <div
+                            class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                            <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                <span>🔌 Extension Risk</span>
+                            </h3>
+                            <span id="extensions-count" class="text-xs text-gray-500">0 indicators</span>
+                        </div>
+                        <div class="overflow-x-auto max-h-80">
+                            <table class="w-full text-left">
+                                <thead
+                                    class="bg-gray-50 dark:bg-gray-900/50 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0">
+                                    <tr>
+                                        <th class="px-4 py-3">Browser</th>
+                                        <th class="px-4 py-3">Extension</th>
+                                        <th class="px-4 py-3 text-right">Risk</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="extensions-body" class="divide-y divide-gray-100 dark:divide-gray-700">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Startup & Persistence -->
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+                        <div
+                            class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                            <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                <span>⚡ Startup & Persistence</span>
+                            </h3>
+                            <span id="persistence-count" class="text-xs text-gray-500">0 indicators</span>
+                        </div>
+                        <div class="overflow-x-auto max-h-80">
+                            <table class="w-full text-left">
+                                <thead
+                                    class="bg-gray-50 dark:bg-gray-900/50 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0">
+                                    <tr>
+                                        <th class="px-4 py-3">Type</th>
+                                        <th class="px-4 py-3">Name</th>
+                                        <th class="px-4 py-3 text-right">Risk</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="persistence-body" class="divide-y divide-gray-100 dark:divide-gray-700">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- USB & Physical Audit -->
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+                        <div
+                            class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                            <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                <span>📱 Physical & Login Audit</span>
+                            </h3>
+                            <span id="audit-count" class="text-xs text-gray-500">0 indicators</span>
+                        </div>
+                        <div class="overflow-x-auto max-h-80">
+                            <table class="w-full text-left">
+                                <thead
+                                    class="bg-gray-50 dark:bg-gray-900/50 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0">
+                                    <tr>
+                                        <th class="px-4 py-3">Event</th>
+                                        <th class="px-4 py-3">Details</th>
+                                        <th class="px-4 py-3 text-right">Risk</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="audit-body" class="divide-y divide-gray-100 dark:divide-gray-700">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Raw System Visibility (always visible, outside security-content) -->
+            <div
+                    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                        <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100">Raw System Visibility</h3>
+                        <span id="system-visibility-updated" class="text-xs text-gray-500">Latest snapshot: -</span>
+                    </div>
+                    <div class="p-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-center text-xs">
+                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                            <div class="text-gray-500">Open Ports</div>
+                            <div id="visibility-open-ports-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
+                        </div>
+                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                            <div class="text-gray-500">Connections</div>
+                            <div id="visibility-connections-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
+                        </div>
+                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                            <div class="text-gray-500">Startup Apps</div>
+                            <div id="visibility-startup-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
+                        </div>
+                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                            <div class="text-gray-500">Tasks</div>
+                            <div id="visibility-tasks-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
+                        </div>
+                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                            <div class="text-gray-500">Disks</div>
+                            <div id="visibility-disks-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 p-4 pt-0">
+                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Open Ports</div>
+                            <div class="overflow-x-auto max-h-64">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                                        <tr>
+                                            <th class="px-3 py-2">Port</th>
+                                            <th class="px-3 py-2">Address</th>
+                                            <th class="px-3 py-2">Process</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="visibility-ports-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Network Connections</div>
+                            <div class="overflow-x-auto max-h-64">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                                        <tr>
+                                            <th class="px-3 py-2">Remote</th>
+                                            <th class="px-3 py-2">Local</th>
+                                            <th class="px-3 py-2">Process</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="visibility-connections-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Startup Programs</div>
+                            <div class="overflow-x-auto max-h-64">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                                        <tr>
+                                            <th class="px-3 py-2">Name</th>
+                                            <th class="px-3 py-2">Command</th>
+                                            <th class="px-3 py-2">Source</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="visibility-startup-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Scheduled Tasks</div>
+                            <div class="overflow-x-auto max-h-64">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                                        <tr>
+                                            <th class="px-3 py-2">Task</th>
+                                            <th class="px-3 py-2">Path</th>
+                                            <th class="px-3 py-2">Principal</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="visibility-tasks-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden lg:col-span-2">
+                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Disk Usage</div>
+                            <div class="overflow-x-auto max-h-64">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                                        <tr>
+                                            <th class="px-3 py-2">Drive</th>
+                                            <th class="px-3 py-2">Volume</th>
+                                            <th class="px-3 py-2">Used %</th>
+                                            <th class="px-3 py-2">Free GB</th>
+                                            <th class="px-3 py-2">Size GB</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="visibility-disk-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+</div>
+
+<!-- Tab: Extended Inventory -->
+<div id="tab-extended" class="tab-content hidden">
+    <div id="extended-loading" class="p-8 text-center text-gray-500 dark:text-gray-400">Loading extended inventory...
+    </div>
+    <div id="extended-empty" class="hidden p-8 text-center text-gray-500 dark:text-gray-400">
+        <p class="text-lg">No extended inventory data available yet.</p>
+        <p class="text-sm mt-2">CLI tools, drivers, extensions, and plugins will appear after the agent collects them.
+        </p>
+    </div>
+    <div id="extended-content" class="hidden space-y-6">
+
+        <!-- CLI Tools Section -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">💻 CLI Tools</h3>
+                <span id="cli-tools-count"
+                    class="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs font-medium rounded-full">0
+                    tools</span>
+            </div>
+            <div class="max-h-64 overflow-y-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Name
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Version
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Path
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Source
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="cli-tools-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                        <tr>
+                            <td colspan="4" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No CLI tools
+                                detected</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Hardware Drivers Section -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🔧 Hardware Drivers</h3>
+                <span id="drivers-count"
+                    class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
+                    drivers</span>
+            </div>
+            <div class="max-h-64 overflow-y-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Device
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Driver
+                                Version</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">
+                                Manufacturer</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Class
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Signed
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="drivers-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                        <tr>
+                            <td colspan="5" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No drivers
+                                detected</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- IDE Extensions (VS Code) Section -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🧩 IDE Extensions (VS Code)</h3>
+                <span id="vscode-ext-count"
+                    class="px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full">0
+                    extensions</span>
+            </div>
+            <div class="max-h-64 overflow-y-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">
+                                Extension</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">
+                                Publisher</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Version
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="vscode-ext-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                        <tr>
+                            <td colspan="3" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No VS Code
+                                extensions detected</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Browser Extensions Section -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🌐 Browser Extensions</h3>
+                <span id="browser-ext-count"
+                    class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 text-xs font-medium rounded-full">0
+                    extensions</span>
+            </div>
+            <div class="max-h-64 overflow-y-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Browser
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Name
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Version
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Enabled
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="browser-ext-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                        <tr>
+                            <td colspan="4" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No browser
+                                extensions detected</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Application Plugins Section -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🔌 Application Plugins</h3>
+                <span id="plugins-count"
+                    class="px-2 py-1 bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 text-xs font-medium rounded-full">0
+                    plugins</span>
+            </div>
+            <div class="max-h-64 overflow-y-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Type
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Name
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Host
+                                App</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Enabled
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="plugins-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                        <tr>
+                            <td colspan="4" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No plugins
+                                detected</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Portable Applications Section -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">📦 Portable Applications</h3>
+                <span id="portable-count"
+                    class="px-2 py-1 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 text-xs font-medium rounded-full">0
+                    apps</span>
+            </div>
+            <div class="max-h-64 overflow-y-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Name
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Version
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Drive
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Path
+                            </th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Size
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="portable-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                        <tr>
+                            <td colspan="5" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No portable
+                                applications detected</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>

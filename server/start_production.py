@@ -58,7 +58,7 @@ def start_waitress(host, port):
         
         app = create_app()
         logger.info(f"\n🚀 Starting Production Server (Waitress) on http://{host}:{port}")
-        logger.info("   Dashboard: http://localhost:5000/dashboard")
+        logger.info("   Dashboard: http://localhost:5050/dashboard")
         logger.info("="*60)
         
         serve(app, host=host, port=port, threads=8)
@@ -84,11 +84,14 @@ def main():
     if not run_setup():
         sys.exit(1)
         
+    # NEW: Ensure logs directory exists
+    Path("logs").mkdir(exist_ok=True)
+        
     # 2. Detect OS and start
     is_windows = platform.system() == "Windows"
     
     host = "0.0.0.0"
-    port = 5000 # Standard port
+    port = 5050 # Standard port
     
     if is_windows:
         logger.info("✅ OS: Windows detected. Using Waitress for production.")

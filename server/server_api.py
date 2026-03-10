@@ -2,15 +2,14 @@ import logging
 import json
 import os
 import re
+import uuid
 from datetime import datetime, date, timezone, timedelta
 from flask import Blueprint, request, jsonify, current_app
 from extensions import db
 import server_models
-from extensions import db
 from server_auth import generate_api_key, generate_api_token, require_auth
 from schemas import RegisterSchema, AppInventorySchema, DomainUsageSchema, HeartbeatSchema
 from pydantic import ValidationError
-from server_analytics import process_heartbeat_analytics
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('api', __name__)
@@ -47,6 +46,18 @@ def redact_secret(value: str, show_chars: int = 8) -> str:
 # Optional registration secret - if set, agents must provide this to register
 REGISTRATION_SECRET = os.getenv('REGISTRATION_SECRET')
 _is_dev_mode = os.getenv('FLASK_ENV') == 'development' or os.getenv('FLASK_DEBUG') == '1'
+
+
+def validate_agent_id(agent_id: str) -> bool:
+    """DATA-001: Validate agent_id is a proper UUID format."""
+    if not agent_id or not isinstance(agent_id, str):
+        return False
+    try:
+        uuid.UUID(str(agent_id))
+        return True
+    except (ValueError, AttributeError):
+        return False
+
 
 if REGISTRATION_SECRET:
     logger.info("[SECURITY] Registration secret is configured (new agents must authenticate)")
@@ -324,6 +335,11 @@ def inventory():
         logger.warning(f"Inventory: Missing agent_id in request or JWT")
         return jsonify({'status': 'error', 'message': 'Missing agent_id'}), 400
     
+    # DATA-001: Validate agent_id format
+    if not validate_agent_id(agent_id):
+        logger.warning(f"Inventory: Invalid agent_id format: {agent_id}")
+        return jsonify({'status': 'error', 'message': 'Invalid agent_id format'}), 400
+    
     if 'apps' not in data:
         logger.warning(f"[AGENT {agent_id}] Inventory: Missing apps data")
         return jsonify({'status': 'error', 'message': 'Missing apps data'}), 400
@@ -376,65 +392,87 @@ def inventory():
                     version=app_data.get('version')
                 ))
         
-        deleted_count = server_models.AppInventory.query.filter_by(agent_id=agent_id).delete()
-        logger.debug(f"[AGENT {agent_id}] Deleted {deleted_count} old inventory records")
+        # BUG-003 FIX: Use savepoint to prevent data loss if insert phase fails.
+        # If something goes wrong inserting new apps, we rollback to the savepoint
+        # and the old inventory remains intact.
+        savepoint = db.session.begin_nested()
         
-        # Track seen apps to prevent duplicates in the same batch
-        seen_apps = set()
-        
-        for app_data in apps:
-            app_name = app_data.get('name')
-            if not app_name:
-                continue
+        try:
+            deleted_count = server_models.AppInventory.query.filter_by(agent_id=agent_id).delete()
+            logger.debug(f"[AGENT {agent_id}] Deleted {deleted_count} old inventory records")
             
-            # Skip if we've already processed this app name in this batch
-            if app_name in seen_apps:
-                continue
+            # Track seen apps to prevent duplicates in the same batch
+            seen_apps = set()
             
-            seen_apps.add(app_name)
+            for app_data in apps:
+                app_name = app_data.get('name')
+                if not app_name:
+                    continue
+                
+                # Skip if we've already processed this app name in this batch
+                if app_name in seen_apps:
+                    continue
+                
+                seen_apps.add(app_name)
+                
+                # Parse install_date - handle various formats
+                install_date_raw = app_data.get('install_date')
+                install_date = None
+                if install_date_raw and isinstance(install_date_raw, str) and install_date_raw.strip():
+                    try:
+                        # Try YYYYMMDD format (Windows registry format)
+                        if len(install_date_raw) == 8 and install_date_raw.isdigit():
+                            install_date = date(
+                                int(install_date_raw[:4]),
+                                int(install_date_raw[4:6]),
+                                int(install_date_raw[6:8])
+                            )
+                        # Try ISO format (YYYY-MM-DD)
+                        elif '-' in install_date_raw:
+                            install_date = date.fromisoformat(install_date_raw[:10])
+                    except (ValueError, TypeError):
+                        install_date = None  # Invalid date, skip it
+                
+                new_app = server_models.AppInventory(
+                    agent_id=agent_id,
+                    name=app_name,
+                    version=app_data.get('version', 'Unknown'),
+                    publisher=app_data.get('publisher', 'Unknown'),
+                    install_location=app_data.get('install_location') or None,  # Convert empty to None
+                    install_date=install_date,
+                    source=app_data.get('source'),  # Registry-HKLM, Registry-HKCU, MicrosoftStore
+                    architecture=app_data.get('architecture'),
+                    uninstall_command=app_data.get('uninstall_command'),
+                    estimated_size_kb=app_data.get('estimated_size_kb'),
+                    last_seen=timestamp
+                )
+                db.session.add(new_app)
             
-            # Parse install_date - handle various formats
-            install_date_raw = app_data.get('install_date')
-            install_date = None
-            if install_date_raw and isinstance(install_date_raw, str) and install_date_raw.strip():
-                try:
-                    # Try YYYYMMDD format (Windows registry format)
-                    if len(install_date_raw) == 8 and install_date_raw.isdigit():
-                        install_date = date(
-                            int(install_date_raw[:4]),
-                            int(install_date_raw[4:6]),
-                            int(install_date_raw[6:8])
-                        )
-                    # Try ISO format (YYYY-MM-DD)
-                    elif '-' in install_date_raw:
-                        install_date = date.fromisoformat(install_date_raw[:10])
-                except (ValueError, TypeError):
-                    install_date = None  # Invalid date, skip it
-            
-            new_app = server_models.AppInventory(
-                agent_id=agent_id,
-                name=app_name,
-                version=app_data.get('version', 'Unknown'),
-                publisher=app_data.get('publisher', 'Unknown'),
-                install_location=app_data.get('install_location') or None,  # Convert empty to None
-                install_date=install_date,
-                source=app_data.get('source'),  # Registry-HKLM, Registry-HKCU, MicrosoftStore
-                last_seen=timestamp
-            )
-            db.session.add(new_app)
-
+            savepoint.commit()
+        except Exception as insert_error:
+            savepoint.rollback()
+            logger.error(f"[AGENT {agent_id}] Insert phase failed, old inventory preserved: {insert_error}")
+            raise  # Re-raise to trigger outer error handler
 
         if raw_event:
             raw_event.processed = True
             
         db.session.commit()
         
-        logger.info(f"[OK] Inventory from {agent_id}: {len(apps)} apps (replaced)")
+        # EOL-002: Trigger lifecycle evaluation after inventory update
+        try:
+            from eol_engine import evaluate_agent_lifecycle
+            evaluate_agent_lifecycle(agent_id=agent_id)
+            logger.debug(f"[EOL] Triggered evaluation for agent {agent_id}")
+        except Exception as eol_error:
+            logger.warning(f"[EOL] Background evaluation trigger failed: {eol_error}")
+
+        logger.info(f"[OK] Inventory from {agent_id}: {len(seen_apps)} apps (replaced)")
 
         return jsonify({
             'status': 'ok',
             'message': 'Inventory processed successfully',
-            'apps_count': len(apps)
+            'apps_count': len(seen_apps)
         }), 200
 
     except Exception as e:
@@ -475,6 +513,11 @@ def domain_usage():
     if not agent_id:
         logger.warning(f"Domain usage: Missing agent_id in request or JWT")
         return jsonify({'status': 'error', 'message': 'Missing agent_id'}), 400
+
+    # DATA-001: Validate agent_id format
+    if not validate_agent_id(agent_id):
+        logger.warning(f"Domain usage: Invalid agent_id format: {agent_id}")
+        return jsonify({'status': 'error', 'message': 'Invalid agent_id format'}), 400
 
     records = data.get('records', [])
     if not records:
@@ -558,19 +601,16 @@ def heartbeat():
         except:
             pass
 
-    # Process analytics if payload is present
+    # Process heartbeat
     if payload:
         try:
-            heartbeat_data = payload.dict()
-            process_heartbeat_analytics(agent_id, heartbeat_data)
-            
             if raw_event:
                 raw_event.processed = True
                 
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            logger.error(f"Failed to process V1 heartbeat analytics: {e}")
+            logger.error(f"Failed to process heartbeat: {e}")
             if raw_event:
                 try:
                     failed_raw = server_models.RawEvent(
@@ -1231,32 +1271,968 @@ def domains():
         return jsonify({'error': str(e)}), 500
 
 
+@bp.route('/asset-hardware', methods=['POST'])
+@require_auth
+def asset_hardware():
+    """
+    Receive hardware/asset information from agent.
+    Upsert: create if new, update if changed, skip if unchanged.
+    """
+    from flask import g
+    data = request.get_json() or {}
+    
+    agent_id = data.get('agent_id')
+    if not agent_id:
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    
+    if not agent_id:
+        return jsonify({'error': 'Missing agent_id'}), 400
+    
+    sid = short_agent_id(agent_id)
+    
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if not agent:
+            logger.warning(f"[ASSET {sid}] Unknown agent")
+            return jsonify({'error': 'Unknown agent'}), 404
+        
+        # Update last_seen
+        agent.last_seen = datetime.now(timezone.utc)
+        
+        # Extract nested data structures
+        identity = data.get('identity', {})
+        hardware = data.get('hardware', {})
+        network = data.get('network', {})
+        security = data.get('security', {})
+        collection_hash = data.get('collection_hash', '')
+        
+        # Check if record exists
+        existing = server_models.AssetInfo.query.filter_by(agent_id=agent_id).first()
+        
+        if existing and existing.collection_hash == collection_hash and collection_hash:
+            # No changes
+            logger.debug(f"[ASSET {sid}] No changes (hash match)")
+            db.session.commit()
+            return jsonify({'status': 'unchanged'}), 304
+        
+        if not existing:
+            existing = server_models.AssetInfo(agent_id=agent_id)
+            db.session.add(existing)
+            action = 'created'
+        else:
+            action = 'updated'
+        
+        # Identity fields
+        existing.hostname = identity.get('hostname', '')
+        existing.serial_number = identity.get('serial_number', '')
+        existing.manufacturer = identity.get('manufacturer', '')
+        existing.model = identity.get('model', '')
+        existing.bios_uuid = identity.get('bios_uuid', '')
+        existing.system_uuid = identity.get('system_uuid', '')
+        existing.asset_tag = identity.get('asset_tag', '')
+        existing.domain = identity.get('domain', '')
+        existing.workgroup = identity.get('workgroup', '')
+        
+        # Hardware fields
+        existing.cpu_name = hardware.get('cpu_name', '')
+        existing.cpu_cores = hardware.get('cpu_cores', 0)
+        existing.cpu_threads = hardware.get('cpu_threads', 0)
+        existing.cpu_speed_mhz = hardware.get('cpu_speed_mhz', 0)
+        existing.ram_total_gb = hardware.get('ram_total_gb', 0.0)
+        existing.ram_slots_used = hardware.get('ram_slots_used', 0)
+        existing.ram_slots_total = hardware.get('ram_slots_total', 0)
+        existing.gpu_name = hardware.get('gpu_name', '')
+        existing.gpu_memory_gb = hardware.get('gpu_memory_gb', 0.0)
+        existing.disks_json = json.dumps(hardware.get('disks', []))
+        existing.motherboard = hardware.get('motherboard', '')
+        
+        # Network fields
+        existing.primary_mac = network.get('primary_mac', '')
+        existing.primary_ip = network.get('primary_ip', '')
+        existing.all_macs_json = json.dumps(network.get('all_macs', []))
+        existing.all_ips_json = json.dumps(network.get('all_ips', []))
+        existing.dns_servers_json = json.dumps(network.get('dns_servers', []))
+        existing.domain_joined = network.get('domain_joined', False)
+        existing.domain_name = network.get('domain_name', '')
+        
+        # Security fields
+        existing.os_name = security.get('os_name', '')
+        existing.os_version = security.get('os_version', '')
+        existing.os_build = security.get('os_build', '')
+        existing.os_architecture = security.get('os_architecture', '')
+        existing.antivirus_json = json.dumps(security.get('antivirus_installed', []))
+        existing.firewall_enabled = security.get('firewall_enabled', False)
+        existing.last_boot_time = security.get('last_boot_time', '')
+        existing.windows_update_enabled = security.get('windows_update_enabled', False)
+        existing.bitlocker_status = security.get('bitlocker_status', '')
+        
+        # Meta
+        existing.collected_at = datetime.now(timezone.utc)
+        existing.collection_hash = collection_hash
+        existing.agent_version = data.get('agent_version', '')
+        
+        db.session.commit()
+        
+        logger.info(f"[ASSET {sid}] Asset info {action}: {identity.get('manufacturer', '')} {identity.get('model', '')}")
+        
+        status_code = 201 if action == 'created' else 200
+        return jsonify({'status': action}), status_code
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[ASSET {sid}] Error: {e}")
+        return jsonify({'error': 'Asset update failed', 'message': str(e)}), 500
+
+
+# =============================================================================
+# Extended Inventory API Endpoints
+# =============================================================================
+
+def _resolve_agent_id_from_request(data):
+    """Resolve agent_id from payload first, then authenticated agent context."""
+    from flask import g
+
+    agent_id = None
+    if isinstance(data, dict):
+        agent_id = data.get('agent_id')
+
+    if not agent_id:
+        agent_id = str(g.current_agent.agent_id) if getattr(g, 'current_agent', None) else None
+
+    return agent_id
+
+
+def _normalize_inventory_items(data, category_key):
+    """
+    Normalize category payload to a list of items.
+
+    Supported payload forms:
+    - { "<category_key>": [...] }
+    - { "items": [...] }
+    - [ ... ]  (direct list)
+    - { ... }  (single item object)
+    """
+    if isinstance(data, list):
+        return data
+
+    if not isinstance(data, dict):
+        return []
+
+    items = data.get(category_key)
+    if items is None:
+        items = data.get('items')
+
+    if items is None:
+        # Treat remaining dict payload as a single record when category key is absent.
+        fallback_item = dict(data)
+        fallback_item.pop('agent_id', None)
+        return [fallback_item] if fallback_item else []
+
+    if isinstance(items, list):
+        return items
+    if isinstance(items, dict):
+        return [items]
+
+    return []
+
+
+def _process_inventory_category_upload(category_key, upsert_func):
+    """
+    Shared handler for compatibility category endpoints under /inventory/*.
+    """
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+
+    agent_id = _resolve_agent_id_from_request(data)
+    if not agent_id:
+        return jsonify({'error': 'Missing agent_id'}), 400
+
+    if not validate_agent_id(agent_id):
+        return jsonify({'error': 'Invalid agent_id format'}), 400
+
+    sid = short_agent_id(agent_id)
+
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if not agent:
+            logger.warning(f"[EXTENDED {sid}] Unknown agent")
+            return jsonify({'error': 'Unknown agent'}), 404
+
+        items = _normalize_inventory_items(data, category_key)
+        result = {'count': 0, 'action': 'upserted'}
+
+        if items:
+            result = upsert_func(agent_id, items)
+
+        db.session.commit()
+
+        # Keep lifecycle risk model current for categories that can impact lifecycle views.
+        if items:
+            try:
+                from eol_engine import evaluate_extended_inventory_lifecycle, evaluate_agent_lifecycle
+                evaluate_extended_inventory_lifecycle(agent)
+                evaluate_agent_lifecycle(agent)
+            except Exception as eol_error:
+                logger.warning(f"[EOL] Extended evaluation trigger failed: {eol_error}")
+
+        return jsonify({
+            'status': 'ok',
+            'category': category_key,
+            'results': {category_key: result},
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[EXTENDED {sid}] Category upload error for {category_key}: {e}")
+        return jsonify({'error': 'Extended inventory category failed', 'message': str(e)}), 500
+
+
+@bp.route('/extended-inventory', methods=['POST'])
+@require_auth
+def extended_inventory():
+    """
+    Receive extended inventory data from agent (CLI tools, drivers, extensions, plugins).
+    Uses upsert pattern: create if new, update if changed.
+    """
+    from flask import g
+    data = request.get_json() or {}
+    
+    agent_id = data.get('agent_id')
+    if not agent_id:
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    
+    if not agent_id:
+        return jsonify({'error': 'Missing agent_id'}), 400
+    
+    sid = short_agent_id(agent_id)
+    
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if not agent:
+            logger.warning(f"[EXTENDED {sid}] Unknown agent")
+            return jsonify({'error': 'Unknown agent'}), 404
+        
+        results = {}
+        
+        # Process CLI Tools
+        cli_tools = data.get('cli_tools', [])
+        if cli_tools:
+            results['cli_tools'] = _upsert_cli_tools(agent_id, cli_tools)
+        
+        # Process Hardware Drivers
+        drivers = data.get('drivers', [])
+        if drivers:
+            results['drivers'] = _upsert_hardware_drivers(agent_id, drivers)
+        
+        # Process VS Code Extensions
+        vscode_extensions = data.get('vscode_extensions', [])
+        if vscode_extensions:
+            results['vscode_extensions'] = _upsert_vscode_extensions(agent_id, vscode_extensions)
+        
+        # Process Browser Extensions
+        browser_extensions = data.get('browser_extensions', [])
+        if browser_extensions:
+            results['browser_extensions'] = _upsert_browser_extensions(agent_id, browser_extensions)
+        
+        # Process Application Plugins
+        plugins = data.get('plugins', [])
+        if plugins:
+            results['plugins'] = _upsert_application_plugins(agent_id, plugins)
+        
+        # Process Portable Applications
+        portable_apps = data.get('portable_apps', [])
+        if portable_apps:
+            results['portable_apps'] = _upsert_portable_applications(agent_id, portable_apps)
+        
+        db.session.commit()
+        
+        total_items = sum(r.get('count', 0) for r in results.values())
+        
+        # EOL-002: Trigger lifecycle evaluation after extended inventory update
+        # This is critical for CLI tools and portable apps risk detection
+        try:
+            from eol_engine import evaluate_extended_inventory_lifecycle, evaluate_agent_lifecycle
+            # Evaluate extended first
+            evaluate_extended_inventory_lifecycle(agent)
+            # Then run general agent evaluation to ensure OS/Apps are also up to date
+            evaluate_agent_lifecycle(agent)
+            logger.debug(f"[EOL] Triggered extended evaluation for agent {sid}")
+        except Exception as eol_error:
+            logger.warning(f"[EOL] Extended evaluation trigger failed: {eol_error}")
+
+        logger.info(f"[EXTENDED {sid}] Processed extended inventory: {total_items} items across {len(results)} categories")
+        
+        return jsonify({'status': 'ok', 'results': results}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[EXTENDED {sid}] Error: {e}")
+        return jsonify({'error': 'Extended inventory failed', 'message': str(e)}), 500
+
+
+# Compatibility category endpoints (docs compatibility and phased agent rollout)
+@bp.route('/inventory/cli-tools', methods=['POST'])
+@require_auth
+def inventory_cli_tools():
+    return _process_inventory_category_upload('cli_tools', _upsert_cli_tools)
+
+
+@bp.route('/inventory/drivers', methods=['POST'])
+@require_auth
+def inventory_drivers():
+    return _process_inventory_category_upload('drivers', _upsert_hardware_drivers)
+
+
+@bp.route('/inventory/vscode-extensions', methods=['POST'])
+@require_auth
+def inventory_vscode_extensions():
+    return _process_inventory_category_upload('vscode_extensions', _upsert_vscode_extensions)
+
+
+@bp.route('/inventory/browser-extensions', methods=['POST'])
+@require_auth
+def inventory_browser_extensions():
+    return _process_inventory_category_upload('browser_extensions', _upsert_browser_extensions)
+
+
+@bp.route('/inventory/plugins', methods=['POST'])
+@require_auth
+def inventory_plugins():
+    return _process_inventory_category_upload('plugins', _upsert_application_plugins)
+
+
+@bp.route('/inventory/portable-apps', methods=['POST'])
+@require_auth
+def inventory_portable_apps():
+    return _process_inventory_category_upload('portable_apps', _upsert_portable_applications)
+
+
+# =============================================================================
+# Security Indicators API Endpoint
+# =============================================================================
+
+@bp.route('/security-indicators', methods=['POST'])
+@require_auth
+def security_indicators():
+    """
+    Receive security indicator data from agent (unsigned drivers, risky extensions, file changes).
+    Uses upsert pattern: create if new, update last_seen if existing.
+    """
+    from flask import g
+    data = request.get_json() or {}
+    
+    agent_id = data.get('agent_id')
+    if not agent_id:
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    
+    if not agent_id:
+        return jsonify({'error': 'Missing agent_id'}), 400
+    
+    sid = short_agent_id(agent_id)
+    
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if not agent:
+            logger.warning(f"[SECURITY {sid}] Unknown agent")
+            return jsonify({'error': 'Unknown agent'}), 404
+        
+        indicators = data.get('indicators', [])
+        created = 0
+        updated = 0
+        
+        for ind in indicators:
+            indicator_type = ind.get('indicator_type', 'unknown')
+            title = ind.get('title', '')[:500]  # Truncate to column limit
+            severity = ind.get('severity', 'low')
+            risk_score = ind.get('risk_score', 0)
+            details = ind.get('details', {})
+            
+            # Upsert: find existing or create new
+            existing = server_models.SecurityIndicator.query.filter_by(
+                agent_id=agent_id,
+                indicator_type=indicator_type,
+                title=title
+            ).first()
+            
+            if existing:
+                # Update existing indicator
+                existing.severity = severity
+                existing.risk_score = risk_score
+                existing.details_json = json.dumps(details) if details else None
+                existing.last_seen = datetime.utcnow()
+                existing.resolved = False  # Re-detected, so not resolved
+                updated += 1
+            else:
+                # Create new indicator
+                new_ind = server_models.SecurityIndicator(
+                    agent_id=agent_id,
+                    indicator_type=indicator_type,
+                    severity=severity,
+                    title=title,
+                    details_json=json.dumps(details) if details else None,
+                    risk_score=risk_score,
+                )
+                db.session.add(new_ind)
+                created += 1
+        
+        db.session.commit()
+        
+        logger.info(
+            f"[SECURITY {sid}] Processed {len(indicators)} indicators: "
+            f"{created} new, {updated} updated"
+        )
+        
+        return jsonify({
+            'status': 'ok',
+            'created': created,
+            'updated': updated,
+            'total': len(indicators),
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[SECURITY {sid}] Error: {e}")
+        return jsonify({'error': 'Security indicators failed', 'message': str(e)}), 500
+
+
+@bp.route('/system-visibility', methods=['POST'])
+@require_auth
+def system_visibility():
+    """
+    Receive raw system visibility snapshot (ports, connections, startup, tasks, disk).
+    Stored as raw event for latest dashboard visibility.
+    """
+    from flask import g
+    data = request.get_json() or {}
+
+    agent_id = data.get('agent_id')
+    if not agent_id:
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+
+    if not agent_id:
+        return jsonify({'error': 'Missing agent_id'}), 400
+
+    sid = short_agent_id(agent_id)
+
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if not agent:
+            logger.warning(f"[VISIBILITY {sid}] Unknown agent")
+            return jsonify({'error': 'Unknown agent'}), 404
+
+        raw_event = store_raw_event(agent_id, 'system_visibility', data, processed=True)
+        db.session.commit()
+
+        counts = data.get('counts', {})
+        logger.info(f"[VISIBILITY {sid}] Snapshot received: {counts}")
+
+        return jsonify({
+            'status': 'ok',
+            'event_id': raw_event.id if raw_event else None,
+            'counts': counts
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[VISIBILITY {sid}] Error: {e}")
+        return jsonify({'error': 'System visibility failed', 'message': str(e)}), 500
+
+
+def _upsert_cli_tools(agent_id, tools):
+    """Upsert CLI tools inventory."""
+    count = 0
+    for tool in tools:
+        name = tool.get('name')
+        path = tool.get('executable_path', '')
+        
+        if not name:
+            continue
+        
+        existing = server_models.CLITool.query.filter_by(
+            agent_id=agent_id, 
+            name=name, 
+            executable_path=path
+        ).first()
+        
+        if existing:
+            existing.version = tool.get('version')
+            existing.source = tool.get('source')
+            existing.publisher = tool.get('publisher')
+            existing.last_updated = datetime.utcnow()
+        else:
+            db.session.add(server_models.CLITool(
+                agent_id=agent_id,
+                name=name,
+                version=tool.get('version'),
+                executable_path=path,
+                source=tool.get('source'),
+                publisher=tool.get('publisher')
+            ))
+        count += 1
+    
+    return {'count': count, 'action': 'upserted'}
+
+
+def _upsert_hardware_drivers(agent_id, drivers):
+    """Upsert hardware drivers inventory."""
+    count = 0
+    for driver in drivers:
+        device_id = driver.get('device_id')
+        
+        if not device_id:
+            continue
+        
+        existing = server_models.HardwareDriver.query.filter_by(
+            agent_id=agent_id,
+            device_id=device_id
+        ).first()
+        
+        driver_date = None
+        if driver.get('driver_date'):
+            try:
+                driver_date = datetime.strptime(driver['driver_date'][:10], '%Y-%m-%d').date()
+            except:
+                pass
+        
+        if existing:
+            existing.device_name = driver.get('device_name')
+            existing.driver_name = driver.get('driver_name')
+            existing.driver_version = driver.get('driver_version')
+            existing.driver_date = driver_date
+            existing.manufacturer = driver.get('manufacturer')
+            existing.device_class = driver.get('device_class')
+            existing.is_signed = driver.get('is_signed', False)
+            existing.signer = driver.get('signer')
+            existing.last_updated = datetime.utcnow()
+        else:
+            db.session.add(server_models.HardwareDriver(
+                agent_id=agent_id,
+                device_name=driver.get('device_name'),
+                driver_name=driver.get('driver_name'),
+                driver_version=driver.get('driver_version'),
+                driver_date=driver_date,
+                manufacturer=driver.get('manufacturer'),
+                device_class=driver.get('device_class'),
+                device_id=device_id,
+                is_signed=driver.get('is_signed', False),
+                signer=driver.get('signer')
+            ))
+        count += 1
+    
+    return {'count': count, 'action': 'upserted'}
+
+
+def _upsert_vscode_extensions(agent_id, extensions):
+    """Upsert VS Code extensions inventory."""
+    count = 0
+    for ext in extensions:
+        ext_id = ext.get('extension_id')
+        
+        if not ext_id:
+            continue
+        
+        existing = server_models.VSCodeExtension.query.filter_by(
+            agent_id=agent_id,
+            extension_id=ext_id
+        ).first()
+        
+        if existing:
+            existing.display_name = ext.get('display_name')
+            existing.version = ext.get('version')
+            existing.publisher = ext.get('publisher')
+            existing.install_path = ext.get('install_path')
+            existing.last_updated = datetime.utcnow()
+        else:
+            db.session.add(server_models.VSCodeExtension(
+                agent_id=agent_id,
+                extension_id=ext_id,
+                display_name=ext.get('display_name'),
+                version=ext.get('version'),
+                publisher=ext.get('publisher'),
+                install_path=ext.get('install_path')
+            ))
+        count += 1
+    
+    return {'count': count, 'action': 'upserted'}
+
+
+def _upsert_browser_extensions(agent_id, extensions):
+    """Upsert browser extensions inventory."""
+    count = 0
+    for ext in extensions:
+        browser = ext.get('browser')
+        ext_id = ext.get('extension_id')
+        
+        if not browser or not ext_id:
+            continue
+        
+        existing = server_models.BrowserExtension.query.filter_by(
+            agent_id=agent_id,
+            browser=browser,
+            extension_id=ext_id
+        ).first()
+        
+        install_date = None
+        if ext.get('install_date'):
+            try:
+                install_date = datetime.strptime(ext['install_date'][:10], '%Y-%m-%d').date()
+            except:
+                pass
+        
+        if existing:
+            existing.name = ext.get('name')
+            existing.version = ext.get('version')
+            existing.description = ext.get('description')
+            existing.enabled = ext.get('enabled', True)
+            existing.install_date = install_date
+            existing.profile_path = ext.get('profile_path')
+            existing.last_updated = datetime.utcnow()
+        else:
+            db.session.add(server_models.BrowserExtension(
+                agent_id=agent_id,
+                browser=browser,
+                extension_id=ext_id,
+                name=ext.get('name'),
+                version=ext.get('version'),
+                description=ext.get('description'),
+                enabled=ext.get('enabled', True),
+                install_date=install_date,
+                profile_path=ext.get('profile_path')
+            ))
+        count += 1
+    
+    return {'count': count, 'action': 'upserted'}
+
+
+def _upsert_application_plugins(agent_id, plugins):
+    """Upsert application plugins inventory."""
+    count = 0
+    for plugin in plugins:
+        plugin_type = plugin.get('plugin_type')
+        name = plugin.get('name')
+        path = plugin.get('install_path', '')
+        
+        if not plugin_type or not name:
+            continue
+        
+        existing = server_models.ApplicationPlugin.query.filter_by(
+            agent_id=agent_id,
+            plugin_type=plugin_type,
+            name=name,
+            install_path=path
+        ).first()
+        
+        if existing:
+            existing.version = plugin.get('version')
+            existing.publisher = plugin.get('publisher')
+            existing.host_application = plugin.get('host_application')
+            existing.enabled = plugin.get('enabled', True)
+            existing.last_updated = datetime.utcnow()
+        else:
+            db.session.add(server_models.ApplicationPlugin(
+                agent_id=agent_id,
+                plugin_type=plugin_type,
+                name=name,
+                version=plugin.get('version'),
+                publisher=plugin.get('publisher'),
+                install_path=path,
+                host_application=plugin.get('host_application'),
+                enabled=plugin.get('enabled', True)
+            ))
+        count += 1
+    
+    return {'count': count, 'action': 'upserted'}
+
+
+def _upsert_portable_applications(agent_id, apps):
+    """Upsert portable applications inventory."""
+    count = 0
+    for app in apps:
+        path = app.get('executable_path')
+        
+        if not path:
+            continue
+        
+        existing = server_models.PortableApplication.query.filter_by(
+            agent_id=agent_id,
+            executable_path=path
+        ).first()
+        
+        if existing:
+            existing.name = app.get('name')
+            existing.version = app.get('version')
+            existing.install_directory = app.get('install_directory')
+            existing.publisher = app.get('publisher')
+            existing.detection_method = app.get('detection_method')
+            existing.file_size_bytes = app.get('file_size_bytes')
+            existing.last_updated = datetime.utcnow()
+        else:
+            db.session.add(server_models.PortableApplication(
+                agent_id=agent_id,
+                name=app.get('name'),
+                version=app.get('version'),
+                executable_path=path,
+                install_directory=app.get('install_directory'),
+                publisher=app.get('publisher'),
+                detection_method=app.get('detection_method'),
+                file_size_bytes=app.get('file_size_bytes')
+            ))
+        count += 1
+    
+    return {'count': count, 'action': 'upserted'}
+
+
+# =============================================================================
+# EOL Data Ingestion API Endpoint
+# =============================================================================
+
+@bp.route('/eol-data', methods=['POST'])
+@require_auth
+def eol_data():
+    """
+    Receive EOL-specific data from agent.
+    Ingests: Windows updates, software metering, product keys, ESU status, warranty info.
+    """
+    from flask import g
+    data = request.get_json() or {}
+
+    agent_id = data.get('agent_id')
+    if not agent_id:
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+
+    if not agent_id:
+        return jsonify({'error': 'Missing agent_id'}), 400
+
+    sid = short_agent_id(agent_id)
+
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if not agent:
+            logger.warning(f"[EOL {sid}] Unknown agent")
+            return jsonify({'error': 'Unknown agent'}), 404
+
+        results = {}
+
+        # 1. Windows Updates
+        updates = data.get('updates', [])
+        if updates:
+            results['updates'] = _upsert_windows_updates(agent_id, updates)
+
+        # 2. Software Metering
+        metering = data.get('metering', [])
+        if metering:
+            results['metering'] = _upsert_software_metering(agent_id, metering)
+
+        # 3. Product Keys (partial)
+        product_keys = data.get('product_keys', [])
+        if product_keys:
+            results['product_keys'] = _upsert_product_keys(agent_id, product_keys)
+
+        # 4. ESU Status — store on AssetInfo (existing model)
+        esu = data.get('esu')
+        if esu:
+            _update_esu_status(agent_id, esu)
+            results['esu'] = {'status': 'updated'}
+
+        # 5. Warranty info — store on AssetInfo (existing model)
+        warranty = data.get('warranty')
+        if warranty:
+            _update_warranty_info(agent_id, warranty)
+            results['warranty'] = {'status': 'updated'}
+
+        db.session.commit()
+
+        total_items = sum(r.get('count', 0) for r in results.values() if isinstance(r, dict) and 'count' in r)
+        logger.info(f"[EOL {sid}] Processed EOL data: {total_items} items across {len(results)} categories")
+
+        return jsonify({'status': 'ok', 'results': results}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[EOL {sid}] Error: {e}")
+        return jsonify({'error': 'EOL data ingestion failed', 'message': str(e)}), 500
+
+
+def _upsert_windows_updates(agent_id, updates):
+    """Upsert Windows update (KB) records."""
+    count = 0
+    for update in updates:
+        kb = update.get('kb_number', '')
+        if not kb:
+            continue
+
+        existing = server_models.WindowsUpdateRecord.query.filter_by(
+            agent_id=agent_id, kb_number=kb
+        ).first()
+
+        install_date = None
+        if update.get('install_date'):
+            try:
+                install_date = datetime.strptime(update['install_date'][:10], '%Y-%m-%d').date()
+            except:
+                pass
+
+        if existing:
+            existing.title = update.get('title', existing.title)
+            existing.update_type = update.get('update_type', existing.update_type)
+            existing.install_date = install_date or existing.install_date
+            existing.result_code = update.get('result_code', existing.result_code)
+            existing.is_pending = update.get('is_pending', existing.is_pending)
+            existing.last_updated = datetime.utcnow()
+        else:
+            db.session.add(server_models.WindowsUpdateRecord(
+                agent_id=agent_id,
+                kb_number=kb,
+                title=update.get('title', ''),
+                update_type=update.get('update_type', 'Unknown'),
+                install_date=install_date,
+                result_code=update.get('result_code', 0),
+                is_pending=update.get('is_pending', False)
+            ))
+        count += 1
+
+    return {'count': count, 'action': 'upserted'}
+
+
+def _upsert_software_metering(agent_id, entries):
+    """Upsert software metering (usage frequency) records."""
+    count = 0
+    for entry in entries:
+        exe_name = entry.get('executable_name', '')
+        if not exe_name:
+            continue
+
+        existing = server_models.SoftwareMeteringRecord.query.filter_by(
+            agent_id=agent_id, executable_name=exe_name
+        ).first()
+
+        last_used = None
+        if entry.get('last_used'):
+            try:
+                last_used = datetime.fromisoformat(entry['last_used'])
+            except:
+                pass
+
+        if existing:
+            existing.app_name = entry.get('app_name', existing.app_name)
+            existing.usage_count = max(existing.usage_count, entry.get('usage_count', 0))
+            if last_used:
+                existing.last_used = last_used
+            existing.source = entry.get('source', existing.source)
+            existing.last_updated = datetime.utcnow()
+        else:
+            db.session.add(server_models.SoftwareMeteringRecord(
+                agent_id=agent_id,
+                app_name=entry.get('app_name', ''),
+                executable_name=exe_name,
+                usage_count=entry.get('usage_count', 0),
+                last_used=last_used,
+                source=entry.get('source', 'prefetch')
+            ))
+        count += 1
+
+    return {'count': count, 'action': 'upserted'}
+
+
+def _upsert_product_keys(agent_id, keys):
+    """Upsert partial product key records (last 5 chars only)."""
+    count = 0
+    for key in keys:
+        product = key.get('product_name', '')
+        if not product:
+            continue
+
+        # Safety: truncate partial key to max 5 chars
+        partial = str(key.get('partial_key', ''))
+        if len(partial) > 5:
+            partial = partial[-5:]
+
+        existing = server_models.ProductKeyRecord.query.filter_by(
+            agent_id=agent_id, product_name=product
+        ).first()
+
+        if existing:
+            existing.partial_key = partial
+            existing.key_source = key.get('key_source', existing.key_source)
+            existing.license_status = key.get('license_status', existing.license_status)
+            existing.last_updated = datetime.utcnow()
+        else:
+            db.session.add(server_models.ProductKeyRecord(
+                agent_id=agent_id,
+                product_name=product,
+                partial_key=partial,
+                key_source=key.get('key_source', 'Unknown'),
+                license_status=key.get('license_status', 'Unknown')
+            ))
+        count += 1
+
+    return {'count': count, 'action': 'upserted'}
+
+
+def _update_esu_status(agent_id, esu_data):
+    """Update ESU status on AssetInfo record."""
+    asset = server_models.AssetInfo.query.filter_by(agent_id=agent_id).first()
+    if not asset:
+        return
+
+    # Store ESU data as JSON in a flexible field
+    esu_json = json.dumps({
+        'eligible': esu_data.get('esu_eligible', False),
+        'activated': esu_data.get('esu_activated', False),
+        'expiry_date': esu_data.get('esu_expiry_date'),
+        'detection_method': esu_data.get('detection_method', 'unknown'),
+    })
+    # Use the existing collected_at field to track last update
+    if hasattr(asset, 'esu_status_json'):
+        asset.esu_status_json = esu_json
+    logger.debug(f"[EOL] Updated ESU status for agent {agent_id[:8]}")
+
+
+def _update_warranty_info(agent_id, warranty_data):
+    """Update warranty info on AssetInfo record."""
+    asset = server_models.AssetInfo.query.filter_by(agent_id=agent_id).first()
+    if not asset:
+        return
+
+    # Store warranty data as JSON
+    if hasattr(asset, 'warranty_json'):
+        asset.warranty_json = json.dumps({
+            'serial_number': warranty_data.get('serial_number', ''),
+            'manufacturer': warranty_data.get('manufacturer', ''),
+            'model': warranty_data.get('model', ''),
+            'warranty_expiry': warranty_data.get('warranty_expiry'),
+            'warranty_source': warranty_data.get('warranty_source', 'agent_collected'),
+        })
+    logger.debug(f"[EOL] Updated warranty info for agent {agent_id[:8]}")
+
+
 def register_root_endpoint(app):
     """Register all endpoints at root level for agent compatibility."""
-    
+
     @app.route('/register', methods=['POST'])
     def register_agent_root():
         return register()
-    
+
     @app.route('/heartbeat', methods=['POST', 'GET'])
     def heartbeat_root():
         return heartbeat()
-    
+
     @app.route('/inventory', methods=['POST'])
     @require_auth
     def inventory_root():
         return inventory()
-    
+
     @app.route('/domain-usage', methods=['POST'])
     @require_auth
     def domain_usage_root():
         return domain_usage()
-    
+
     @app.route('/merged-events', methods=['POST'])
     @require_auth
     def merged_events_root():
         return merged_events()
-    
+
     @app.route('/domains', methods=['POST'])
     @require_auth
     def domains_root():
@@ -1267,6 +2243,19 @@ def register_root_endpoint(app):
         domain_count = len(data.get('domains', []))
         logger.info(f"[AGENT {agent_id}] Domains root endpoint from {request.remote_addr}: {domain_count} domains")
         return jsonify({'status': 'ok'}), 200
+
+    @app.route('/asset-hardware', methods=['POST'])
     @require_auth
-    def domain_usage_root():
-        return domain_usage()
+    def asset_hardware_root():
+        return asset_hardware()
+
+    @app.route('/extended-inventory', methods=['POST'])
+    @require_auth
+    def extended_inventory_root():
+        return extended_inventory()
+
+    @app.route('/eol-data', methods=['POST'])
+    @require_auth
+    def eol_data_root():
+        return eol_data()
+

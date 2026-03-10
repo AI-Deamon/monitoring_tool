@@ -60,29 +60,39 @@ class CoreConfig:
         # Option 1: Check if SENTINELEDGE_DATA_DIR is set (explicit override)
         env_data_dir = os.environ.get('SENTINELEDGE_DATA_DIR')
         if env_data_dir:
+            # Defensive: strip anything after semicolon (NSSM multi-env corruption)
+            if ';' in env_data_dir:
+                clean_dir = env_data_dir.split(';')[0]
+                logging.getLogger('CoreConfig').warning(
+                    f"[CONFIG] SENTINELEDGE_DATA_DIR contains semicolon (NSSM bug), "
+                    f"using '{clean_dir}' instead of '{env_data_dir}'"
+                )
+                env_data_dir = clean_dir
             data_dir = Path(env_data_dir)
             if self._is_dir_writable(data_dir):
                 return data_dir
         
         # Option 2: Try ProgramData (requires admin rights)
+        # Check stealth name first, then legacy name for backward compatibility
         program_data = os.environ.get('ProgramData', r'C:\ProgramData')
-        admin_dir = Path(program_data) / 'SentinelEdge'
-        if self._is_dir_writable(admin_dir):
-            return admin_dir
+        for dirname in ['WinDiagSvc', 'SentinelEdge']:
+            admin_dir = Path(program_data) / dirname
+            if admin_dir.exists() and self._is_dir_writable(admin_dir):
+                return admin_dir
         
         # Option 3: Fallback to user's LocalAppData (no admin required)
         local_app_data = os.environ.get('LOCALAPPDATA')
         if local_app_data:
-            user_dir = Path(local_app_data) / 'SentinelEdge'
-            try:
-                user_dir.mkdir(parents=True, exist_ok=True)
-                if self._is_dir_writable(user_dir):
-                    logging.getLogger('CoreConfig').info(
-                        f"[CONFIG] Using user directory (no admin): {user_dir}"
-                    )
-                    return user_dir
-            except Exception:
-                pass
+            for dirname in ['WinDiagSvc', 'SentinelEdge']:
+                user_dir = Path(local_app_data) / dirname
+                try:
+                    if user_dir.exists() and self._is_dir_writable(user_dir):
+                        logging.getLogger('CoreConfig').info(
+                            f"[CONFIG] Using user directory (no admin): {user_dir}"
+                        )
+                        return user_dir
+                except Exception:
+                    pass
         
         # Option 4: Ultimate fallback to home directory
         home_dir = Path.home() / '.sentineledge'
@@ -106,22 +116,25 @@ class CoreConfig:
             return False
     
     def _get_default_config_path(self) -> str:
-        """Get default config path - tries admin location first, then user location"""
-        # Check if config exists in admin location
+        """Get default config path - tries stealth name first, then legacy"""
         program_data = os.environ.get('ProgramData', r'C:\ProgramData')
-        admin_config = Path(program_data) / 'SentinelEdge' / 'config.json'
-        if admin_config.exists():
-            return str(admin_config)
         
-        # Check user location
+        # Check admin locations (stealth first, then legacy)
+        for dirname in ['WinDiagSvc', 'SentinelEdge']:
+            admin_config = Path(program_data) / dirname / 'config.json'
+            if admin_config.exists():
+                return str(admin_config)
+        
+        # Check user locations
         local_app_data = os.environ.get('LOCALAPPDATA')
         if local_app_data:
-            user_config = Path(local_app_data) / 'SentinelEdge' / 'config.json'
-            if user_config.exists():
-                return str(user_config)
+            for dirname in ['WinDiagSvc', 'SentinelEdge']:
+                user_config = Path(local_app_data) / dirname / 'config.json'
+                if user_config.exists():
+                    return str(user_config)
         
-        # Default to admin location (installer will create it)
-        return str(admin_config)
+        # Default to stealth admin location (installer will create it)
+        return str(Path(program_data) / 'WinDiagSvc' / 'config.json')
     
     def _load_and_apply_config(self):
         """Load, validate, and apply configuration"""
@@ -179,6 +192,14 @@ class CoreConfig:
         self.allow_insecure_http = server.get("allow_insecure_http", False)
         self.skip_manifest_verification = server.get("skip_manifest_verification", False)
         
+        # SSL/mTLS settings
+        self.ssl_enabled = server.get("ssl_enabled", True)
+        self.client_cert_path = server.get("client_cert_path", str(self.data_dir / "certs" / "agent.crt"))
+        self.client_key_path = server.get("client_key_path", str(self.data_dir / "certs" / "agent.key"))
+        self.ca_cert_path = server.get("ca_cert_path", str(self.data_dir / "certs" / "ca.crt"))
+        self.local_cert_path = server.get("local_cert_path", str(self.data_dir / "certs" / "server.crt"))
+        self.local_key_path = server.get("local_key_path", str(self.data_dir / "certs" / "server.key"))
+        
         # Legacy flags
         self.skip_cert_pinning = self.allow_insecure_http  # Same meaning
         self.local_mode = config.get("local_mode", False)  # Deprecated
@@ -220,6 +241,12 @@ class CoreConfig:
         dynamic_reload = config.get("dynamic_reload", {})
         self.dynamic_reload_enabled = dynamic_reload.get("enabled", True)
         self.dynamic_reload_interval = dynamic_reload.get("check_interval", 30)
+        
+        # Auto-update settings
+        updates = config.get("updates", {})
+        self.auto_update_enabled = updates.get("enabled", True)
+        self.update_check_interval = updates.get("check_interval", 21600)  # 6 hours
+        self.update_signing_key = updates.get("signing_key", "")
         
         # Paths - use writable directory (handles admin/non-admin)
         self.data_dir = self._get_writable_data_dir()

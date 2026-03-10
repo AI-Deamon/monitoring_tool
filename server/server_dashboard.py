@@ -5,6 +5,7 @@ Handles both frontend page rendering (Jinja2) and data API endpoints (JSON).
 Now includes authentication - users must log in to access dashboard.
 """
 
+import json
 import logging
 from datetime import datetime, timedelta, date, timezone
 from flask import Blueprint, render_template, jsonify, request, redirect, url_for, g, session
@@ -146,6 +147,40 @@ def agents_list():
         return redirect(url_for('dashboard.agents_detail'))
     
     return render_template('dashboard/agents.html',
+                           current_user=g.current_user)
+
+
+@bp.route('/assets')
+@login_required
+def assets_list():
+    """Render assets list page - for admin users only."""
+    if session.get('role') != 'admin':
+        return redirect(url_for('dashboard.dashboard_home'))
+    
+    return render_template('dashboard/assets.html',
+                           current_user=g.current_user)
+
+
+@bp.route('/assets/<path:agent_id>')
+@login_required
+def single_asset_detail(agent_id):
+    """Render detailed asset view for a specific agent - for admin users only."""
+    if session.get('role') != 'admin':
+        return redirect(url_for('dashboard.dashboard_home'))
+    
+    return render_template('dashboard/asset_details.html',
+                           agent_id=agent_id,
+                           current_user=g.current_user)
+
+
+@bp.route('/updates')
+@login_required
+def updates_dashboard():
+    """Render dedicated updates dashboard - for admin users only."""
+    if session.get('role') != 'admin':
+        return redirect(url_for('dashboard.dashboard_home'))
+    
+    return render_template('dashboard/updates.html',
                            current_user=g.current_user)
 
 @bp.route('/agents/detail')
@@ -305,73 +340,109 @@ def api_overview():
             target_date = datetime.utcnow().date()
         
         # 1. Agent Counts (Current State - ALWAYS Real-time)
-        total_agents = server_models.Agent.query.count()
+        agent_query = server_models.Agent.query
+        
+        # Multi-tenant: filter by org_id for non-admin users
+        if g.current_user.role != 'admin':
+            agent_query = agent_query.filter(server_models.Agent.org_id == g.current_user.org_id)
+            
+        total_agents = agent_query.count()
         
         # Active agents (last seen < 5 min)
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
-        active_agents = server_models.Agent.query.filter(
+        active_agents = agent_query.filter(
             server_models.Agent.last_seen >= five_min_ago
         ).count()
         
         # 2. Fleet Scope Metrics
         # Total Applications: Unique apps installed across entire fleet (Inventory)
-        total_applications = db.session.query(
+        app_inventory_query = db.session.query(
             func.count(func.distinct(server_models.AppInventory.name))
-        ).scalar() or 0
-
+        )
+        
         # Total Domains: Unique domains visited across fleet on selected date
-        total_domains = db.session.query(
+        domain_usage_query = db.session.query(
             func.count(func.distinct(server_models.DomainUsage.domain))
         ).filter(
             server_models.DomainUsage.date == target_date
-        ).scalar() or 0
+        )
+
+        if g.current_user.role != 'admin':
+            # Join with Agent to filter by org_id
+            app_inventory_query = app_inventory_query.join(
+                server_models.Agent, server_models.AppInventory.agent_id == server_models.Agent.agent_id
+            ).filter(server_models.Agent.org_id == g.current_user.org_id)
+            
+            domain_usage_query = domain_usage_query.join(
+                server_models.Agent, server_models.DomainUsage.agent_id == server_models.Agent.agent_id
+            ).filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        total_applications = app_inventory_query.scalar() or 0
+        total_domains = domain_usage_query.scalar() or 0
         
         # 3. Total Screen Time (Selected Date) - From screen_time table (AGENT'S DAILY TOTALS)
-        # The agent tracks daily totals and sends them via /screentime endpoint
-        # This is the SOURCE OF TRUTH for screen time (active/idle/locked/away)
-        screen_time_totals = db.session.query(
+        screen_time_query = db.session.query(
             func.sum(server_models.ScreenTime.active_seconds),
             func.sum(server_models.ScreenTime.idle_seconds),
             func.sum(server_models.ScreenTime.locked_seconds),
             func.sum(server_models.ScreenTime.away_seconds)
         ).filter(
             server_models.ScreenTime.date == target_date
-        ).first()
+        )
+
+        if g.current_user.role != 'admin':
+            screen_time_query = screen_time_query.join(
+                server_models.Agent, server_models.ScreenTime.agent_id == server_models.Agent.agent_id
+            ).filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        screen_time_totals = screen_time_query.first()
         
         total_active = int(screen_time_totals[0] or 0) if screen_time_totals else 0
         total_idle = int(screen_time_totals[1] or 0) if screen_time_totals else 0
         total_locked = int(screen_time_totals[2] or 0) if screen_time_totals else 0
         total_away = int(screen_time_totals[3] or 0) if screen_time_totals else 0
 
-        
-
         # 4. Top App (Selected Date - Fleet Wide)
         # Sum duration per app across all agents
-        top_app = db.session.query(
+        top_app_query = db.session.query(
             server_models.AppUsage.app,
             func.sum(server_models.AppUsage.duration_seconds).label('total')
         ).filter(
             server_models.AppUsage.date == target_date
-        ).group_by(
+        )
+
+        if g.current_user.role != 'admin':
+            top_app_query = top_app_query.join(
+                server_models.Agent, server_models.AppUsage.agent_id == server_models.Agent.agent_id
+            ).filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        top_app = top_app_query.group_by(
             server_models.AppUsage.app
         ).order_by(
             desc('total')
         ).first()
         
         # 5. Top Domain (Selected Date - Fleet Wide)
-        top_domain = db.session.query(
+        top_domain_query = db.session.query(
             server_models.DomainUsage.domain,
             func.sum(server_models.DomainUsage.duration_seconds).label('total')
         ).filter(
             server_models.DomainUsage.date == target_date
-        ).group_by(
+        )
+
+        if g.current_user.role != 'admin':
+            top_domain_query = top_domain_query.join(
+                server_models.Agent, server_models.DomainUsage.agent_id == server_models.Agent.agent_id
+            ).filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        top_domain = top_domain_query.group_by(
             server_models.DomainUsage.domain
         ).order_by(
             desc('total')
         ).first()
         
         # 6. Top 5 Agents by Idle Time (Selected Date)
-        top_idle_agents = db.session.query(
+        top_idle_query = db.session.query(
             server_models.Agent.hostname,
             server_models.ScreenTime.idle_seconds
         ).join(
@@ -380,12 +451,10 @@ def api_overview():
         ).filter(
             server_models.ScreenTime.date == target_date,
             server_models.ScreenTime.idle_seconds > 0
-        ).order_by(
-            desc(server_models.ScreenTime.idle_seconds)
-        ).limit(5).all()
-        
+        )
+
         # 7. Top 5 Agents by Active Time (Selected Date)
-        top_active_agents = db.session.query(
+        top_active_query = db.session.query(
             server_models.Agent.hostname,
             server_models.ScreenTime.active_seconds
         ).join(
@@ -394,12 +463,10 @@ def api_overview():
         ).filter(
             server_models.ScreenTime.date == target_date,
             server_models.ScreenTime.active_seconds > 0
-        ).order_by(
-            desc(server_models.ScreenTime.active_seconds)
-        ).limit(5).all()
-        
+        )
+
         # 8. Top 5 Agents by Locked Time (Selected Date)
-        top_locked_agents = db.session.query(
+        top_locked_query = db.session.query(
             server_models.Agent.hostname,
             server_models.ScreenTime.locked_seconds
         ).join(
@@ -408,9 +475,16 @@ def api_overview():
         ).filter(
             server_models.ScreenTime.date == target_date,
             server_models.ScreenTime.locked_seconds > 0
-        ).order_by(
-            desc(server_models.ScreenTime.locked_seconds)
-        ).limit(5).all()
+        )
+
+        if g.current_user.role != 'admin':
+            top_idle_query = top_idle_query.filter(server_models.Agent.org_id == g.current_user.org_id)
+            top_active_query = top_active_query.filter(server_models.Agent.org_id == g.current_user.org_id)
+            top_locked_query = top_locked_query.filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        top_idle_agents = top_idle_query.order_by(desc(server_models.ScreenTime.idle_seconds)).limit(5).all()
+        top_active_agents = top_active_query.order_by(desc(server_models.ScreenTime.active_seconds)).limit(5).all()
+        top_locked_agents = top_locked_query.order_by(desc(server_models.ScreenTime.locked_seconds)).limit(5).all()
         
         return jsonify({
             'total_agents': total_agents,
@@ -450,6 +524,331 @@ def api_overview():
     except Exception as e:
         logger.error(f"Overview API error: {e}")
         return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/assets', methods=['GET'])
+@login_required
+def get_assets_data():
+    """Get all hardware assets data for the assets dashboard."""
+    if session.get('role') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+        
+    try:
+        # Subquery to get max risk score and count of EOL products per agent
+        risk_summary = db.session.query(
+            server_models.AssetLifecycleStatus.agent_id,
+            func.max(server_models.AssetLifecycleStatus.risk_score).label('max_risk'),
+            func.count(case((server_models.AssetLifecycleStatus.status == 'eol', 1))).label('eol_count')
+        ).group_by(server_models.AssetLifecycleStatus.agent_id).subquery()
+
+        # Get query with organization filtering
+        query = db.session.query(
+            server_models.Agent,
+            server_models.AssetInfo,
+            server_models.AgentCurrentStatus.username,
+            risk_summary.c.max_risk,
+            risk_summary.c.eol_count
+        ).join(
+            server_models.AssetInfo, 
+            server_models.Agent.agent_id == server_models.AssetInfo.agent_id
+        ).outerjoin(
+            server_models.AgentCurrentStatus,
+            server_models.Agent.agent_id == server_models.AgentCurrentStatus.agent_id
+        ).outerjoin(
+            risk_summary,
+            server_models.Agent.agent_id == risk_summary.c.agent_id
+        )
+        
+        # Apply organization filter
+        if g.current_user.role != 'admin' or g.current_user.org_id:
+            query = query.filter(server_models.Agent.org_id == g.current_user.org_id)
+            
+        results = query.all()
+        
+        assets = []
+        for agent, info, username, max_risk, eol_count in results:
+            # Determine overall risk category
+            risk_category = 'healthy'
+            if max_risk and max_risk >= 35:
+                risk_category = 'eol'
+            elif max_risk and max_risk > 0:
+                risk_category = 'outdated'
+
+            asset_dict = {
+                'hostname': agent.hostname,
+                'agent_id': str(agent.agent_id),
+                'lifecycle_risk': risk_category,
+                'max_risk_score': max_risk or 0,
+                'eol_count': eol_count or 0,
+                'username': username or 'Unknown',
+                'manufacturer': info.manufacturer,
+                'model': info.model,
+                'serial_number': info.serial_number,
+                'cpu_name': info.cpu_name,
+                'ram_total_gb': info.ram_total_gb,
+                'os_name': info.os_name,
+                'os_version': info.os_version,
+                'os_build': info.os_build,
+                'primary_ip': info.primary_ip,
+                'primary_mac': info.primary_mac,
+                'domain': info.domain,
+                'bitlocker_status': info.bitlocker_status,
+                'firewall_enabled': info.firewall_enabled,
+                'antivirus_installed': json.loads(info.antivirus_json or '[]'),
+                'last_collected': info.collected_at.isoformat() if info.collected_at else None
+            }
+            assets.append(asset_dict)
+            
+        return jsonify({'data': assets})
+    except Exception as e:
+        logger.error(f"[DASHBOARD] Error fetching assets: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/assets/<path:agent_id>', methods=['GET'])
+@login_required
+def get_single_asset_data(agent_id):
+    """Get exhaustive hardware, network, and security data for a specific asset."""
+    if session.get('role') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    try:
+        # Join Agent and AssetInfo to get all details
+        query = db.session.query(
+            server_models.Agent,
+            server_models.AssetInfo,
+            server_models.AgentCurrentStatus.username,
+            server_models.AgentCurrentStatus.is_online
+        ).join(
+            server_models.AssetInfo, 
+            server_models.Agent.agent_id == server_models.AssetInfo.agent_id
+        ).outerjoin(
+            server_models.AgentCurrentStatus,
+            server_models.Agent.agent_id == server_models.AgentCurrentStatus.agent_id
+        ).filter(server_models.Agent.agent_id == agent_id)
+        
+        # Apply organization filter
+        if g.current_user.role != 'admin' or g.current_user.org_id:
+            query = query.filter(server_models.Agent.org_id == g.current_user.org_id)
+            
+        result = query.first()
+        
+        if not result:
+            return jsonify({'error': 'Asset not found'}), 404
+            
+        agent, info, username, is_online = result
+        
+        # Comprehensive data structure
+        data = {
+            'identity': {
+                'hostname': agent.hostname,
+                'serial_number': info.serial_number,
+                'manufacturer': info.manufacturer,
+                'model': info.model,
+                'os_name': info.os_name,
+                'os_version': info.os_version,
+                'os_build': info.os_build,
+                'os_architecture': info.os_architecture,
+                'domain': info.domain,
+                'workgroup': info.workgroup,
+                'bios_uuid': info.bios_uuid,
+                'system_uuid': info.system_uuid,
+                'asset_tag': info.asset_tag,
+                'agent_version': agent.version,
+                'last_seen': agent.last_seen.isoformat() if agent.last_seen else None,
+                'is_online': is_online,
+                'username': username or 'Unknown'
+            },
+            'hardware': {
+                'cpu_name': info.cpu_name,
+                'cpu_cores': info.cpu_cores,
+                'cpu_threads': info.cpu_threads,
+                'cpu_speed_mhz': info.cpu_speed_mhz,
+                'ram_total_gb': info.ram_total_gb,
+                'ram_slots_used': info.ram_slots_used,
+                'ram_slots_total': info.ram_slots_total,
+                'gpu_name': info.gpu_name,
+                'gpu_memory_gb': info.gpu_memory_gb,
+                'motherboard': info.motherboard,
+                'disks': json.loads(info.disks_json or '[]')
+            },
+            'network': {
+                'primary_mac': info.primary_mac,
+                'primary_ip': info.primary_ip,
+                'all_macs': json.loads(info.all_macs_json or '[]'),
+                'all_ips': json.loads(info.all_ips_json or '[]'),
+                'dns_servers': json.loads(info.dns_servers_json or '[]'),
+                'domain_joined': info.domain_joined,
+                'domain_name': info.domain_name
+            },
+            'security': {
+                'antivirus': json.loads(info.antivirus_json or '[]'),
+                'firewall_enabled': info.firewall_enabled,
+                'bitlocker_status': info.bitlocker_status,
+                'last_boot_time': info.last_boot_time,
+                'windows_update_enabled': info.windows_update_enabled
+            },
+            'meta': {
+                'collected_at': info.collected_at.isoformat() if info.collected_at else None,
+                'agent_version': info.agent_version
+            }
+        }
+        
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"[DASHBOARD] Error fetching asset detail for {agent_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ============================================================================
+# LIFECYCLE / EOL SCANNING API ENDPOINTS
+# ============================================================================
+
+@bp.route('/api/lifecycle/fleet-summary', methods=['GET'])
+@login_required
+def api_lifecycle_fleet_summary():
+    """Get fleet-wide EOL risk aggregation for dashboard cards."""
+    # Allow non-admins to see their own org summary
+    org_id = g.current_user.org_id if g.current_user.role != 'admin' else None
+    
+    try:
+        from eol_engine import get_fleet_lifecycle_summary
+        summary = get_fleet_lifecycle_summary(org_id=org_id)
+        return jsonify(summary)
+    except Exception as e:
+        logger.error(f"[LIFECYCLE] Fleet summary error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/lifecycle/agent/<path:agent_id>', methods=['GET'])
+@login_required
+def api_lifecycle_agent(agent_id):
+    """Get lifecycle evaluation results for a specific agent."""
+    # Check if agent belongs to current user's org
+    agent = server_models.Agent.query.get(agent_id)
+    if not agent:
+        return jsonify({'error': 'Agent not found'}), 404
+        
+    if g.current_user.role != 'admin' and agent.org_id != g.current_user.org_id:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    try:
+        statuses = server_models.AssetLifecycleStatus.query.filter_by(
+            agent_id=agent_id
+        ).order_by(
+            server_models.AssetLifecycleStatus.risk_score.desc()
+        ).all()
+        
+        data = [{
+            'product_name': s.product_name,
+            'installed_version': s.installed_version,
+            'matched_cycle': s.matched_cycle,
+            'status': s.status,
+            'eol_date': s.eol_date.isoformat() if s.eol_date else None,
+            'risk_score': s.risk_score,
+            'severity': s.severity,
+            'evaluated_at': s.evaluated_at.isoformat() if s.evaluated_at else None
+        } for s in statuses]
+        
+        total_risk = sum(s.risk_score for s in statuses)
+        
+        return jsonify({
+            'agent_id': agent_id,
+            'lifecycle_statuses': data,
+            'total_risk_score': total_risk,
+            'evaluated_count': len(data)
+        })
+    except Exception as e:
+        logger.error(f"[LIFECYCLE] Agent lifecycle error for {agent_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/lifecycle/sync', methods=['POST'])
+@login_required
+def api_lifecycle_sync():
+    """Trigger manual EOL data sync from endoflife.date (admin only)."""
+    if session.get('role') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    try:
+        from eol_engine import sync_lifecycle_data
+        results = sync_lifecycle_data()
+        return jsonify({'status': 'ok', 'synced': results})
+    except Exception as e:
+        logger.error(f"[LIFECYCLE] Sync error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/lifecycle/evaluate', methods=['POST'])
+@login_required
+def api_lifecycle_evaluate():
+    """Trigger manual fleet lifecycle evaluation."""
+    # Admins evaluate all, Managers evaluate their own org
+    org_id = g.current_user.org_id if g.current_user.role != 'admin' else None
+    
+    try:
+        from eol_engine import evaluate_fleet_lifecycle
+        summary = evaluate_fleet_lifecycle(org_id=org_id)
+        return jsonify({'status': 'ok', 'summary': summary})
+    except Exception as e:
+        logger.error(f"[LIFECYCLE] Evaluate error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/lifecycle/fleet-export', methods=['GET'])
+@bp.route('/api/lifecycle/report', methods=['GET'])
+@login_required
+def api_lifecycle_fleet_export():
+    """
+    ⚡ Bolt: Bulk fleet lifecycle export — single query replaces N sequential
+    per-agent requests. Used by reports page CSV export.
+    
+    Before: Frontend made 1 HTTP request per agent (N+1 pattern).
+    After:  Single SQL query with Agent join for hostname.
+    Impact: For 50 agents, reduces from ~50 sequential requests to 1.
+    """
+    status_filter = request.args.get('status', 'all')
+    
+    try:
+        # Single query: join AssetLifecycleStatus with Agent for hostname
+        query = db.session.query(
+            server_models.AssetLifecycleStatus,
+            server_models.Agent.hostname,
+            server_models.Agent.agent_id
+        ).join(
+            server_models.Agent,
+            server_models.AssetLifecycleStatus.agent_id == server_models.Agent.agent_id
+        )
+        
+        # Multi-tenant: filter by org_id for non-admin users
+        if g.current_user.role != 'admin':
+            query = query.filter(server_models.Agent.org_id == g.current_user.org_id)
+        
+        # Optional status filter
+        if status_filter != 'all':
+            query = query.filter(server_models.AssetLifecycleStatus.status == status_filter)
+        
+        results = query.order_by(
+            server_models.AssetLifecycleStatus.risk_score.desc()
+        ).all()
+        
+        data = [{
+            'hostname': hostname,
+            'agent_id': str(agent_id),
+            'product_name': s.product_name,
+            'installed_version': s.installed_version,
+            'matched_cycle': s.matched_cycle,
+            'status': s.status,
+            'eol_date': s.eol_date.isoformat() if s.eol_date else None,
+            'risk_score': s.risk_score,
+            'severity': s.severity,
+            'evaluated_at': s.evaluated_at.isoformat() if s.evaluated_at else None
+        } for s, hostname, agent_id in results]
+        
+        return jsonify({
+            'lifecycle_statuses': data,
+            'total': len(data)
+        })
+    except Exception as e:
+        logger.error(f"[LIFECYCLE] Fleet export error: {e}")
+        return jsonify({'lifecycle_statuses': [], 'total': 0})
+
 
 @bp.route('/api/agents', methods=['GET'])
 @login_required
@@ -541,7 +940,13 @@ def api_agents():
         
         # ================================================================
         # PERFORMANCE: Pre-fetch all data to avoid N+1 queries
+        # ⚡ Bolt optimization: Filter all subqueries by allowed agent_ids
+        #    to prevent global table scans when user can only see a subset.
+        #    Impact: Reduces DB I/O proportionally to (user's agents / total agents).
         # ================================================================
+        
+        # Extract the set of agent IDs we actually need data for
+        agent_ids = [a.agent_id for a in agents]
         
         # Date range for session queries
         start_dt = datetime.combine(target_date, datetime.min.time())
@@ -549,9 +954,11 @@ def api_agents():
         
         # 1. SCREEN TIME: From screen_time table (AGENT'S DAILY TOTALS - SOURCE OF TRUTH)
         # Agent tracks and sends daily totals via /screentime endpoint
-        screen_time_records = server_models.ScreenTime.query.filter_by(
-            date=target_date
-        ).all()
+        # ⚡ Filtered: only fetch rows for agents the user can see
+        screen_time_records = server_models.ScreenTime.query.filter(
+            server_models.ScreenTime.date == target_date,
+            server_models.ScreenTime.agent_id.in_(agent_ids)
+        ).all() if agent_ids else []
         
         screen_time_map = {
             st.agent_id: {
@@ -562,11 +969,15 @@ def api_agents():
         }
         
         # 2. App Usage - Get top app per agent (subquery)
+        # ⚡ Filtered: only fetch rows for agents the user can see
         app_totals = db.session.query(
             server_models.AppUsage.agent_id,
             server_models.AppUsage.app,
             server_models.AppUsage.duration_seconds
-        ).filter_by(date=target_date).all()
+        ).filter(
+            server_models.AppUsage.date == target_date,
+            server_models.AppUsage.agent_id.in_(agent_ids)
+        ).all() if agent_ids else []
         
         # Build top app map per agent
         app_map = {}  # agent_id -> {top_app, total_apps, total_duration}
@@ -585,24 +996,34 @@ def api_agents():
             app_map[agent_id]['top_app_duration'] = apps[0][1] if apps else 0
         
         # 3. Domain Usage totals
+        # ⚡ Filtered: only fetch rows for agents the user can see
         domain_totals = db.session.query(
             server_models.DomainUsage.agent_id,
             func.count(server_models.DomainUsage.domain).label('domain_count'),
             func.sum(server_models.DomainUsage.duration_seconds).label('total_duration')
-        ).filter_by(date=target_date).group_by(
+        ).filter(
+            server_models.DomainUsage.date == target_date,
+            server_models.DomainUsage.agent_id.in_(agent_ids)
+        ).group_by(
             server_models.DomainUsage.agent_id
-        ).all()
+        ).all() if agent_ids else []
         domain_map = {d.agent_id: {'count': d.domain_count, 'duration': d.total_duration or 0} for d in domain_totals}
         
         # 4. App Inventory counts
+        # ⚡ Filtered: only fetch rows for agents the user can see
         inv_counts = db.session.query(
             server_models.AppInventory.agent_id,
             func.count(server_models.AppInventory.id).label('app_count')
-        ).group_by(server_models.AppInventory.agent_id).all()
+        ).filter(
+            server_models.AppInventory.agent_id.in_(agent_ids)
+        ).group_by(server_models.AppInventory.agent_id).all() if agent_ids else []
         inv_map = {i.agent_id: i.app_count for i in inv_counts}
         
         # 5. Live Status (from AgentCurrentStatus)
-        live_records = server_models.AgentCurrentStatus.query.all()
+        # ⚡ Filtered: only fetch rows for agents the user can see
+        live_records = server_models.AgentCurrentStatus.query.filter(
+            server_models.AgentCurrentStatus.agent_id.in_(agent_ids)
+        ).all() if agent_ids else []
         live_map = {l.agent_id: l for l in live_records}
 
 
@@ -658,7 +1079,8 @@ def api_agents():
                 'username': username,
                 'status': 'online' if is_online else 'offline',
                 'is_online': is_online,
-                'first_seen': agent.created_at.isoformat() if agent.created_at else None,
+                'first_seen': utc_to_ist(agent.first_activity_at) if agent.first_activity_at else None,
+                'has_activity': bool(agent.first_activity_at),
                 'last_seen': utc_to_ist(agent.last_seen),#if agent.last_seen else None
                 
                 # NEW: Telemetry tracking for silent failure detection
@@ -670,6 +1092,11 @@ def api_agents():
                     not agent.last_telemetry_time or 
                     (datetime.utcnow() - agent.last_telemetry_time).total_seconds() > 600
                 ),
+                
+                # Agent Version & Update Control
+                'version': agent.version,
+                'target_version': agent.target_version,
+                'update_status': agent.update_status or 'up_to_date',
                 
                 # Screen Time
                 'active_seconds': active_seconds,
@@ -982,6 +1409,286 @@ def api_agent_inventory(agent_id):
         logger.error(f"Agent Inventory API error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@bp.route('/api/inventory/fleet-export', methods=['GET'])
+@login_required
+def api_inventory_fleet_export():
+    """
+    ⚡ Bolt: Bulk fleet inventory export.
+    Joins AppInventory with Agent to get hostname and enforces multi-tenancy.
+    Replaces N sequential HTTP requests with 1 optimized query.
+    """
+    try:
+        query = db.session.query(
+            server_models.AppInventory,
+            server_models.Agent.hostname
+        ).join(
+            server_models.Agent,
+            server_models.AppInventory.agent_id == server_models.Agent.agent_id
+        )
+        
+        # Multi-tenant scoping
+        if g.current_user.role != 'admin':
+            query = query.filter(server_models.Agent.org_id == g.current_user.org_id)
+            
+        results = query.all()
+        
+        data = [{
+            'agent_id': str(inv.agent_id),
+            'agent_hostname': hostname,
+            'name': inv.name,
+            'version': inv.version,
+            'publisher': inv.publisher,
+            'source': inv.source,
+            'install_date': inv.install_date.isoformat() if inv.install_date else None
+        } for inv, hostname in results]
+        
+        return jsonify({'data': data}), 200
+    except Exception as e:
+        logger.error(f"Fleet Inventory Export API error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/agent/<path:agent_id>/hardware', methods=['GET'])
+@api_rate_limit
+def api_agent_hardware(agent_id):
+    """Get hardware/asset info for an agent."""
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        
+        if not agent:
+            # Try numeric ID fallback
+            try:
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+            except ValueError:
+                pass
+        
+        if not agent:
+            return jsonify({'data': None}), 200
+        
+        asset = server_models.AssetInfo.query.filter_by(agent_id=agent.agent_id).first()
+        
+        if not asset:
+            return jsonify({'data': None}), 200
+        
+        return jsonify({'data': asset.to_dict()}), 200
+    except Exception as e:
+        logger.error(f"Agent Hardware API error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/agent/<path:agent_id>/extended-inventory', methods=['GET'])
+@api_rate_limit
+def api_agent_extended_inventory(agent_id):
+    """Get extended inventory (CLI tools, drivers, extensions, plugins) for an agent."""
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        
+        if not agent:
+            # Try numeric ID fallback
+            try:
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+            except ValueError:
+                pass
+        
+        if not agent:
+            return jsonify({'error': 'Agent not found'}), 404
+        
+        result = {
+            'cli_tools': [],
+            'drivers': [],
+            'vscode_extensions': [],
+            'browser_extensions': [],
+            'plugins': [],
+            'portable_apps': []
+        }
+        
+        # CLI Tools
+        cli_tools = server_models.CLITool.query.filter_by(agent_id=agent.agent_id).all()
+        for tool in cli_tools:
+            result['cli_tools'].append({
+                'name': tool.name,
+                'version': tool.version,
+                'executable_path': tool.executable_path,
+                'source': tool.source,
+                'publisher': tool.publisher,
+                'first_detected': tool.first_detected.isoformat() if tool.first_detected else None
+            })
+        
+        # Hardware Drivers
+        drivers = server_models.HardwareDriver.query.filter_by(agent_id=agent.agent_id).all()
+        for driver in drivers:
+            result['drivers'].append({
+                'device_name': driver.device_name,
+                'driver_name': driver.driver_name,
+                'driver_version': driver.driver_version,
+                'driver_date': driver.driver_date.isoformat() if driver.driver_date else None,
+                'manufacturer': driver.manufacturer,
+                'device_class': driver.device_class,
+                'device_id': driver.device_id,
+                'is_signed': driver.is_signed
+            })
+        
+        # VS Code Extensions
+        vscode_exts = server_models.VSCodeExtension.query.filter_by(agent_id=agent.agent_id).all()
+        for ext in vscode_exts:
+            result['vscode_extensions'].append({
+                'extension_id': ext.extension_id,
+                'display_name': ext.display_name,
+                'version': ext.version,
+                'publisher': ext.publisher,
+                'install_path': ext.install_path
+            })
+        
+        # Browser Extensions
+        browser_exts = server_models.BrowserExtension.query.filter_by(agent_id=agent.agent_id).all()
+        for ext in browser_exts:
+            result['browser_extensions'].append({
+                'browser': ext.browser,
+                'extension_id': ext.extension_id,
+                'name': ext.name,
+                'version': ext.version,
+                'description': ext.description,
+                'enabled': ext.enabled
+            })
+        
+        # Application Plugins
+        plugins = server_models.ApplicationPlugin.query.filter_by(agent_id=agent.agent_id).all()
+        for plugin in plugins:
+            result['plugins'].append({
+                'plugin_type': plugin.plugin_type,
+                'name': plugin.name,
+                'version': plugin.version,
+                'publisher': plugin.publisher,
+                'host_application': plugin.host_application,
+                'enabled': plugin.enabled
+            })
+        
+        # Portable Applications
+        portable_apps = server_models.PortableApplication.query.filter_by(agent_id=agent.agent_id).all()
+        for app in portable_apps:
+            result['portable_apps'].append({
+                'name': app.name,
+                'version': app.version,
+                'executable_path': app.executable_path,
+                'install_directory': app.install_directory,
+                'publisher': app.publisher,
+                'file_size_bytes': app.file_size_bytes
+            })
+        
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Agent Extended Inventory API error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/agent/<path:agent_id>/security-indicators', methods=['GET'])
+@api_rate_limit
+def api_agent_security_indicators(agent_id):
+    """Get security indicators for an agent."""
+    try:
+        # Get query parameters
+        show_resolved = request.args.get('resolved', 'false').lower() == 'true'
+        min_severity = request.args.get('severity')
+        
+        query = server_models.SecurityIndicator.query.filter_by(agent_id=agent_id)
+        
+        if not show_resolved:
+            query = query.filter_by(resolved=False)
+            
+        if min_severity:
+            # Simple severity ranking for filtering
+            severity_map = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+            min_rank = severity_map.get(min_severity.lower(), 0)
+            
+            # This is a bit complex for SQLAlchemy filter if we want >=, 
+            # so we'll just filter manually or use a CASE statement if needed.
+            # Simplified for now: just filter for specific severity if provided
+            query = query.filter(server_models.SecurityIndicator.severity.ilike(min_severity))
+
+        indicators = query.order_by(server_models.SecurityIndicator.last_seen.desc()).all()
+        
+        result = []
+        for ind in indicators:
+            result.append({
+                'id': ind.id,
+                'indicator_type': ind.indicator_type,
+                'severity': ind.severity,
+                'title': ind.title,
+                'risk_score': ind.risk_score,
+                'details': json.loads(ind.details_json) if ind.details_json else {},
+                'first_detected': ind.first_detected.isoformat() if ind.first_detected else None,
+                'last_seen': ind.last_seen.isoformat() if ind.last_seen else None,
+                'resolved': ind.resolved
+            })
+            
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Agent Security Indicators API error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/agent/<path:agent_id>/system-visibility', methods=['GET'])
+@api_rate_limit
+def api_agent_system_visibility(agent_id):
+    """Get latest raw system visibility snapshot for an agent."""
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+
+        if not agent:
+            try:
+                numeric_id = int(agent_id)
+                agent = server_models.Agent.query.filter_by(id=numeric_id).first()
+            except ValueError:
+                pass
+
+        if not agent:
+            return jsonify({'error': 'Agent not found'}), 404
+
+        latest = server_models.RawEvent.query.filter_by(
+            agent_id=agent.agent_id,
+            event_type='system_visibility'
+        ).order_by(server_models.RawEvent.received_at.desc()).first()
+
+        if not latest:
+            return jsonify({
+                'timestamp': None,
+                'open_ports': [],
+                'network_connections': [],
+                'startup_programs': [],
+                'scheduled_tasks': [],
+                'disk_usage': [],
+                'counts': {
+                    'open_ports': 0,
+                    'network_connections': 0,
+                    'startup_programs': 0,
+                    'scheduled_tasks': 0,
+                    'disk_usage': 0
+                }
+            }), 200
+
+        payload = json.loads(latest.payload) if latest.payload else {}
+        response = {
+            'timestamp': payload.get('timestamp') or (latest.received_at.isoformat() if latest.received_at else None),
+            'open_ports': payload.get('open_ports', []),
+            'network_connections': payload.get('network_connections', []),
+            'startup_programs': payload.get('startup_programs', []),
+            'scheduled_tasks': payload.get('scheduled_tasks', []),
+            'disk_usage': payload.get('disk_usage', []),
+            'counts': payload.get('counts', {
+                'open_ports': len(payload.get('open_ports', [])),
+                'network_connections': len(payload.get('network_connections', [])),
+                'startup_programs': len(payload.get('startup_programs', [])),
+                'scheduled_tasks': len(payload.get('scheduled_tasks', [])),
+                'disk_usage': len(payload.get('disk_usage', [])),
+            })
+        }
+        return jsonify(response), 200
+
+    except Exception as e:
+        logger.error(f"Agent System Visibility API error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @bp.route('/api/agent/<path:agent_id>/full-report', methods=['GET'])
 @api_rate_limit
@@ -1094,6 +1801,9 @@ def api_agent_full_report(agent_id):
             last_ts = last_session_today.end_time or last_session_today.start_time
             total_tracked_seconds = max(0, int((last_ts - first_ts).total_seconds()))
                 
+        # Canonical first_seen: first real telemetry activity (nullable if no telemetry yet).
+        first_seen = agent.first_activity_at
+        
         agent_info = {
             'agent_id': str(agent.agent_id),
             'hostname': agent.hostname or 'Unknown',
@@ -1103,7 +1813,8 @@ def api_agent_full_report(agent_id):
             'status': 'online' if is_online else 'offline',
             'is_online': is_online,
             'registered_at': utc_to_ist(agent.created_at),
-            'first_seen': utc_to_ist(agent.created_at),
+            'first_seen': utc_to_ist(first_seen) if first_seen else None,
+            'has_activity': bool(first_seen),
             'first_seen_today': first_seen_today,
             'last_seen_today': last_seen_today,
             'total_tracked_seconds': total_tracked_seconds,
@@ -1270,7 +1981,7 @@ def api_agent_full_report(agent_id):
             server_models.DomainVisit.agent_id == resolved_agent_id,
             server_models.DomainVisit.visited_at >= start_dt,
             server_models.DomainVisit.visited_at <= end_dt
-        ).order_by(desc(server_models.DomainVisit.visited_at)).limit(200).all()
+        ).order_by(desc(server_models.DomainVisit.visited_at)).all()
         
         # Filter out internal domains
         filtered_visits = [v for v in domain_visits if not server_models.is_internal_domain(v.domain)]
@@ -1279,7 +1990,7 @@ def api_agent_full_report(agent_id):
             'url': v.url,
             'browser': v.browser,
             'visited_at': utc_to_ist(v.visited_at)
-        } for v in filtered_visits[:100]]
+        } for v in filtered_visits]
         
         # ================================================================
         # 8. APP INVENTORY - FILTERED & CONSOLIDATED
@@ -2351,4 +3062,237 @@ def api_table_sizes():
         return jsonify(tables)
     except Exception as e:
         logger.error(f"Table sizes error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# UPDATE CONTROL API ENDPOINTS (Admin Only)
+# ============================================================================
+
+@bp.route('/api/updates/set-target', methods=['POST'])
+@login_required
+@admin_required
+def api_set_target_version():
+    """
+    Set target version for one or all agents.
+    
+    Body:
+        {"target_version": "2.3.0"}                    — all agents
+        {"target_version": "2.3.0", "agent_id": "..."}  — single agent
+    """
+    try:
+        data = request.get_json()
+        if not data or 'target_version' not in data:
+            return jsonify({'error': 'target_version required'}), 400
+        
+        target = data['target_version'].strip()
+        agent_id = data.get('agent_id')
+        
+        if agent_id:
+            # Single agent
+            agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+            if not agent:
+                return jsonify({'error': 'Agent not found'}), 404
+            
+            agent.target_version = target
+            agent.update_status = 'pending' if agent.version != target else 'up_to_date'
+            agent.update_attempts = 0
+            agent.last_update_error = None
+            db.session.commit()
+            
+            logger.info(f"[UPDATES] Target set to {target} for agent {agent_id}")
+            return jsonify({'updated': 1, 'target_version': target})
+        else:
+            # All agents
+            agents = server_models.Agent.query.all()
+            updated = 0
+            for agent in agents:
+                agent.target_version = target
+                agent.update_status = 'pending' if agent.version != target else 'up_to_date'
+                agent.update_attempts = 0
+                agent.last_update_error = None
+                updated += 1
+            
+            db.session.commit()
+            
+            logger.info(f"[UPDATES] Target set to {target} for {updated} agents (bulk)")
+            return jsonify({'updated': updated, 'target_version': target})
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Set target version error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/updates/summary', methods=['GET'])
+@login_required
+@admin_required
+def api_updates_summary():
+    """
+    Get update status summary for dashboard - enhanced with policy, versions, stale info.
+    """
+    try:
+        agents = server_models.Agent.query.all()
+        
+        version_dist = {}
+        status_breakdown = {}
+        pending_count = 0
+        failed_count = 0
+        agents_detail = []
+        
+        stale_cutoff = datetime.utcnow() - timedelta(minutes=30)
+        
+        for agent in agents:
+            v = agent.version or 'Unknown'
+            version_dist[v] = version_dist.get(v, 0) + 1
+            
+            s = agent.update_status or 'up_to_date'
+            status_breakdown[s] = status_breakdown.get(s, 0) + 1
+            
+            if s == 'pending':
+                pending_count += 1
+            elif s in ('failed', 'rolled_back'):
+                failed_count += 1
+            
+            is_stale_update = (
+                s in ('pending', 'downloading', 'installing')
+                and agent.last_update_check
+                and agent.last_update_check < stale_cutoff
+            )
+            
+            agents_detail.append({
+                'agent_id': str(agent.agent_id),
+                'hostname': agent.hostname or 'Unknown',
+                'version': agent.version,
+                'target_version': agent.target_version,
+                'update_status': s,
+                'update_attempts': agent.update_attempts or 0,
+                'last_update_error': agent.last_update_error,
+                'last_update_check': agent.last_update_check.isoformat() if agent.last_update_check else None,
+                'is_stale_update': is_stale_update,
+            })
+        
+        policy_data = {}
+        try:
+            policy = server_models.UpdateGlobalPolicy.query.get(1)
+            if policy:
+                policy_data = policy.to_dict()
+        except Exception:
+            pass
+        
+        available_versions = []
+        try:
+            versions = server_models.UpdateVersion.query.filter_by(
+                is_active=True
+            ).order_by(server_models.UpdateVersion.version.desc()).all()
+            available_versions = [v.to_dict() for v in versions]
+        except Exception:
+            pass
+        
+        return jsonify({
+            'version_distribution': version_dist,
+            'status_breakdown': status_breakdown,
+            'pending_count': pending_count,
+            'failed_count': failed_count,
+            'total_agents': len(agents),
+            'agents_detail': agents_detail,
+            'policy': policy_data,
+            'available_versions': available_versions,
+        })
+    
+    except Exception as e:
+        logger.error(f"Updates summary error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/updates/retry', methods=['POST'])
+@login_required
+@admin_required
+def api_retry_update():
+    """
+    Reset a failed agent's update status to pending for retry.
+    """
+    try:
+        data = request.get_json()
+        if not data or 'agent_id' not in data:
+            return jsonify({'error': 'agent_id required'}), 400
+        
+        agent = server_models.Agent.query.filter_by(
+            agent_id=data['agent_id']
+        ).first()
+        
+        if not agent:
+            return jsonify({'error': 'Agent not found'}), 404
+        
+        if agent.update_status not in ('failed', 'rolled_back'):
+            return jsonify({'error': f'Agent status is {agent.update_status}, not failed'}), 400
+        
+        agent.update_status = 'pending'
+        agent.update_attempts = 0
+        agent.last_update_error = None
+        db.session.commit()
+        
+        logger.info(f"[UPDATES] Retry triggered for agent {data['agent_id']}")
+        return jsonify({'status': 'pending', 'agent_id': str(agent.agent_id)})
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Retry update error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/updates/canary-deploy', methods=['POST'])
+@login_required
+@admin_required
+def api_canary_deploy():
+    """
+    Deploy target version to a random percentage of agents (canary rollout).
+    """
+    try:
+        import random
+        
+        data = request.get_json()
+        if not data or 'target_version' not in data:
+            return jsonify({'error': 'target_version required'}), 400
+        
+        target = data['target_version'].strip()
+        percentage = min(max(int(data.get('percentage', 10)), 1), 100)
+        
+        eligible = server_models.Agent.query.filter(
+            server_models.Agent.status == 'active',
+            db.or_(
+                server_models.Agent.version != target,
+                server_models.Agent.version.is_(None)
+            )
+        ).all()
+        
+        if not eligible:
+            return jsonify({'error': 'No eligible agents found', 'updated': 0}), 200
+        
+        count = max(1, int(len(eligible) * percentage / 100))
+        selected = random.sample(eligible, min(count, len(eligible)))
+        
+        for agent in selected:
+            agent.target_version = target
+            agent.update_status = 'pending'
+            agent.update_attempts = 0
+            agent.last_update_error = None
+        
+        db.session.commit()
+        
+        logger.info(
+            f"[UPDATES] Canary deploy: v{target} to {len(selected)}/{len(eligible)} "
+            f"agents ({percentage}%)"
+        )
+        
+        return jsonify({
+            'updated': len(selected),
+            'total_eligible': len(eligible),
+            'percentage': percentage,
+            'target_version': target,
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Canary deploy error: {e}")
         return jsonify({'error': str(e)}), 500

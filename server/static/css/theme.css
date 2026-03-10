@@ -456,8 +456,9 @@ a:hover {
 }
 
 .metric-card:hover {
-    box-shadow: var(--shadow-md);
-    border-color: var(--border-strong);
+    box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.15), var(--shadow-md);
+    border-color: var(--brand-primary);
+    transform: translateY(-2px);
 }
 
 .metric-card.primary::before {
