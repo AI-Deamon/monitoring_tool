@@ -1,7 +1,7 @@
 """Add portable applications inventory table
 
-Revision ID: 006_add_portable_applications_table
-Revises: 005_add_application_plugins_table
+Revision ID: 006_add_portable_apps
+Revises: 005_add_app_plugins
 Create Date: 2026-02-13
 
 Tracks portable applications found on C: and D: drives.
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = '006_add_portable_applications_table'
-down_revision = '005_add_application_plugins_table'
+revision = '006_add_portable_apps'
+down_revision = '005_add_app_plugins'
 branch_labels = None
 depends_on = None
 

@@ -1,7 +1,7 @@
 """Add EOL system tables
 
 Revision ID: 007_add_eol_system_tables
-Revises: 006_add_portable_applications_table
+Revises: 006_add_portable_apps
 Create Date: 2026-02-13
 
 Phase 6: Creates all remaining EOL system tables:
@@ -18,7 +18,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = '007_add_eol_system_tables'
-down_revision = '006_add_portable_applications_table'
+down_revision = '006_add_portable_apps'
 branch_labels = None
 depends_on = None
 

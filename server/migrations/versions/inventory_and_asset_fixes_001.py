@@ -17,21 +17,52 @@ depends_on = None
 
 
 def upgrade():
-    # --- app_inventory updates ---
-    # Rename uninstall_string to uninstall_command to match model
-    op.alter_column('app_inventory', 'uninstall_string', new_column_name='uninstall_command')
+    # Guard: app_inventory column rename and additions
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'app_inventory') THEN
+                -- Rename uninstall_string to uninstall_command if old name exists
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'app_inventory' AND column_name = 'uninstall_string'
+                ) THEN
+                    ALTER TABLE app_inventory RENAME COLUMN uninstall_string TO uninstall_command;
+                END IF;
+                -- Add architecture if missing
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'app_inventory' AND column_name = 'architecture'
+                ) THEN
+                    ALTER TABLE app_inventory ADD COLUMN architecture VARCHAR(50);
+                END IF;
+                -- Add estimated_size_kb if missing
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'app_inventory' AND column_name = 'estimated_size_kb'
+                ) THEN
+                    ALTER TABLE app_inventory ADD COLUMN estimated_size_kb BIGINT;
+                END IF;
+            END IF;
+        END $$;
+    """)
     
-    # Add missing ones
-    op.add_column('app_inventory', sa.Column('architecture', sa.String(length=50), nullable=True))
-    op.add_column('app_inventory', sa.Column('estimated_size_kb', sa.BigInteger(), nullable=True))
-    
-    print("[MIGRATION] Updated app_inventory schema")
+    print("[MIGRATION] Updated app_inventory schema (guarded)")
 
 
 def downgrade():
-    # --- app_inventory downgrades ---
-    op.drop_column('app_inventory', 'estimated_size_kb')
-    op.drop_column('app_inventory', 'architecture')
-    op.alter_column('app_inventory', 'uninstall_command', new_column_name='uninstall_string')
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'app_inventory') THEN
+                ALTER TABLE app_inventory DROP COLUMN IF EXISTS estimated_size_kb;
+                ALTER TABLE app_inventory DROP COLUMN IF EXISTS architecture;
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'app_inventory' AND column_name = 'uninstall_command'
+                ) THEN
+                    ALTER TABLE app_inventory RENAME COLUMN uninstall_command TO uninstall_string;
+                END IF;
+            END IF;
+        END $$;
+    """)
     
     print("[MIGRATION] Reverted app_inventory schema changes")

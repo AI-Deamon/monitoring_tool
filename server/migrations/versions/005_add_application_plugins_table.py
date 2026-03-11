@@ -1,6 +1,6 @@
 """Add application plugins inventory table
 
-Revision ID: 005_add_application_plugins_table
+Revision ID: 005_add_app_plugins
 Revises: 004_add_browser_extensions_table
 Create Date: 2026-02-13
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = '005_add_application_plugins_table'
+revision = '005_add_app_plugins'
 down_revision = '004_add_browser_extensions_table'
 branch_labels = None
 depends_on = None

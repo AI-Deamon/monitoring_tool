@@ -16,29 +16,64 @@ branch_labels = None
 depends_on = None
 
 def upgrade():
-    # Add email field to dashboard_users
-    op.add_column('dashboard_users', 
-                  sa.Column('email', sa.String(255), nullable=True))
-    op.add_column('dashboard_users',
-                  sa.Column('email_verified', sa.Boolean, default=False))
+    # Guard: dashboard_users may not exist on fresh DBs
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'dashboard_users') THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'dashboard_users' AND column_name = 'email'
+                ) THEN
+                    ALTER TABLE dashboard_users ADD COLUMN email VARCHAR(255);
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'dashboard_users' AND column_name = 'email_verified'
+                ) THEN
+                    ALTER TABLE dashboard_users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE;
+                END IF;
+            END IF;
+        END $$;
+    """)
     
-    # Create password_reset_tokens table
-    op.create_table('password_reset_tokens',
-        sa.Column('id', sa.Integer, primary_key=True),
-        sa.Column('user_id', sa.Integer, sa.ForeignKey('dashboard_users.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('token_hash', sa.String(255), nullable=False),
-        sa.Column('expires_at', sa.DateTime, nullable=False),
-        sa.Column('used_at', sa.DateTime, nullable=True),
-        sa.Column('created_at', sa.DateTime, server_default=text('CURRENT_TIMESTAMP')),
-        
-        # Indexes for performance
-        sa.Index('idx_token_hash', 'token_hash'),
-        sa.Index('idx_expires_at', 'expires_at'),
-        sa.Index('idx_user_id', 'user_id')
-    )
+    # Create password_reset_tokens table (safe — uses create_table)
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            token_hash VARCHAR(255) NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS idx_token_hash ON password_reset_tokens(token_hash)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_expires_at ON password_reset_tokens(expires_at)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_prt_user_id ON password_reset_tokens(user_id)")
+    
+    # Add FK only if dashboard_users exists
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'dashboard_users') THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.table_constraints
+                    WHERE constraint_name = 'fk_prt_user_id' AND table_name = 'password_reset_tokens'
+                ) THEN
+                    ALTER TABLE password_reset_tokens
+                        ADD CONSTRAINT fk_prt_user_id FOREIGN KEY (user_id)
+                        REFERENCES dashboard_users(id) ON DELETE CASCADE;
+                END IF;
+            END IF;
+        END $$;
+    """)
 
 def downgrade():
-    # Drop table and columns
-    op.drop_table('password_reset_tokens')
-    op.drop_column('dashboard_users', 'email_verified')
-    op.drop_column('dashboard_users', 'email')
+    op.execute("DROP TABLE IF EXISTS password_reset_tokens")
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'dashboard_users') THEN
+                ALTER TABLE dashboard_users DROP COLUMN IF EXISTS email_verified;
+                ALTER TABLE dashboard_users DROP COLUMN IF EXISTS email;
+            END IF;
+        END $$;
+    """)
