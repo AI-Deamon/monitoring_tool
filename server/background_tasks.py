@@ -288,6 +288,165 @@ def cleanup_old_data():
         logger.error(f"[CLEANUP] Cleanup failed: {e}", exc_info=True)
 
 
+def sync_eol_data():
+    """
+    Sync EOL lifecycle data from endoflife.date API.
+    Primary intelligence source for EOL tracking.
+    """
+    try:
+        from eol_engine import sync_lifecycle_data
+        logger.info("[EOL] Starting endoflife.date sync...")
+        results = sync_lifecycle_data()
+        total = sum(v for v in results.values() if isinstance(v, int))
+        errors = sum(1 for v in results.values() if isinstance(v, str) and 'error' in v)
+        logger.info(f"[EOL] Sync complete: {total} cycles synced, {errors} errors")
+    except Exception as e:
+        logger.error(f"[EOL] EOL data sync failed: {e}")
+
+
+def sync_nvd_cache():
+    """
+    Sync NIST NVD vulnerability data (supplementary to endoflife.date).
+    Runs weekly with a 30-day lookback for modified CVEs.
+    """
+    try:
+        import os
+        from nvd_cache import NVDCache
+        api_key = os.environ.get('NVD_API_KEY')
+        cache = NVDCache(api_key=api_key)
+        logger.info("[NVD] Starting NVD cache sync (30-day lookback)...")
+        result = cache.sync(days_back=30)
+        logger.info(f"[NVD] Sync complete: {result.get('synced', 0)} entries, "
+                    f"{result.get('errors', 0)} errors, {result.get('duration_seconds', 0)}s")
+    except ImportError:
+        logger.debug("[NVD] nvd_cache module not available — skipping")
+    except Exception as e:
+        logger.error(f"[NVD] NVD cache sync failed: {e}")
+
+
+def check_stale_updates():
+    """
+    Watchdog: detect agents stuck in update states for >30 minutes (AUE-13).
+    Logs warnings so admins can investigate via dashboard stale report.
+    """
+    from extensions import db
+    import server_models
+
+    try:
+        cutoff = datetime.utcnow() - timedelta(minutes=30)
+
+        stale_agents = server_models.Agent.query.filter(
+            server_models.Agent.update_status.in_(['pending', 'downloading', 'installing']),
+            server_models.Agent.last_update_check < cutoff
+        ).all()
+
+        if not stale_agents:
+            logger.debug("[STALE-WATCHDOG] No stale update agents found")
+            return
+
+        logger.warning(f"[STALE-WATCHDOG] Found {len(stale_agents)} agents stuck in update state:")
+        for agent in stale_agents[:10]:
+            minutes_stuck = 0
+            if agent.last_update_check:
+                minutes_stuck = int(
+                    (datetime.utcnow() - agent.last_update_check).total_seconds() / 60
+                )
+            logger.warning(
+                f"[STALE-WATCHDOG] Agent {str(agent.agent_id)[:12]}... "
+                f"({agent.hostname}) status={agent.update_status} "
+                f"stuck for {minutes_stuck}min target={agent.target_version}"
+            )
+
+    except Exception as e:
+        logger.error(f"[STALE-WATCHDOG] Error: {e}")
+
+
+def sync_available_versions():
+    """
+    Scan updates directory and sync version metadata into update_versions table.
+    Runs hourly to keep the dashboard version list up-to-date.
+    """
+    from extensions import db
+    import server_models
+    import re
+
+    try:
+        import os
+        from pathlib import Path
+
+        updates_dir = Path(os.environ.get(
+            'SENTINELEDGE_UPDATES_DIR',
+            Path(__file__).parent / 'updates'
+        ))
+
+        if not updates_dir.exists():
+            logger.debug("[VERSION-SYNC] Updates directory not found, skipping")
+            return
+
+        synced = 0
+
+        # Read latest.json for primary metadata
+        latest_file = updates_dir / 'latest.json'
+        if latest_file.exists():
+            try:
+                import json
+                info = json.loads(latest_file.read_text())
+                version = info.get('version')
+                if version:
+                    existing = server_models.UpdateVersion.query.filter_by(
+                        version=version
+                    ).first()
+
+                    if not existing:
+                        new_ver = server_models.UpdateVersion(
+                            version=version,
+                            artifact_type=info.get('artifact_type', 'exe_bundle'),
+                            package_size=info.get('package_size'),
+                            package_sha256=info.get('package_sha256'),
+                            min_agent_version=info.get('min_agent_version'),
+                            mandatory=info.get('mandatory', False),
+                            changelog=info.get('changelog', ''),
+                            is_active=True,
+                        )
+                        db.session.add(new_ver)
+                        synced += 1
+                    else:
+                        # Update existing
+                        existing.package_size = info.get('package_size', existing.package_size)
+                        existing.package_sha256 = info.get('package_sha256', existing.package_sha256)
+                        existing.is_active = True
+            except Exception as e:
+                logger.error(f"[VERSION-SYNC] Error reading latest.json: {e}")
+
+        # Scan zip files
+        for zip_file in updates_dir.glob('sentineledge-agent-*.zip'):
+            match = re.search(r'sentineledge-agent-(.+)\.zip', zip_file.name)
+            if match:
+                v = match.group(1)
+                existing = server_models.UpdateVersion.query.filter_by(
+                    version=v
+                ).first()
+                if not existing:
+                    new_ver = server_models.UpdateVersion(
+                        version=v,
+                        artifact_type='exe_bundle',
+                        package_size=zip_file.stat().st_size,
+                        is_active=True,
+                    )
+                    db.session.add(new_ver)
+                    synced += 1
+
+        if synced > 0:
+            db.session.commit()
+            logger.info(f"[VERSION-SYNC] Synced {synced} new version(s)")
+        else:
+            logger.debug("[VERSION-SYNC] No new versions found")
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[VERSION-SYNC] Error: {e}")
+
+
 def start_background_tasks(app):
     """Start background scheduler"""
     scheduler = BackgroundScheduler(app)
@@ -323,7 +482,40 @@ def start_background_tasks(app):
         minute=0,
         name="Data integrity audit"
     )
+
+    # Run EOL data sync at 1 AM UTC (endoflife.date — primary source)
+    scheduler.add_job(
+        func=sync_eol_data,
+        hour=1,
+        minute=0,
+        name="EOL lifecycle data sync"
+    )
+
+    # Run NVD cache sync weekly (Sundays at 1:30 AM UTC — supplementary)
+    scheduler.add_job(
+        func=sync_nvd_cache,
+        hour=1,
+        minute=30,
+        name="NVD vulnerability cache sync"
+    )
+
+    # ── Auto-Update Background Jobs ──────────────────────────────
     
+    # Stale update watchdog — every 5 minutes
+    scheduler.add_interval_job(
+        func=check_stale_updates,
+        seconds=300,
+        name="Stale update watchdog"
+    )
+
+    # Version directory sync — every 1 hour
+    scheduler.add_interval_job(
+        func=sync_available_versions,
+        seconds=3600,
+        name="Available versions sync"
+    )
+
     scheduler.start()
-    
+
     return scheduler
+

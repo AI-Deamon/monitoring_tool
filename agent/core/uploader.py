@@ -263,6 +263,8 @@ class ServerUploader:
         self.registration_attempts = 0
         self.last_registration_failure = 0
         self.registration_backoff_until = 0
+        self.last_registration_success = 0  # Cooldown after success
+        self.registration_cooldown = 60  # Seconds to wait between registrations
         
         # Rate limiting for spam prevention
         self.last_warning_time = {}
@@ -360,8 +362,18 @@ class ServerUploader:
         if self.registered and self.config.is_registered():
             return True
         
-        # Check if we're in backoff period
         current_time = time.time()
+        
+        # Cooldown after successful registration to prevent save_config→reload→re-register loop
+        if self.last_registration_success > 0:
+            elapsed = current_time - self.last_registration_success
+            if elapsed < self.registration_cooldown:
+                # Recently registered successfully — likely a false re-registration trigger
+                logger.debug(f"Registration cooldown active ({int(self.registration_cooldown - elapsed)}s remaining)")
+                self.registered = True
+                return True
+        
+        # Check if we're in failure backoff period
         if current_time < self.registration_backoff_until:
             remaining = int(self.registration_backoff_until - current_time)
             logger.info(f"Registration in backoff, {remaining}s remaining")
@@ -394,7 +406,7 @@ class ServerUploader:
                 masked_secret = self.config.registration_secret[:8] + "***" if len(self.config.registration_secret) > 8 else "***"
                 logger.info(f"[REGISTER] Registration secret: {masked_secret} (configured)")
             else:
-                logger.warning("[REGISTER] ⚠️ Registration secret: NOT CONFIGURED!")
+                logger.warning("[REGISTER] [WARN] Registration secret: NOT CONFIGURED!")
                 logger.warning("[REGISTER] Check config.json -> server -> registration_secret")
             logger.info("=" * 70)
             
@@ -503,9 +515,10 @@ class ServerUploader:
             self.config.api_key = loaded_key
             self.config.save_config()
             
-            # Mark as registered
+            # Mark as registered with cooldown timestamp
             self.registered = True
             self.registration_attempts = 0
+            self.last_registration_success = time.time()
             
             logger.info("=" * 70)
             logger.info("[REGISTER] Registration complete and verified")
@@ -630,8 +643,23 @@ class ServerUploader:
                         return retcode
                     
                     context.verify_mode = ssl.CERT_REQUIRED
-                    # Note: Full certificate pinning requires more complex implementation
-                    # This is a simplified version for demonstration
+                    
+                    # mTLS support: Load client cert if enabled
+                    if self.config.ssl_enabled:
+                        try:
+                            import os
+                            if os.path.exists(self.config.client_cert_path):
+                                context.load_cert_chain(
+                                    certfile=self.config.client_cert_path,
+                                    keyfile=self.config.client_key_path
+                                )
+                                # Also load CA to verify server cert
+                                context.load_verify_locations(cafile=self.config.ca_cert_path)
+                                logger.debug("[SECURITY] Loaded mTLS client certificate for request")
+                            else:
+                                logger.warning(f"[SECURITY] mTLS cert not found: {self.config.client_cert_path}")
+                        except Exception as e:
+                            logger.error(f"[SECURITY] Failed to load mTLS certificates: {e}")
                 
                 with urllib.request.urlopen(req, timeout=timeout, context=context) as response:
                     response_data = response.read().decode('utf-8')
@@ -640,6 +668,11 @@ class ServerUploader:
                     return {'status': 'ok'}
                     
             except urllib.error.HTTPError as e:
+                # Handle 304 Not Modified specially - it's not an error, just means no change
+                if e.code == 304:
+                    logger.info(f"[REQUEST] HTTP 304 for {endpoint}: NOT MODIFIED (no changes to report)")
+                    return {'status': 'ok'}  # Treat as successful
+                
                 logger.error(f"[REQUEST] HTTP {e.code} for {endpoint}: {e.reason}")
                 
                 # Handle 401 Unauthorized with automatic re-registration
@@ -721,6 +754,21 @@ class ServerUploader:
             # Upload inventory
             self._upload_inventory()
             
+            # Upload hardware asset info
+            self._upload_hardware()
+            
+            # Upload extended inventory (CLI tools, drivers, extensions, etc.)
+            self._upload_extended_inventory()
+            
+            # Upload security indicators (risk assessments)
+            self._upload_security_indicators()
+
+            # Upload raw system visibility snapshots
+            self._upload_system_visibility()
+            
+            # Upload EOL data (Windows updates, ESU status, product keys, warranty)
+            self._upload_eol_data()
+            
             # Send current status (from latest heartbeat)
             self._send_current_status()
             
@@ -729,6 +777,13 @@ class ServerUploader:
             
         except Exception as e:
             logger.error(f"Upload batch error: {e}", exc_info=True)
+
+    def _is_ack_success(self, response: Optional[Dict]) -> bool:
+        """Treat only explicit success-like statuses as upload ACKs."""
+        if not response:
+            return False
+        status = str(response.get('status', '')).lower()
+        return status in ('ok', 'success', 'skipped')
 
     def _send_current_status(self):
         """Send current app/idle status from latest heartbeat"""
@@ -847,36 +902,43 @@ class ServerUploader:
                 response = self._make_request('/telemetry/app-switch', payload)
             
             elif event_type == 'screentime':
-                # ✅ PHASE 6: Read cumulative totals from aggregator (read-only)
+                # Read cumulative totals from aggregator (read-only)
                 # DATA FLOW:
                 # 1. state_machine.py calculates time (ONLY place)
-                # 2. state_detector.get_cumulative_deltas() reads from state_machine
+                # 2. state_detector.get_cumulative_totals() reads from state_machine
                 # 3. collector.collect_heartbeat() reads from state_detector
                 # 4. aggregator._process_screentime() reads from heartbeat
                 # 5. uploader (HERE) reads from aggregator - NO CALCULATION
                 # 6. server stores via GREATEST() - NO CALCULATION
                 
-                # Get cumulative values from aggregator (which reads from state_machine)
-                # Server expects: active_seconds, idle_seconds, locked_seconds (NOT delta_*)
-                state = event.get('state', {})
                 payload = {
                     'agent_id': event.get('agent_id'),
                     'username': event.get('username', 'unknown'),
-                    'timestamp': event.get('start'),  # Buffer stores as 'start'
-                    'active_seconds': state.get('delta_active_seconds', 0),  # Cumulative total
-                    'idle_seconds': state.get('delta_idle_seconds', 0),      # Cumulative total
-                    'locked_seconds': state.get('delta_locked_seconds', 0),  # Cumulative total
-                    'away_seconds': state.get('delta_away_seconds', 0),      # NEW: away time
-                    'current_state': state.get('current_state', 'active')
+                    'timestamp': event.get('timestamp') or datetime.now(timezone.utc).isoformat(),
+                    'session_start': event.get('session_start'),
+                    'active_seconds': event.get('active_seconds', 0),
+                    'idle_seconds': event.get('idle_seconds', 0),
+                    'locked_seconds': event.get('locked_seconds', 0),
+                    'away_seconds': event.get('away_seconds', 0),
+                    'current_state': event.get('current_state', 'active')
                 }
                 
+                logger.info(
+                    f"[DIAG] Uploader screentime payload: "
+                    f"active={payload.get('active_seconds')}, "
+                    f"idle={payload.get('idle_seconds')}, "
+                    f"locked={payload.get('locked_seconds')}, "
+                    f"ts={payload.get('timestamp', 'MISSING')[:25] if payload.get('timestamp') else 'NONE'}"
+                )
                 response = self._make_request('/telemetry/screentime', payload)
             else:
                 # Unknown type, skip
                 continue
             
-            if response:
+            if self._is_ack_success(response):
                 uploaded_ids.append(event['id'])
+            else:
+                self.buffer.record_upload_ack_failure()
         
         # Mark as uploaded
         if uploaded_ids:
@@ -905,12 +967,13 @@ class ServerUploader:
         payload = {'domains': formatted_domains}
         response = self._make_request('/domains', payload)
         
-        if response:
+        if self._is_ack_success(response):
             # Mark as uploaded
             domain_ids = [d['id'] for d in domains]
             self.buffer.mark_domains_uploaded(domain_ids)
             logger.info(f"[OK] Uploaded {len(domains)} domain visits")
         else:
+            self.buffer.record_upload_ack_failure()
             logger.debug("Failed to upload domains (server offline?)")
     
     def _upload_domain_sessions(self):
@@ -938,8 +1001,10 @@ class ServerUploader:
             
             response = self._make_request('/telemetry/domain-switch', payload)
             
-            if response and response.get('status') in ('ok', 'success', 'skipped'):
+            if self._is_ack_success(response):
                 uploaded_ids.append(session['id'])
+            else:
+                self.buffer.record_upload_ack_failure()
         
         # Mark uploaded sessions
         if uploaded_ids:
@@ -970,12 +1035,178 @@ class ServerUploader:
             
             response = self._make_request('/inventory', payload)
             
-            if response:
+            if self._is_ack_success(response):
                 self.buffer.mark_inventory_uploaded([record['id']])
                 logger.info(f"[OK] Uploaded inventory snapshot: {len(record.get('apps', []))} apps")
             else:
+                self.buffer.record_upload_ack_failure()
                 logger.debug("Failed to upload inventory (server offline?)")
                 break  # Stop on first failure
+    
+    def _upload_hardware(self):
+        """Upload hardware asset snapshots"""
+        hardware_records = self.buffer.get_unuploaded_hardware(limit=5)
+        
+        if not hardware_records:
+            return
+        
+        for record in hardware_records:
+            payload = record.get('data', {})
+            
+            response = self._make_request('/asset-hardware', payload)
+            
+            if self._is_ack_success(response):
+                self.buffer.mark_hardware_uploaded([record['id']])
+                identity = payload.get('identity', {})
+                logger.info(
+                    f"[OK] Uploaded hardware: "
+                    f"{identity.get('manufacturer', '')} {identity.get('model', '')}"
+                )
+            else:
+                self.buffer.record_upload_ack_failure()
+                logger.debug("Failed to upload hardware (server offline?)")
+                break  # Stop on first failure
+    
+    def _upload_extended_inventory(self):
+        """Upload extended inventory data from buffer to server"""
+        try:
+            snapshots = self.buffer.get_unuploaded_extended_inventory(limit=5)
+            
+            if not snapshots:
+                return
+            
+            uploaded_ids = []
+            
+            for snapshot in snapshots:
+                data = snapshot['data']
+                data['agent_id'] = self.config.agent_id
+                
+                response = self._make_request('/extended-inventory', data)
+                
+                if self._is_ack_success(response):
+                    uploaded_ids.append(snapshot['id'])
+                    counts = {
+                        k: len(v) for k, v in data.items()
+                        if isinstance(v, list)
+                    }
+                    logger.info(f"[OK] Uploaded extended inventory: {counts}")
+                else:
+                    self.buffer.record_upload_ack_failure()
+                    logger.debug("[EXTENDED] Failed to upload extended inventory (server offline?)")
+                    break  # Stop on first failure
+            
+            if uploaded_ids:
+                self.buffer.mark_extended_inventory_uploaded(uploaded_ids)
+                logger.info(f"[EXTENDED] Marked {len(uploaded_ids)} snapshots as uploaded")
+        
+        except Exception as e:
+            logger.error(f"[EXTENDED] Extended inventory upload error: {e}")
+    
+    def _upload_eol_data(self):
+        """Upload EOL data from buffer to server"""
+        try:
+            snapshots = self.buffer.get_unuploaded_eol_data(limit=5)
+            
+            if not snapshots:
+                return
+            
+            uploaded_ids = []
+            
+            for snapshot in snapshots:
+                data = snapshot['data']
+                data['agent_id'] = self.config.agent_id
+                
+                response = self._make_request('/eol-data', data)
+                
+                if self._is_ack_success(response):
+                    uploaded_ids.append(snapshot['id'])
+                    # Count number of items in each EOL data category
+                    counts = {}
+                    if 'updates' in data:
+                        counts['updates'] = len(data['updates'])
+                    if 'metering' in data:
+                        counts['metering'] = len(data['metering'])
+                    if 'product_keys' in data:
+                        counts['product_keys'] = len(data['product_keys'])
+                    if 'esu' in data:
+                        counts['esu'] = 1
+                    if 'warranty' in data:
+                        counts['warranty'] = 1
+                    logger.info(f"[OK] Uploaded EOL data: {counts}")
+                else:
+                    self.buffer.record_upload_ack_failure()
+                    logger.debug("[EOL] Failed to upload EOL data (server offline?)")
+                    break
+            
+            if uploaded_ids:
+                self.buffer.mark_eol_data_uploaded(uploaded_ids)
+                logger.info(f"[EOL] Marked {len(uploaded_ids)} snapshots as uploaded")
+        
+        except Exception as e:
+            logger.error(f"[EOL] EOL data upload error: {e}")
+    
+    def _upload_security_indicators(self):
+        """Upload security indicator data from buffer to server"""
+        try:
+            snapshots = self.buffer.get_unuploaded_security_indicators(limit=5)
+            
+            if not snapshots:
+                return
+            
+            uploaded_ids = []
+            
+            for snapshot in snapshots:
+                data = snapshot['data']
+                data['agent_id'] = self.config.agent_id
+                
+                response = self._make_request('/security-indicators', data)
+                
+                if self._is_ack_success(response):
+                    uploaded_ids.append(snapshot['id'])
+                    total = len(data.get('indicators', []))
+                    logger.info(f"[OK] Uploaded security indicators: {total} indicators")
+                else:
+                    self.buffer.record_upload_ack_failure()
+                    logger.debug("[SECURITY] Failed to upload security indicators (server offline?)")
+                    break
+            
+            if uploaded_ids:
+                self.buffer.mark_security_indicators_uploaded(uploaded_ids)
+                logger.info(f"[SECURITY] Marked {len(uploaded_ids)} snapshots as uploaded")
+        
+        except Exception as e:
+            logger.error(f"[SECURITY] Security indicators upload error: {e}")
+
+    def _upload_system_visibility(self):
+        """Upload raw system visibility snapshots from buffer to server."""
+        try:
+            snapshots = self.buffer.get_unuploaded_system_visibility(limit=5)
+            if not snapshots:
+                return
+
+            uploaded_ids = []
+
+            for snapshot in snapshots:
+                data = snapshot['data']
+                data['agent_id'] = self.config.agent_id
+
+                response = self._make_request('/system-visibility', data)
+
+                if self._is_ack_success(response):
+                    uploaded_ids.append(snapshot['id'])
+                    counts = data.get('counts', {})
+                    logger.info(f"[OK] Uploaded system visibility snapshot: {counts}")
+                else:
+                    self.buffer.record_upload_ack_failure()
+                    logger.debug("[VISIBILITY] Failed to upload system visibility (server offline?)")
+                    break
+
+            if uploaded_ids:
+                self.buffer.mark_system_visibility_uploaded(uploaded_ids)
+                logger.info(f"[VISIBILITY] Marked {len(uploaded_ids)} snapshots as uploaded")
+
+        except Exception as e:
+            logger.error(f"[VISIBILITY] System visibility upload error: {e}")
     
     def _send_heartbeat(self):
         """Send heartbeat to server"""
@@ -1012,13 +1243,14 @@ class ServerUploader:
             
             response = self._make_request('/telemetry/state-change', payload)
             
-            if response:
+            if self._is_ack_success(response):
                 logger.info(
                     f"[STATE] Uploaded state-change: "
                     f"{event_data.get('previous_state')} -> {event_data.get('current_state')}"
                 )
                 return True
             else:
+                self.buffer.record_upload_ack_failure()
                 logger.debug("State-change upload failed (server offline?)")
                 return False
                 
@@ -1052,10 +1284,10 @@ class ServerUploader:
         
         response = self._make_request('/telemetry/screentime-spans', payload)
         
-        if response:
+        if self._is_ack_success(response):
             uploaded_ids = [s['id'] for s in spans]
             self.buffer.mark_state_spans_uploaded(uploaded_ids)
             logger.info(f"[OK] Uploaded {len(uploaded_ids)} state spans")
         else:
+            self.buffer.record_upload_ack_failure()
             logger.debug("Failed to upload state spans (server offline?)")
-

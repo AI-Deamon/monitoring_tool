@@ -39,7 +39,12 @@ class HelperConfig:
         self._change_callbacks: list[Callable] = []
         
         # Paths
-        self.data_dir = Path(os.environ.get('APPDATA', '.')) / 'SentinelEdge'
+        # Check stealth name first, then legacy for backward compatibility
+        appdata = Path(os.environ.get('APPDATA', '.'))
+        if (appdata / 'WinDiagSvc').exists():
+            self.data_dir = appdata / 'WinDiagSvc'
+        else:
+            self.data_dir = appdata / 'SentinelEdge'
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.state_dir = self.data_dir  # Alias for compatibility
         self.state_file = self.data_dir / 'helper_state.json'
@@ -51,7 +56,13 @@ class HelperConfig:
     def _get_default_config_path(self) -> str:
         """Get default config path (shared with Core)"""
         program_data = os.environ.get('ProgramData', r'C:\ProgramData')
-        return str(Path(program_data) / 'SentinelEdge' / 'config.json')
+        # Check stealth name first, then legacy for backward compatibility
+        for dirname in ['WinDiagSvc', 'SentinelEdge']:
+            config_path = Path(program_data) / dirname / 'config.json'
+            if config_path.exists():
+                return str(config_path)
+        # Default to stealth name if neither exists
+        return str(Path(program_data) / 'WinDiagSvc' / 'config.json')
     
     def _load_and_apply_config(self):
         """Load, validate, and apply configuration"""
@@ -114,7 +125,16 @@ class HelperConfig:
         # Core communication
         core = config.get("core", {})
         core_port = core.get("listen_port", 48123)
-        self.core_url = f'http://localhost:{core_port}'
+        
+        # SSL/mTLS settings
+        self.ssl_enabled = server.get("ssl_enabled", False)
+        self.core_url = f"{'https' if self.ssl_enabled else 'http'}://localhost:{core_port}"
+        
+        # Helper uses same certs as Core for local mTLS communication
+        # In a real environment, Helper might have its own cert signed by same CA
+        self.client_cert_path = server.get("client_cert_path", str(self.data_dir / "certs" / "agent.crt"))
+        self.client_key_path = server.get("client_key_path", str(self.data_dir / "certs" / "agent.key"))
+        self.ca_cert_path = server.get("ca_cert_path", str(self.data_dir / "certs" / "ca.crt"))
         self.core_host = '127.0.0.1'
         self.core_port = core_port
         
@@ -124,6 +144,11 @@ class HelperConfig:
         self.heartbeat_interval = helper.get("heartbeat_interval", 10)
         self.domain_interval = helper.get("domain_interval", 60)
         self.inventory_interval = helper.get("inventory_interval", 3600)
+        self.enable_security_collection = helper.get("enable_security_collection", True)
+        self.security_collection_interval_seconds = helper.get("security_collection_interval_seconds", 21600)
+        self.enable_disk_usage_indicator = helper.get("enable_disk_usage_indicator", True)
+        self.enable_system_visibility_collection = helper.get("enable_system_visibility_collection", True)
+        self.system_visibility_interval_seconds = helper.get("system_visibility_interval_seconds", 21600)
         
         # Helper features
         features = helper.get("features", {})
@@ -150,7 +175,13 @@ class HelperConfig:
         self.enable_cpu_fallback = helper.get("enable_cpu_fallback", True)  # Enable CPU fallback when window tracking fails
         
         self.logger.info("[CONFIG] Helper configuration applied successfully")
-        self.logger.info(f"[CONFIG] Features: idle={self.enable_idle_tracking}, app={self.enable_app_tracking}, domains={self.enable_domains}, inventory={self.enable_inventory}")
+        self.logger.info(
+            f"[CONFIG] Features: idle={self.enable_idle_tracking}, "
+            f"app={self.enable_app_tracking}, domains={self.enable_domains}, "
+            f"inventory={self.enable_inventory}, security={self.enable_security_collection}, "
+            f"disk_indicator={self.enable_disk_usage_indicator}, "
+            f"system_visibility={self.enable_system_visibility_collection}"
+        )
     
     def check_for_reload(self) -> bool:
         """
@@ -208,7 +239,7 @@ class HelperConfig:
         """
         DISABLED: Helper should NEVER write to system config.json
         
-        The config file is at C:\\ProgramData\\SentinelEdge\\config.json
+        The config file is at C:\\ProgramData\\WinDiagSvc\\config.json (or legacy SentinelEdge)
         which is owned by SYSTEM/Administrators. Helper runs under user
         context and does not have permission to write there.
         

@@ -60,7 +60,15 @@ def get_server_tz():
         return timezone(timedelta(hours=5, minutes=30))
 
 
-def update_telemetry_time(agent_id: str):
+def pick_earliest_timestamp(*values: Optional[datetime]) -> Optional[datetime]:
+    """Return earliest non-null timestamp."""
+    candidates = [v for v in values if isinstance(v, datetime)]
+    if not candidates:
+        return None
+    return min(candidates)
+
+
+def update_telemetry_time(agent_id: str, event_timestamp: Optional[datetime] = None):
     """
     Update last_telemetry_time for an agent when actual telemetry data is received.
     This is different from last_seen which is updated on any authenticated request.
@@ -70,7 +78,13 @@ def update_telemetry_time(agent_id: str):
     try:
         agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
         if agent:
+            # Keep liveness heartbeat based on receive time (not event time).
             agent.last_telemetry_time = datetime.utcnow()
+
+            # Canonical first activity must come from telemetry event timestamp.
+            if event_timestamp is not None:
+                if not agent.first_activity_at or event_timestamp < agent.first_activity_at:
+                    agent.first_activity_at = event_timestamp
             # Don't commit here - let the calling function handle the commit
     except Exception as e:
         logger.warning(f"Failed to update telemetry time for {short_agent_id(agent_id)}: {e}")
@@ -78,59 +92,49 @@ def update_telemetry_time(agent_id: str):
 
 def parse_agent_timestamp(ts_str: str, agent_id: str = None) -> datetime:
     """
-    Parse timestamp from agent with backward compatibility and VALIDATION.
+    Parse and normalize agent timestamps with robust timezone handling
     
     - New agents (v1.2+): Send IST timestamp with +05:30
     - Old agents (v1.0-1.1): Send UTC timestamp with Z
     
-    Bug #5 Fix: Added validation to reject unreasonable timestamps.
+    Enhanced validation with better error handling and DST support.
     
     Returns: Naive datetime in server timezone (IST)
     """
     short_id = short_agent_id(agent_id) if agent_id else "??????"
     
     try:
-        # Parse ISO format
+        # Validate input format
+        if not ts_str or not isinstance(ts_str, str) or not ts_str.strip():
+            raise ValueError("Invalid timestamp format")
+            
+        # Parse ISO format with timezone validation
         ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
         
+        # Validate timezone information
         if ts.tzinfo is None:
-            # No timezone info - assume UTC (legacy agent)
-            logger.debug(f"[{short_id}] Legacy timestamp (no TZ): {ts_str}")
+            logger.warning(f"[{short_id}] Legacy timestamp without timezone: {ts_str}")
             ts = ts.replace(tzinfo=timezone.utc)
-        
-        # ================================================================
-        # Bug #5 Fix: Validate timestamp is within reasonable range
-        # ================================================================
+            
+        # Validate timestamp range (enhanced from original)
         now = datetime.now(timezone.utc)
+        max_future = now + timedelta(hours=2)  # Reduce clock drift tolerance
+        min_past = now - timedelta(days=365)
         
-        # Reject timestamps too far in the past (> 365 days)
-        if ts < now - timedelta(days=365):
-            logger.warning(f"[{short_id}] Timestamp too old (>1 year): {ts_str}")
-            raise ValueError(f"Timestamp too far in past: {ts_str}")
-        
-        # FIX 7: Allow 24h backfill, clamp minor clock drift
-        if ts > now + timedelta(hours=24):
-            # Too far in future - reject
-            logger.warning(f"[{short_id}] Timestamp too far future: {ts_str}")
-            raise ValueError(f"Timestamp too far future: {ts_str}")
-        elif ts > now + timedelta(hours=1):
-            # Minor future timestamp (clock drift) - clamp to now
-            logger.debug(f"[{short_id}] Minor future timestamp (clock drift): {ts_str}, clamping to now")
-            ts = now
-        
-        # Convert to server timezone
+        if ts > max_future:
+            logger.warning(f"[{short_id}] Timestamp too far in future: {ts_str}")
+            return now.astimezone(get_server_tz()).replace(tzinfo=None)
+        if ts < min_past:
+            logger.warning(f"[{short_id}] Timestamp too old: {ts_str}")
+            raise ValueError("Timestamp outside valid range")
+            
+        # Convert to server timezone with proper DST support
         server_tz = get_server_tz()
-        if _PYTZ_AVAILABLE:
-            ts_local = ts.astimezone(server_tz)
-        else:
-            ts_local = ts.astimezone(server_tz)
+        ts_local = ts.astimezone(server_tz)
         
         # Return naive datetime in server timezone (for PostgreSQL)
         return ts_local.replace(tzinfo=None)
         
-    except ValueError:
-        # Re-raise validation errors
-        raise
     except Exception as e:
         logger.error(f"[{short_id}] Failed to parse timestamp: {ts_str} - {e}")
         # Fallback: use current server time
@@ -345,11 +349,45 @@ def telemetry_screentime():
     active_seconds = safe_int(data.get('active_seconds', 0))
     idle_seconds = safe_int(data.get('idle_seconds', 0))
     locked_seconds = safe_int(data.get('locked_seconds', 0))
+    away_seconds = safe_int(data.get('away_seconds', 0))
     current_state = data.get('current_state', 'active')
+    session_start_str = data.get('session_start')  # Agent session start for reset detection
+    total_seconds = active_seconds + idle_seconds + locked_seconds + away_seconds
+
+    # Hard validation: cumulative daily buckets are mutually exclusive and must fit in one day.
+    buckets = {
+        "active_seconds": active_seconds,
+        "idle_seconds": idle_seconds,
+        "locked_seconds": locked_seconds,
+        "away_seconds": away_seconds,
+    }
+    invalid_bucket = next(
+        (
+            (name, value)
+            for name, value in buckets.items()
+            if value < 0 or value > 86400
+        ),
+        None
+    )
+    if invalid_bucket:
+        bucket_name, bucket_value = invalid_bucket
+        logger.error(
+            f"[{short_id}] screentime REJECTED: invalid {bucket_name}={bucket_value} "
+            f"(must be 0..86400)"
+        )
+        return jsonify({'error': f'Invalid {bucket_name}: {bucket_value}'}), 400
+
+    if total_seconds > 86400:
+        logger.error(
+            f"[{short_id}] screentime REJECTED: invalid total={total_seconds}s "
+            f"(A={active_seconds}, I={idle_seconds}, L={locked_seconds}, W={away_seconds})"
+        )
+        return jsonify({'error': f'Invalid screentime total: {total_seconds} > 86400'}), 400
     
     logger.info(
         f"[{short_id}] screentime: active={active_seconds}s, "
-        f"idle={idle_seconds}s, locked={locked_seconds}s (state={current_state})"
+        f"idle={idle_seconds}s, locked={locked_seconds}s, "
+        f"away={away_seconds}s (state={current_state})"
     )
     
     # Store Raw Event
@@ -358,7 +396,42 @@ def telemetry_screentime():
     try:
         # Parse timestamp
         ts_str = data.get('timestamp', datetime.utcnow().isoformat())
+        logger.info(
+            f"[{short_id}] [DIAG] screentime raw ts_str={ts_str!r}, "
+            f"type={type(ts_str).__name__}, "
+            f"active={data.get('active_seconds')}, idle={data.get('idle_seconds')}, "
+            f"locked={data.get('locked_seconds')}, away={data.get('away_seconds')}"
+        )
         ts_naive = parse_agent_timestamp(ts_str, agent_id)
+        day = ts_naive.date()
+
+        # Anomaly diagnostics only: detect strong regressions and overshoots from incoming totals.
+        existing = server_models.ScreenTime.query.filter_by(agent_id=agent_id, date=day).first()
+        if existing:
+            if active_seconds + 1800 < (existing.active_seconds or 0):
+                logger.warning(
+                    f"[{short_id}] [ANOMALY] Active regression: incoming={active_seconds}, existing={existing.active_seconds}, day={day}"
+                )
+            if idle_seconds + 1800 < (existing.idle_seconds or 0):
+                logger.warning(
+                    f"[{short_id}] [ANOMALY] Idle regression: incoming={idle_seconds}, existing={existing.idle_seconds}, day={day}"
+                )
+            if locked_seconds + 1800 < (existing.locked_seconds or 0):
+                logger.warning(
+                    f"[{short_id}] [ANOMALY] Locked regression: incoming={locked_seconds}, existing={existing.locked_seconds}, day={day}"
+                )
+            if away_seconds + 1800 < (existing.away_seconds or 0):
+                logger.warning(
+                    f"[{short_id}] [ANOMALY] Away regression: incoming={away_seconds}, existing={existing.away_seconds}, day={day}"
+                )
+        
+        # Parse session_start for reset detection
+        session_start_naive = None
+        if session_start_str:
+            try:
+                session_start_naive = parse_agent_timestamp(session_start_str, agent_id)
+            except Exception:
+                logger.warning(f"[{short_id}] Failed to parse session_start: {session_start_str}")
         
         # Call stored procedure to update screen_time table
         result = db.session.execute(
@@ -369,7 +442,9 @@ def telemetry_screentime():
                     :active,
                     :idle,
                     :locked,
-                    :state
+                    :away,
+                    :state,
+                    :session_start
                 )
             """),
             {
@@ -378,7 +453,9 @@ def telemetry_screentime():
                 'active': active_seconds,
                 'idle': idle_seconds,
                 'locked': locked_seconds,
-                'state': current_state
+                'away': away_seconds,
+                'state': current_state,
+                'session_start': session_start_naive
             }
         ).fetchone()
         
@@ -405,7 +482,7 @@ def telemetry_screentime():
             raw_event.processed = True
         
         # Track that agent is active
-        update_telemetry_time(agent_id)
+        update_telemetry_time(agent_id, pick_earliest_timestamp(session_start_naive, ts_naive))
         db.session.commit()
         
         return jsonify({'status': 'success'}), 200
@@ -529,6 +606,7 @@ def telemetry_app_active():
             )
             db.session.add(status)
         
+        update_telemetry_time(agent_id, pick_earliest_timestamp(session_start_naive, timestamp_naive))
         db.session.commit()
         return jsonify({'status': 'success'}), 200
         
@@ -623,6 +701,7 @@ def telemetry_domain_active():
             )
             db.session.add(status)
         
+        update_telemetry_time(agent_id, pick_earliest_timestamp(session_start_naive, timestamp_naive))
         db.session.commit()
         return jsonify({'status': 'success'}), 200
         
@@ -711,6 +790,7 @@ def telemetry_app_switch():
         if raw_event:
             raw_event.processed = True
             
+        update_telemetry_time(agent_id, pick_earliest_timestamp(start_naive, end_naive, timestamp_naive))
         db.session.commit()
         
         # Handle stored procedure result:
@@ -838,6 +918,7 @@ def telemetry_domain_switch():
         if raw_event:
             raw_event.processed = True
             
+        update_telemetry_time(str(agent_id), pick_earliest_timestamp(start_naive, end_naive, timestamp_naive))
         db.session.commit()
         
         # Handle stored procedure result (same logic as app-switch)
@@ -970,6 +1051,7 @@ def telemetry_state_change():
         if raw_event:
             raw_event.processed = True
             
+        update_telemetry_time(agent_id, ts_naive)
         db.session.commit()
         
         return jsonify({'status': 'success'}), 200
@@ -1111,6 +1193,7 @@ def telemetry_screentime_spans():
     store_raw_event(agent_id, 'screentime-spans', data)
     
     stored_count = 0
+    batch_earliest: Optional[datetime] = None
     errors = []
     
     try:
@@ -1125,6 +1208,7 @@ def telemetry_screentime_spans():
             # 2. Parse times for DB
             start = parse_agent_timestamp(span['start_time'], agent_id)
             end = parse_agent_timestamp(span['end_time'], agent_id)
+            batch_earliest = pick_earliest_timestamp(batch_earliest, start, end)
             
             # 3. Idempotent Insert
             # We use text() with ON CONFLICT for performance and correctness
@@ -1144,8 +1228,8 @@ def telemetry_screentime_spans():
             })
             stored_count += 1
             
+        update_telemetry_time(agent_id, batch_earliest)
         db.session.commit()
-        update_telemetry_time(agent_id)
         
         return jsonify({
             'status': 'success',

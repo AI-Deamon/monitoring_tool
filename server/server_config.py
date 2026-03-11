@@ -2,8 +2,8 @@ import os
 from dotenv import load_dotenv
 from types import SimpleNamespace
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (override=True ensures .env takes priority)
+load_dotenv(override=True)
 
 def get_config() -> SimpleNamespace:
     """Return runtime config from environment variables."""
@@ -44,4 +44,17 @@ def get_config() -> SimpleNamespace:
         # Data Retention
         RETENTION_DAYS=int(os.getenv('RETENTION_DAYS', '90')),  # Keep 90 days of data
         CLEANUP_INTERVAL_HOURS=int(os.getenv('CLEANUP_INTERVAL_HOURS', '24')),
+        
+        # Email / SMTP
+        MAIL_SERVER=os.getenv('MAIL_SERVER', 'smtp.gmail.com'),
+        MAIL_PORT=int(os.getenv('MAIL_PORT', '587')),
+        MAIL_USE_TLS=os.getenv('MAIL_USE_TLS', 'true').lower() == 'true',
+        MAIL_USERNAME=os.getenv('MAIL_USERNAME', ''),
+        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD', ''),
+        MAIL_DEFAULT_SENDER=os.getenv('MAIL_DEFAULT_SENDER', 'security@sentineledge.com'),
+        
+        # SSL/mTLS
+        SSL_CERT_PATH=os.getenv('SSL_CERT_PATH', 'certs/server.crt'),
+        SSL_KEY_PATH=os.getenv('SSL_KEY_PATH', 'certs/server.key'),
+        SSL_CA_PATH=os.getenv('SSL_CA_PATH', 'certs/ca.crt'),
     )

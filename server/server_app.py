@@ -1,9 +1,10 @@
-from flask import Flask
+from flask import Flask, jsonify, send_file
 from extensions import db
 from server_config import get_config
 import logging
 import os
 from datetime import timedelta
+from pathlib import Path
 
 # Try to import Flask-CORS
 try:
@@ -165,12 +166,26 @@ def create_app():
         # Create auth tables and default admin
         # ================================================================
         try:
-            db.create_all()  # Creates dashboard_users table if not exists
+            # Note: Schema now managed exclusively via Alembic migrations.
+            # db.create_all() removed.
             if create_default_admin():
                 logger.info("[AUTH] Default admin user created: admin / changeme123")
                 logger.warning("[AUTH] ⚠️  CHANGE THE DEFAULT PASSWORD IMMEDIATELY!")
         except Exception as e:
-            logger.error(f"[AUTH] Failed to initialize auth: {e}")
+            logger.error(f"[AUTH] Failed to initialize auth (tables may be missing): {e}")
+
+    openapi_spec_path = Path(__file__).resolve().parents[2] / 'openapi.yml'
+
+    @app.route('/openapi.yml', methods=['GET'])
+    def openapi_spec():
+        if not openapi_spec_path.exists():
+            return jsonify({'error': 'OpenAPI spec not found'}), 404
+        return send_file(openapi_spec_path, mimetype='application/yaml')
+
+    @app.route('/api/docs', methods=['GET'])
+    def api_docs():
+        # Compatibility route to the canonical OpenAPI spec.
+        return openapi_spec()
 
     # Start background scheduler (only in main process, not in testing)
     if not app.config.get('TESTING'):

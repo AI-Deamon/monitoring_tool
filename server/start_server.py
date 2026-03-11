@@ -60,16 +60,10 @@ def check_database_connection(app):
             return False
 
 def create_tables(app):
-    """Create all database tables"""
-    logger.info("[2/8] Creating/verifying database tables...")
-    with app.app_context():
-        try:
-            db.create_all()
-            logger.info("  ✅ All tables created/verified")
-            return True
-        except Exception as e:
-            logger.error(f"  ❌ Table creation failed: {e}")
-            return False
+    """Note: Tables are now managed exclusively via Alembic migrations."""
+    logger.info("[2/8] Database schema is managed via Alembic migrations.")
+    # db.create_all() removed to enforce Alembic-only schema management.
+    return True
 
 def create_screen_time_spans_table(app):
     """Create screen_time_spans table and indexes"""
@@ -129,26 +123,53 @@ def install_stored_procedures(app):
             # 1. Drop old functions to avoid return type conflicts
             logger.info("  - Dropping legacy functions...")
             cursor.execute("DROP FUNCTION IF EXISTS process_screentime_event(VARCHAR, TIMESTAMP, INTEGER, INTEGER, INTEGER, VARCHAR) CASCADE;")
+            cursor.execute("DROP FUNCTION IF EXISTS process_screentime_event(VARCHAR, TIMESTAMP, INTEGER, INTEGER, INTEGER, INTEGER, VARCHAR) CASCADE;")
+            cursor.execute("DROP FUNCTION IF EXISTS process_screentime_event(VARCHAR, DATE, VARCHAR, INTEGER, INTEGER, INTEGER, INTEGER) CASCADE;")
             cursor.execute("DROP FUNCTION IF EXISTS process_app_switch_event(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP, TIMESTAMP, INTEGER, VARCHAR) CASCADE;")
             cursor.execute("DROP FUNCTION IF EXISTS process_domain_switch_event(VARCHAR, VARCHAR, VARCHAR, TEXT, TEXT, VARCHAR, TIMESTAMP, TIMESTAMP, INTEGER, VARCHAR) CASCADE;")
             
-            # 2. Process screentime event (legacy cumulative)
-            logger.info("  - Creating process_screentime_event...")
+            # 2. Process screentime event (7 params — includes away_seconds)
+            logger.info("  - Creating process_screentime_event (7 params)...")
             cursor.execute("""
                 CREATE OR REPLACE FUNCTION process_screentime_event(
                     p_agent_id VARCHAR, p_timestamp TIMESTAMP,
                     p_active_total INTEGER, p_idle_total INTEGER,
-                    p_locked_total INTEGER, p_state VARCHAR
+                    p_locked_total INTEGER, p_away_total INTEGER,
+                    p_state VARCHAR,
+                    p_session_start TIMESTAMP DEFAULT NULL
                 ) RETURNS TABLE(status text, message text) AS $$
-                DECLARE v_date DATE;
+                DECLARE
+                    v_date DATE;
+                    v_existing_session_start TIMESTAMP;
+                    v_session_changed BOOLEAN := FALSE;
                 BEGIN
                     v_date := p_timestamp::DATE;
-                    INSERT INTO screen_time (agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated)
-                    VALUES (p_agent_id::UUID, v_date, p_active_total, p_idle_total, p_locked_total, NOW())
+                    
+                    -- Check if session changed (agent restart/reinstall detection)
+                    IF p_session_start IS NOT NULL THEN
+                        SELECT session_start INTO v_existing_session_start
+                        FROM screen_time
+                        WHERE agent_id = p_agent_id::UUID AND date = v_date;
+                        
+                        IF v_existing_session_start IS NULL OR
+                           v_existing_session_start != p_session_start THEN
+                            v_session_changed := TRUE;
+                        END IF;
+                    END IF;
+                    
+                    INSERT INTO screen_time (agent_id, date, session_start, active_seconds, idle_seconds, locked_seconds, away_seconds, last_updated)
+                    VALUES (p_agent_id::UUID, v_date, p_session_start, p_active_total, p_idle_total, p_locked_total, p_away_total, NOW())
                     ON CONFLICT (agent_id, date) DO UPDATE SET
-                        active_seconds = GREATEST(screen_time.active_seconds, EXCLUDED.active_seconds),
-                        idle_seconds = GREATEST(screen_time.idle_seconds, EXCLUDED.idle_seconds),
-                        locked_seconds = GREATEST(screen_time.locked_seconds, EXCLUDED.locked_seconds),
+                        -- Update session_start if changed
+                        session_start = CASE WHEN v_session_changed
+                            THEN EXCLUDED.session_start
+                            ELSE screen_time.session_start END,
+                        -- Session metadata can change, but totals remain monotonic cumulative values.
+                        -- LEAST(86400) caps each counter at 24h as defense-in-depth against clock jumps.
+                        active_seconds = LEAST(GREATEST(screen_time.active_seconds, EXCLUDED.active_seconds), 86400),
+                        idle_seconds = LEAST(GREATEST(screen_time.idle_seconds, EXCLUDED.idle_seconds), 86400),
+                        locked_seconds = LEAST(GREATEST(screen_time.locked_seconds, EXCLUDED.locked_seconds), 86400),
+                        away_seconds = LEAST(GREATEST(screen_time.away_seconds, EXCLUDED.away_seconds), 86400),
                         last_updated = NOW();
                     RETURN QUERY SELECT 'success'::text, 'Screentime processed'::text;
                 EXCEPTION WHEN OTHERS THEN

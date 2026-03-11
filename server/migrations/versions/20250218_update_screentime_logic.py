@@ -24,6 +24,7 @@ def upgrade():
         p_active_total INTEGER,
         p_idle_total INTEGER,
         p_locked_total INTEGER,
+        p_away_total INTEGER,
         p_state VARCHAR
     ) RETURNS TABLE(status text, message text) AS $$
     DECLARE
@@ -32,15 +33,16 @@ def upgrade():
         v_date := p_timestamp::DATE;
         
         INSERT INTO screen_time (
-            agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated
+            agent_id, date, active_seconds, idle_seconds, locked_seconds, away_seconds, last_updated
         ) VALUES (
-            p_agent_id, v_date, p_active_total, p_idle_total, p_locked_total, NOW()
+            p_agent_id, v_date, p_active_total, p_idle_total, p_locked_total, p_away_total, NOW()
         )
         ON CONFLICT (agent_id, date) DO UPDATE SET
             -- Replace with new total from agent (Source of Truth)
             active_seconds = GREATEST(screen_time.active_seconds, EXCLUDED.active_seconds),
             idle_seconds = GREATEST(screen_time.idle_seconds, EXCLUDED.idle_seconds),
             locked_seconds = GREATEST(screen_time.locked_seconds, EXCLUDED.locked_seconds),
+            away_seconds = GREATEST(screen_time.away_seconds, EXCLUDED.away_seconds),
             last_updated = NOW();
             
         RETURN QUERY SELECT 'success'::text, 'Screentime processed (total)'::text;
@@ -59,6 +61,7 @@ def downgrade():
         p_active_inc INTEGER,
         p_idle_inc INTEGER,
         p_locked_inc INTEGER,
+        p_away_inc INTEGER,
         p_state VARCHAR
     ) RETURNS TABLE(status text, message text) AS $$
     DECLARE
@@ -67,14 +70,15 @@ def downgrade():
         v_date := p_timestamp::DATE;
         
         INSERT INTO screen_time (
-            agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated
+            agent_id, date, active_seconds, idle_seconds, locked_seconds, away_seconds, last_updated
         ) VALUES (
-            p_agent_id, v_date, p_active_inc, p_idle_inc, p_locked_inc, NOW()
+            p_agent_id, v_date, p_active_inc, p_idle_inc, p_locked_inc, p_away_inc, NOW()
         )
         ON CONFLICT (agent_id, date) DO UPDATE SET
             active_seconds = screen_time.active_seconds + EXCLUDED.active_seconds,
             idle_seconds = screen_time.idle_seconds + EXCLUDED.idle_seconds,
             locked_seconds = screen_time.locked_seconds + EXCLUDED.locked_seconds,
+            away_seconds = screen_time.away_seconds + EXCLUDED.away_seconds,
             last_updated = NOW();
             
         RETURN QUERY SELECT 'success'::text, 'Screentime processed'::text;

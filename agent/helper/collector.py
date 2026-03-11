@@ -10,19 +10,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 import logging
+import time
 
 from .idle import IdleDetector
 from .window import WindowTracker
 from .domain import ActiveDomainTracker, BrowserHistoryTracker
 from .inventory import InventoryTracker
+from .hardware_collector import HardwareCollector
+from .eol_collector import EOLCollector
 from .config import HelperConfig
 
-# CPU fallback for when window tracking fails
-try:
-    from .cpu_fallback import CPUBasedTracker
-    CPU_FALLBACK_AVAILABLE = True
-except ImportError:
-    CPU_FALLBACK_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -67,24 +64,30 @@ class DataCollector:
                 enable_app_specific_thresholds=config.enable_app_specific_thresholds,
                 on_idle_complete=self.send_idle_event
             )
-            logger.info("[INIT] ✓ IdleDetector")
+            logger.info("[INIT] [OK] IdleDetector")
 
             self.window_tracker = WindowTracker(
                 capture_titles=config.capture_window_titles,
                 state_file=config.data_dir / 'window_state.json'
             )
-            logger.info("[INIT] ✓ WindowTracker")
+            logger.info("[INIT] [OK] WindowTracker")
 
             # Domain tracking - NEW: Active domain tracker for sessions
             self.active_domain_tracker = ActiveDomainTracker(config.capture_full_urls)
-            logger.info("[INIT] ✓ ActiveDomainTracker")
+            logger.info("[INIT] [OK] ActiveDomainTracker")
 
             # Legacy history tracker (for backward compatibility)
             self.history_tracker = BrowserHistoryTracker(config.capture_full_urls)
-            logger.info("[INIT] ✓ BrowserHistoryTracker")
+            logger.info("[INIT] [OK] BrowserHistoryTracker")
 
             self.inventory_tracker = InventoryTracker(config)
-            logger.info("[INIT] ✓ InventoryTracker")
+            logger.info("[INIT] [OK] InventoryTracker")
+
+            self.hardware_collector = HardwareCollector(config)
+            logger.info("[INIT] [OK] HardwareCollector")
+
+            self.eol_collector = EOLCollector(config)
+            logger.info("[INIT] [OK] EOLCollector")
 
             # State
             self.sequence_number = 0
@@ -100,21 +103,18 @@ class DataCollector:
             # Track current date for midnight detection
             self._current_date = datetime.now(timezone.utc).date()
 
-            # CPU fallback tracker for when window tracking fails
-            self.cpu_tracker = CPUBasedTracker() if CPU_FALLBACK_AVAILABLE else None
             self.window_tracking_failures = 0
-            self.use_cpu_fallback = False
-            logger.info("[INIT] ✓ CPU fallback")
+            logger.info("[INIT] [OK] Initialization complete")
 
             # Load persisted state
             logger.info("[INIT] Loading persisted state...")
             self._load_state()
-            logger.info("[INIT] ✓ State loaded")
+            logger.info("[INIT] [OK] State loaded")
 
             # Apply initial config
             logger.info("[INIT] Applying config...")
             self.apply_config()
-            logger.info("[INIT] ✓ Config applied")
+            logger.info("[INIT] [OK] Config applied")
 
             logger.info("[COLLECTOR] Enhanced DataCollector initialized with session tracking")
 
@@ -209,19 +209,19 @@ class DataCollector:
         # Check for midnight crossing (new day)
         current_date = now.date()
         if current_date != self._current_date:
-            logger.info(f"[COLLECTOR] Day changed: {self._current_date} → {current_date}")
-            logger.info(f"[COLLECTOR] Resetting cumulative counters...")
+            logger.info(f"[COLLECTOR] Day changed (UTC): {self._current_date} -> {current_date}")
 
-            # Reset StateDetector cumulative counters (NEW: StateDetector is source of truth)
-            if self.state_detector:
-                self.state_detector.reset_cumulative()
+            # NOTE: Do NOT reset state machine counters here.
+            # The state machine's own check_daily_boundary() handles
+            # midnight resets using LOCAL time (not UTC).
+            # Resetting here caused triple-reset bugs (see PLAN-screentime-reset.md).
 
             # Update current date
             self._current_date = current_date
             self._session_start = now
             self._heartbeat_count = 0
 
-            logger.info("[COLLECTOR] Cumulative counters reset for new day")
+            logger.info("[COLLECTOR] Day changed, counters managed by state machine")
             
             # FIX: Reset WindowTracker timestamp to prevent overnight duration overflow
             if self.window_tracker:
@@ -229,10 +229,6 @@ class DataCollector:
                 # Reset start time to NOW (prevents overnight overflow)
                 self.window_tracker._app_start = now
                 logger.info("[COLLECTOR] WindowTracker timestamp reset")
-        
-        # Drive state detection (NEW ARCHITECTURE)
-        if self.state_detector:
-            self.state_detector._update_state()
         
         # ====================================================================
         # STEP 1: Sample foreground window FIRST (needed for lock fallback)
@@ -244,6 +240,13 @@ class DataCollector:
             # Always sample window to detect lock screen apps (lockapp.exe)
             window_change = self.window_tracker.sample()
             current_app = self.window_tracker.get_current_app_duration()
+        
+        # STEP 1.5: Feed foreground app to state detector BEFORE state check
+        # This enables lock detection via LOCK_APPS (lockapp.exe, logonui.exe)
+        if self.state_detector:
+            foreground_app = current_app.get('app_name', '')
+            self.state_detector.set_foreground_app(foreground_app)
+            self.state_detector._update_state()
         
         # ====================================================================
         # STEP 2: Get current authoritative state (with defensive guard)
@@ -274,25 +277,13 @@ class DataCollector:
                 # Check if window tracking is failing
                 if current_app.get('app_name') in ['unknown', None, '']:
                     self.window_tracking_failures += 1
-                    
-                    # After 3 consecutive failures, try CPU fallback
-                    if self.window_tracking_failures >= 3 and self.cpu_tracker:
-                        if not self.use_cpu_fallback:
-                            logger.warning("[COLLECTOR] Window tracking failing, enabling CPU fallback")
-                            self.use_cpu_fallback = True
-                        
-                        # Try CPU-based detection
-                        cpu_app = self.cpu_tracker.get_active_app_by_cpu()
-                        if cpu_app:
-                            logger.debug(f"[COLLECTOR] Using CPU fallback: {cpu_app}")
-                            current_app['app_name'] = cpu_app
-                            current_app['detection_method'] = 'cpu_fallback'
+                    if self.window_tracking_failures >= 5:
+                        logger.debug(f"[COLLECTOR] Window tracking unavailable ({self.window_tracking_failures} failures)")
                 else:
                     # Window tracking is working
                     if self.window_tracking_failures > 0:
                         logger.info("[COLLECTOR] Window tracking recovered")
                     self.window_tracking_failures = 0
-                    self.use_cpu_fallback = False
         
         # ====================================================================
         # NEW: Domain session tracking integrated with heartbeat
@@ -357,15 +348,14 @@ class DataCollector:
             }
         }
         
-        # ✅ PHASE 2: Get cumulative deltas from StateDetector (ONLY source of truth)
-        # StateDetector calls state_machine.tick() and state_machine.get_daily_totals()
-        # This is the ONLY place screen time is calculated
+        # Get cumulative totals from StateDetector (ONLY source of truth)
+        # StateDetector calls state_machine.tick() then state_machine.get_daily_totals()
         if self.state_detector:
-            deltas = self.state_detector.get_cumulative_deltas()
-            heartbeat['screentime']['delta_active_seconds'] = int(deltas.get('delta_active_seconds', 0))
-            heartbeat['screentime']['delta_idle_seconds'] = int(deltas.get('delta_idle_seconds', 0))
-            heartbeat['screentime']['delta_locked_seconds'] = int(deltas.get('delta_locked_seconds', 0))
-            heartbeat['screentime']['delta_away_seconds'] = int(deltas.get('delta_away_seconds', 0))  # NEW
+            totals = self.state_detector.get_cumulative_totals()
+            heartbeat['screentime']['active_seconds'] = int(totals.get('active_seconds', 0))
+            heartbeat['screentime']['idle_seconds'] = int(totals.get('idle_seconds', 0))
+            heartbeat['screentime']['locked_seconds'] = int(totals.get('locked_seconds', 0))
+            heartbeat['screentime']['away_seconds'] = int(totals.get('away_seconds', 0))
         
         # Add app change info if occurred
         if window_change and window_change.get('changed'):
@@ -518,9 +508,198 @@ class DataCollector:
             logger.error(f"Inventory collection error: {e}")
             return None
     
+    def collect_hardware(self, force: bool = False) -> Optional[Dict]:
+        """
+        Collect hardware/asset information.
+        
+        Args:
+            force: Force full collection (use on registration)
+            
+        Returns:
+            Hardware dict or None if no changes
+        """
+        try:
+            hardware = self.hardware_collector.collect(force=force)
+            
+            if hardware:
+                hardware['agent_id'] = self.config.agent_id
+                return hardware
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Hardware collection error: {e}")
+            return None
+    
     def get_app_usage_summary(self) -> List[Dict]:
         """[DEPRECATED] Cumulative tracking removed."""
         return []
+
+    def collect_eol_data(self, force: bool = False) -> Optional[Dict]:
+        """
+        Collect EOL-specific data (update history, ESU, metering, keys, warranty).
+
+        Runs on a 24-hour interval (same cadence as hardware collection).
+        Returns None if not due yet and force is False.
+        """
+        if not force:
+            # Piggyback on hardware collector's 24h interval check
+            if self.hardware_collector and not self.hardware_collector.should_collect():
+                return None
+
+        try:
+            eol_data = self.eol_collector.collect_all()
+            if eol_data:
+                eol_data['agent_id'] = self.config.agent_id
+                logger.info("[COLLECTOR] EOL data collected successfully")
+                return eol_data
+            return None
+        except Exception as e:
+            logger.error(f"EOL data collection error: {e}")
+            return None
+    
+    def collect_extended_inventory(self, force: bool = False) -> Optional[Dict]:
+        """
+        Collect extended inventory (CLI tools, drivers, extensions, plugins, portable apps).
+        
+        Uses lazy initialization to avoid importing ExtendedInventoryCollector
+        until needed. Runs on a 6-hour interval.
+        
+        Args:
+            force: Force immediate collection (use on startup)
+            
+        Returns:
+            Extended inventory dict or None if not due yet
+        """
+        try:
+            # Lazy init
+            if not hasattr(self, '_ext_collector'):
+                from helper.extended_inventory import ExtendedInventoryCollector
+                self._ext_collector = ExtendedInventoryCollector(config=self.config)
+                self._ext_last_collect = 0
+                logger.info("[COLLECTOR] ExtendedInventoryCollector initialized")
+            
+            # 6-hour interval check
+            EXT_INTERVAL = 6 * 60 * 60
+            now = time.time()
+            if not force and (now - self._ext_last_collect < EXT_INTERVAL):
+                return None
+            
+            logger.info("[COLLECTOR] Starting extended inventory collection...")
+            data = self._ext_collector.collect_all()
+            
+            if data:
+                data['agent_id'] = self.config.agent_id
+                self._ext_last_collect = now
+                counts = {k: len(v) for k, v in data.items() if isinstance(v, list)}
+                logger.info(f"[COLLECTOR] Extended inventory collected: {counts}")
+                return data
+            
+            return None
+            
+        except ImportError as e:
+            logger.warning(f"[COLLECTOR] ExtendedInventoryCollector not available: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[COLLECTOR] Extended inventory collection error: {e}")
+            return None
+    
+    def collect_security_indicators(self, force: bool = False, ext_data: Optional[Dict] = None) -> Optional[Dict]:
+        """
+        Collect security indicators by analyzing existing data.
+        
+        Uses lazy initialization. Interval is config-driven (default: 6 hours).
+        
+        Args:
+            force: Force immediate collection (use on startup)
+            ext_data: Extended inventory data to analyze. If None, only file checks run.
+            
+        Returns:
+            Security indicators dict or None if not due yet
+        """
+        try:
+            if not getattr(self.config, 'enable_security_collection', True):
+                return None
+
+            # Lazy init
+            if not hasattr(self, '_sec_collector'):
+                from helper.security_collector import SecurityCollector
+                self._sec_collector = SecurityCollector(config=self.config)
+                self._sec_last_collect = 0
+                logger.info("[COLLECTOR] SecurityCollector initialized")
+            
+            # Configurable security collection interval (default 6h).
+            SEC_INTERVAL = int(getattr(self.config, 'security_collection_interval_seconds', 21600))
+            SEC_INTERVAL = max(600, SEC_INTERVAL)
+            now = time.time()
+            if not force and (now - self._sec_last_collect < SEC_INTERVAL):
+                return None
+            
+            logger.info("[COLLECTOR] Starting security analysis...")
+            data = self._sec_collector.collect_all_security(ext_inventory=ext_data)
+            
+            if data:
+                data['agent_id'] = self.config.agent_id
+                self._sec_last_collect = now
+                summary = data.get('summary', {})
+                total = len(data.get('indicators', []))
+                # DEBUG LOG - MAY BE REMOVED
+                logger.info(f"[COLLECTOR] Security indicators READY for communication pipeline ({total} total)")
+                logger.info(f"[COLLECTOR] Security breakdown: {summary}")
+                return data
+            
+            return None
+            
+        except ImportError as e:
+            logger.warning(f"[COLLECTOR] SecurityCollector not available: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[COLLECTOR] Security collection error: {e}")
+            return None
+
+    def collect_system_visibility(self, force: bool = False) -> Optional[Dict]:
+        """
+        Collect raw system visibility snapshot (ports/connections/startup/tasks/disk).
+
+        Uses SecurityCollector as a data source, but without risk filtering.
+        Interval is config-driven (default: 6 hours).
+        """
+        try:
+            if not getattr(self.config, 'enable_system_visibility_collection', True):
+                return None
+
+            if not hasattr(self, '_sec_collector'):
+                from helper.security_collector import SecurityCollector
+                self._sec_collector = SecurityCollector(config=self.config)
+                self._sec_last_collect = 0
+                logger.info("[COLLECTOR] SecurityCollector initialized")
+
+            if not hasattr(self, '_vis_last_collect'):
+                self._vis_last_collect = 0
+
+            vis_interval = int(getattr(self.config, 'system_visibility_interval_seconds', 21600))
+            vis_interval = max(600, vis_interval)
+            now = time.time()
+            if not force and (now - self._vis_last_collect < vis_interval):
+                return None
+
+            logger.info("[COLLECTOR] Starting raw system visibility collection...")
+            snapshot = self._sec_collector.collect_system_visibility_snapshot()
+            if snapshot:
+                snapshot['agent_id'] = self.config.agent_id
+                self._vis_last_collect = now
+                counts = snapshot.get('counts', {})
+                logger.info(f"[COLLECTOR] System visibility collected: {counts}")
+                return snapshot
+
+            return None
+
+        except ImportError as e:
+            logger.warning(f"[COLLECTOR] SecurityCollector not available for visibility: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"[COLLECTOR] System visibility collection error: {e}")
+            return None
     
     def shutdown(self):
         """

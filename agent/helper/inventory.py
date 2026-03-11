@@ -14,6 +14,7 @@ import hashlib
 import logging
 import math
 import re
+import time
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -45,7 +46,10 @@ class Application:
     publisher: str = "Unknown"
     install_location: Optional[str] = None
     install_date: Optional[str] = None
-    source: Optional[str] = None  # Registry-HKLM, Registry-HKCU, MicrosoftStore
+    source: Optional[str] = None  # Registry-HKLM, Registry-HKCU, MicrosoftStore, DiskScan
+    architecture: Optional[str] = None  # x86, x64, ARM64, Unknown
+    uninstall_command: Optional[str] = None
+    estimated_size_kb: Optional[int] = None
     
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -70,6 +74,11 @@ class InventoryTracker:
         self.last_hash: str = ""
         self.last_apps: Dict[str, Application] = {}
         self.is_first_scan: bool = True
+        self._consecutive_timeouts: int = 0
+        self._max_consecutive_timeouts: int = 3
+        self._timeout_cooldown_seconds: int = 30 * 60
+        self._timeout_cooldown_until: float = 0.0
+        self._is_suspended_check = None  # Set by main.py to check system suspend state
         
         # State file for persistence
         self._state_file = self._get_state_file()
@@ -80,6 +89,9 @@ class InventoryTracker:
         self._create_powershell_script()
         
         logger.info("[INVENTORY] InventoryTracker initialized (4-hour intervals)")
+
+    def _in_timeout_cooldown(self) -> bool:
+        return self._timeout_cooldown_until > time.time()
     
     def _get_state_file(self) -> Path:
         """Get path to state file"""
@@ -104,7 +116,193 @@ $WarningPreference = 'SilentlyContinue'
 # FIX: Increase output width to prevent path truncation
 $PSDefaultParameterValues['Out-String:Width'] = 4096
 
-$AllApps = @()
+$script:AllApps = @()
+
+# --- Helper: Resolve install location from registry entry ---
+function Get-ResolvedInstallLocation {
+    param($RegItem)
+    
+    # 1. Direct InstallLocation value
+    $loc = $RegItem.InstallLocation
+    if ($loc -and (Test-Path $loc -ErrorAction SilentlyContinue)) { return $loc }
+    
+    # 2. Extract directory from DisplayIcon (often contains exe path)
+    $icon = $RegItem.DisplayIcon
+    if ($icon) {
+        $iconPath = $icon -replace ',.*$', '' -replace '"', ''
+        if ($iconPath -and (Test-Path $iconPath -ErrorAction SilentlyContinue)) {
+            return [System.IO.Path]::GetDirectoryName($iconPath)
+        }
+    }
+    
+    # 3. Try InstallSource
+    $src = $RegItem.InstallSource
+    if ($src -and (Test-Path $src -ErrorAction SilentlyContinue)) { return $src }
+    
+    # 4. Extract directory from UninstallString
+    $uninstall = $RegItem.UninstallString
+    if ($uninstall) {
+        $uninstallPath = $uninstall -replace '"', '' -replace '\s+/.*$', '' -replace '\s+--.*$', ''
+        if ($uninstallPath -and (Test-Path $uninstallPath -ErrorAction SilentlyContinue)) {
+            return [System.IO.Path]::GetDirectoryName($uninstallPath)
+        }
+    }
+    
+    # 5. Return raw InstallLocation even if path doesn't exist (may be on another drive)
+    if ($loc) { return $loc }
+    
+    return $null
+}
+
+# --- Helper: Resolve install date from registry entry ---
+function Get-ResolvedInstallDate {
+    param($RegItem, $ResolvedLocation)
+    
+    # 1. Direct InstallDate from registry (YYYYMMDD format)
+    $rawDate = $RegItem.InstallDate
+    if ($rawDate -and $rawDate -match '^\d{8}$') {
+        $year = $rawDate.Substring(0,4)
+        $month = $rawDate.Substring(4,2)
+        $day = $rawDate.Substring(6,2)
+        return "$year-$month-$day"
+    }
+    
+    # 2. Registry key LastWriteTime (when the Uninstall key was last modified)
+    $keyPath = $RegItem.PSPath
+    if ($keyPath) {
+        try {
+            $key = Get-Item $keyPath -ErrorAction SilentlyContinue
+            if ($key -and $key.LastWriteTime) {
+                return $key.LastWriteTime.ToString('yyyy-MM-dd')
+            }
+        } catch {}
+    }
+    
+    # 3. Folder creation date from resolved install location
+    if ($ResolvedLocation -and (Test-Path $ResolvedLocation -ErrorAction SilentlyContinue)) {
+        try {
+            return (Get-Item $ResolvedLocation -ErrorAction SilentlyContinue).CreationTime.ToString('yyyy-MM-dd')
+        } catch {}
+    }
+    
+    return $null
+}
+
+# --- Helper: Detect application architecture ---
+function Get-AppArchitecture {
+    param($RegItem, $InstallLocation, $Source)
+    
+    # 1. Check if from WOW6432Node (32-bit on 64-bit OS)
+    if ($Source -eq 'Registry-HKLM' -and $RegItem.PSPath -match 'WOW6432Node') {
+        return 'x86'
+    }
+    
+    # 2. Check install location path
+    if ($InstallLocation) {
+        if ($InstallLocation -match 'Program Files \(x86\)') {
+            return 'x86'
+        }
+        if ($InstallLocation -match 'Program Files') {
+            return 'x64'
+        }
+    }
+    
+    # 3. Try to detect from executable PE header
+    if ($InstallLocation -and (Test-Path $InstallLocation)) {
+        try {
+            $exeFiles = Get-ChildItem -Path $InstallLocation -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 3
+            foreach ($exe in $exeFiles) {
+                try {
+                    $bytes = [System.IO.File]::ReadAllBytes($exe.FullName)
+                    if ($bytes.Length -gt 256) {
+                        # PE header offset at 0x3C
+                        $peOffset = [BitConverter]::ToInt32($bytes, 60)
+                        if ($peOffset -gt 0 -and $peOffset -lt $bytes.Length - 6) {
+                            # Machine type at PE header + 4
+                            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+                            if ($machine -eq 0x8664) { return 'x64' }
+                            if ($machine -eq 0x014c) { return 'x86' }
+                            if ($machine -eq 0xAA64) { return 'ARM64' }
+                        }
+                    }
+                } catch {}
+            }
+        } catch {}
+    }
+    
+    return 'Unknown'
+}
+
+# --- Helper: Resolve architecture from executable ---
+function Get-ExeArchitecture {
+    param($Path)
+    if (-not (Test-Path $Path)) { return 'Unknown' }
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        if ($bytes.Length -gt 256) {
+            $peOffset = [BitConverter]::ToInt32($bytes, 60)
+            if ($peOffset -gt 0 -and $peOffset -lt $bytes.Length - 6) {
+                $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+                if ($machine -eq 0x8664) { return 'x64' }
+                if ($machine -eq 0x014c) { return 'x86' }
+                if ($machine -eq 0xAA64) { return 'ARM64' }
+            }
+        }
+    } catch {}
+    return 'Unknown'
+}
+
+# --- Drive Scanning Logic ---
+function Scan-ForPortableApps {
+    param([string[]]$Drives)
+    
+    $PortableApps = @()
+    $ScanPaths = @(
+        'Program Files',
+        'Program Files (x86)',
+        'ProgramData',
+        'Users\*\AppData\Local',
+        'Users\*\AppData\Roaming'
+    )
+    
+    foreach ($drive in $Drives) {
+        $root = "${drive}:\"
+        if (-not (Test-Path $root)) { continue }
+        
+        foreach ($scanPath in $ScanPaths) {
+            $fullPath = Join-Path $root $scanPath
+            try {
+                $dirs = Get-ChildItem -Path $fullPath -Directory -ErrorAction SilentlyContinue
+                foreach ($dir in $dirs) {
+                    # Skip if already found in registry (heuristically based on path)
+                    $dirPath = $dir.FullName
+                    if ($script:AllApps | Where-Object { $_.InstallLocation -eq $dirPath }) { continue }
+                    
+                    # Look for main executable
+                    $exe = Get-ChildItem -Path $dirPath -Filter "*.exe" -File -ErrorAction SilentlyContinue | 
+                           Sort-Object Length -Descending | Select-Object -First 1
+                    
+                    if ($exe) {
+                        # Simple publisher detection from file info
+                        $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName)
+                        $PortableApps += [PSCustomObject]@{
+                            DisplayName = $dir.Name
+                            DisplayVersion = $versionInfo.ProductVersion -or 'Unknown'
+                            Publisher = $versionInfo.CompanyName -or 'Unknown'
+                            InstallLocation = $dirPath
+                            InstallDate = $dir.CreationTime.ToString('yyyy-MM-dd')
+                            Source = 'DiskScan'
+                            Architecture = Get-ExeArchitecture $exe.FullName
+                            UninstallCommand = $null
+                            EstimatedSizeKB = [math]::Round((Get-ChildItem $dirPath -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum / 1KB)
+                        }
+                    }
+                }
+            } catch {}
+        }
+    }
+    return $PortableApps
+}
 
 # METHOD 1: System-wide apps (HKLM)
 $paths = @(
@@ -119,24 +317,26 @@ foreach ($path in $paths) {
                      $_.DisplayName -notmatch '^KB\d{6,}' -and 
                      $_.DisplayName -notmatch 'Update for' 
                  } |
-                 Select-Object @{N='DisplayName';E={$_.DisplayName}},
-                               @{N='DisplayVersion';E={$_.DisplayVersion}},
-                               @{N='Publisher';E={$_.Publisher}},
-                               @{N='InstallLocation';E={$_.InstallLocation}},
-                               @{N='InstallDate';E={
-                                   $rawDate = $_.InstallDate
-                                   if ($rawDate -and $rawDate -match '^\d{8}$') {
-                                       # Convert YYYYMMDD to YYYY-MM-DD
-                                       $year = $rawDate.Substring(0,4)
-                                       $month = $rawDate.Substring(4,2)
-                                       $day = $rawDate.Substring(6,2)
-                                       "$year-$month-$day"
-                                   } else {
-                                       $rawDate
-                                   }
-                               }},
-                               @{N='Source';E={'Registry-HKLM'}}
-        if ($items) { $AllApps += $items }
+                 ForEach-Object {
+                     $resolvedLoc = Get-ResolvedInstallLocation $_
+                     $resolvedDate = Get-ResolvedInstallDate $_ $resolvedLoc
+                     $arch = Get-AppArchitecture $_ $resolvedLoc 'Registry-HKLM'
+                     $uninstallCmd = $_.UninstallString
+                     if ($_.QuietUninstallString) { $uninstallCmd = $_.QuietUninstallString }
+                     
+                     [PSCustomObject]@{
+                         DisplayName = $_.DisplayName
+                         DisplayVersion = $_.DisplayVersion
+                         Publisher = $_.Publisher
+                         InstallLocation = $resolvedLoc
+                         InstallDate = $resolvedDate
+                         Source = 'Registry-HKLM'
+                         Architecture = $arch
+                         UninstallCommand = $uninstallCmd
+                         EstimatedSizeKB = $_.EstimatedSize
+                     }
+                 }
+        if ($items) { $script:AllApps += $items }
     }
 }
 
@@ -146,59 +346,40 @@ foreach ($path in $userPaths) {
     if (Test-Path $path) {
         $items = Get-ItemProperty $path -ErrorAction SilentlyContinue | 
                  Where-Object { $_.DisplayName } |
-                 Select-Object @{N='DisplayName';E={$_.DisplayName}},
-                               @{N='DisplayVersion';E={$_.DisplayVersion}},
-                               @{N='Publisher';E={$_.Publisher}},
-                               @{N='InstallLocation';E={$_.InstallLocation}},
-                               @{N='InstallDate';E={
-                                   $rawDate = $_.InstallDate
-                                   if ($rawDate -and $rawDate -match '^\d{8}$') {
-                                       # Convert YYYYMMDD to YYYY-MM-DD
-                                       $year = $rawDate.Substring(0,4)
-                                       $month = $rawDate.Substring(4,2)
-                                       $day = $rawDate.Substring(6,2)
-                                       "$year-$month-$day"
-                                   } else {
-                                       $rawDate
-                                   }
-                               }},
-                               @{N='Source';E={'Registry-HKCU'}}
-        if ($items) { $AllApps += $items }
+                 ForEach-Object {
+                     $resolvedLoc = Get-ResolvedInstallLocation $_
+                     $resolvedDate = Get-ResolvedInstallDate $_ $resolvedLoc
+                     $arch = Get-AppArchitecture $_ $resolvedLoc 'Registry-HKCU'
+                     $uninstallCmd = $_.UninstallString
+                     if ($_.QuietUninstallString) { $uninstallCmd = $_.QuietUninstallString }
+                     
+                     [PSCustomObject]@{
+                         DisplayName = $_.DisplayName
+                         DisplayVersion = $_.DisplayVersion
+                         Publisher = $_.Publisher
+                         InstallLocation = $resolvedLoc
+                         InstallDate = $resolvedDate
+                         Source = 'Registry-HKCU'
+                         Architecture = $arch
+                         UninstallCommand = $uninstallCmd
+                         EstimatedSizeKB = $_.EstimatedSize
+                     }
+                 }
+        if ($items) { $script:AllApps += $items }
     }
 }
 
-# METHOD 3: Microsoft Store Apps (FIXED - with install date retrieval)
-# System noise apps to filter out
-$SystemNoise = @(
-    'Microsoft.AAD.BrokerPlugin',
-    'Microsoft.AccountsControl',
-    'Microsoft.AsyncTextService',
-    'Microsoft.BioEnrollment',
-    'Microsoft.CredDialogHost',
-    'Microsoft.ECApp',
-    'Microsoft.LockApp',
-    'Microsoft.Win32WebViewHost',
-    'Microsoft.XboxGameCallableUI',
-    'Microsoft.Services.Store.Engagement',
-    'Microsoft.VCLibs.*',
-    'Microsoft.NET.Native.*',
-    'Microsoft.UI.Xaml.*',
-    'Microsoft.WindowsAppRuntime.*'
-)
-
+# METHOD 3: Microsoft Store Apps
 try {
-    $storeApps = Get-AppxPackage -ErrorAction Stop |
+    $storeApps = Get-AppxPackage -ErrorAction SilentlyContinue |
                  Where-Object { 
                      $name = $_.Name
-                     # Exclude Windows core components and system noise
                      $_.Name -notmatch '^Microsoft\.Windows\.' -and
                      -not ($SystemNoise | Where-Object { $name -like $_ })
                  } |
                  ForEach-Object {
                      $pkg = $_
                      $installDate = $null
-                     
-                     # FIX: Get install date from registry
                      $regPath = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages\$($pkg.PackageFullName)"
                      if (Test-Path $regPath) {
                          try {
@@ -208,37 +389,41 @@ try {
                              }
                          } catch {}
                      }
-                     
-                     # Fallback: Use InstallLocation folder creation date
-                     if (-not $installDate -and $pkg.InstallLocation -and (Test-Path $pkg.InstallLocation)) {
-                         try {
-                             $installDate = (Get-Item $pkg.InstallLocation).CreationTime.ToString('yyyy-MM-dd')
-                         } catch {}
-                     }
-                     
-                     # Get full install location path (not truncated)
-                     $fullPath = $pkg.InstallLocation
-                     
-                     [PSCustomObject]@{
-                         DisplayName = $pkg.Name
-                         DisplayVersion = $pkg.Version
-                         Publisher = $pkg.Publisher
-                         InstallLocation = $fullPath
-                         InstallDate = $installDate
-                         Source = 'MicrosoftStore'
-                     }
-                 }
+                      
+                      if (-not $installDate -and $pkg.InstallLocation -and (Test-Path $pkg.InstallLocation)) {
+                          try {
+                              $installDate = (Get-Item $pkg.InstallLocation).CreationTime.ToString('yyyy-MM-dd')
+                          } catch {}
+                      }
+                      
+                      $fullPath = $pkg.InstallLocation
+                      $storeArch = if ($pkg.Architecture) { $pkg.Architecture.ToString() } else { 'Unknown' }
+                      
+                      [PSCustomObject]@{
+                          DisplayName = $pkg.Name
+                          DisplayVersion = $pkg.Version
+                          Publisher = $pkg.Publisher
+                          InstallLocation = $fullPath
+                          InstallDate = $installDate
+                          Source = 'MicrosoftStore'
+                          Architecture = $storeArch
+                          UninstallCommand = $null
+                          EstimatedSizeKB = $null
+                      }
+                  }
     
-    if ($storeApps) { $AllApps += $storeApps }
-} catch {
-    # Silently fail - don't break the script
-}
+    if ($storeApps) { $script:AllApps += $storeApps }
+} catch {}
+
+# METHOD 4: Disk Scan for Portable Apps
+$portable = Scan-ForPortableApps -Drives @('C', 'D')
+if ($portable) { $script:AllApps += $portable }
 
 # Deduplicate by DisplayName
-$AllApps = $AllApps | Group-Object DisplayName | ForEach-Object { $_.Group[0] }
+$script:AllApps = $script:AllApps | Group-Object DisplayName | ForEach-Object { $_.Group[0] }
 
 # Output clean JSON with full width
-$AllApps | ConvertTo-Json -Compress -Depth 10
+$script:AllApps | ConvertTo-Json -Compress -Depth 10
 '''
         
         try:
@@ -286,39 +471,110 @@ $AllApps | ConvertTo-Json -Compress -Depth 10
     
     def _compute_hash(self, apps: List[Application]) -> str:
         """Compute hash of app inventory for change detection"""
-        app_list = sorted([f"{app.name.lower()}:{app.version}" for app in apps])
+        # Include version, publisher, arch, and uninstall cmd in hash for better change detection
+        # We skip estimated_size_kb as it might fluctuate slightly on disk scans
+        app_list = sorted([
+            f"{app.name.lower()}:{app.version}:{app.publisher}:{app.architecture}:{app.uninstall_command}" 
+            for app in apps
+        ])
         return hashlib.sha256("|".join(app_list).encode()).hexdigest()[:16]
     
-    def _collect_via_powershell(self) -> Optional[List[Application]]:
-        """Collect apps using PowerShell script (HIDDEN WINDOW)"""
+    def _kill_process_tree(self, process):
+        """Aggressively kill a subprocess and its entire process tree."""
+        if not process:
+            return
         try:
-            # ✅ FIXED: Hide PowerShell window to prevent popup
+            process.kill()
+        except Exception:
+            pass
+        try:
+            if process.pid:
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    capture_output=True, text=True, timeout=10
+                )
+        except Exception:
+            pass
+
+    def _collect_via_powershell(self, is_suspended_check=None) -> Optional[List[Application]]:
+        """Collect apps using PowerShell script with suspend-aware timeout.
+
+        Uses self._is_suspended_check as default if no explicit checker passed.
+
+        Instead of one blocking ``communicate(timeout=120)`` call, this polls
+        every 5 seconds so the helper can detect a system suspend mid-collection
+        and abort immediately — preventing zombie PowerShell processes that
+        hang the main loop on resume.
+
+        Args:
+            is_suspended_check: Optional callable returning True when the
+                system is suspended.  Passed from main.py via the collector.
+        """
+        process = None
+        try:
+            # Use instance-level checker as fallback
+            check = is_suspended_check or self._is_suspended_check
+
+            # Skip if system is currently suspended
+            if check and check():
+                logger.info("[INVENTORY] Skipping collection — system suspended")
+                return None
+
+            if self._in_timeout_cooldown():
+                remaining = int(max(0, self._timeout_cooldown_until - time.time()))
+                logger.warning(f"[INVENTORY] [HEALTH] Collection paused due to timeout circuit breaker ({remaining}s remaining)")
+                return None
+
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = subprocess.SW_HIDE
-            
-            # ✅ Added -NonInteractive to prevent any prompts that could show a window
-            result = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-NonInteractive", 
-                 "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", 
+
+            process = subprocess.Popen(
+                ["powershell.exe", "-NoProfile", "-NonInteractive",
+                 "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
                  "-File", str(self._ps_script)],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=120,
                 startupinfo=startupinfo,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            
-            if result.returncode != 0:
-                logger.error(f"[INVENTORY] PowerShell failed: {result.stderr[:200]}")
+
+            # ── Suspend-aware polling loop ──────────────────────────
+            # Poll every 5s so we can abort if the system suspends.
+            POLL_INTERVAL = 5   # seconds per poll chunk
+            TOTAL_TIMEOUT = 120  # overall deadline
+            deadline = time.time() + TOTAL_TIMEOUT
+            stdout = None
+            stderr = None
+
+            while time.time() < deadline:
+                # Check for suspend between polls
+                if check and check():
+                    logger.info("[INVENTORY] System suspended mid-collection — aborting PowerShell")
+                    self._kill_process_tree(process)
+                    return None
+
+                try:
+                    stdout, stderr = process.communicate(timeout=POLL_INTERVAL)
+                    break  # Process completed normally
+                except subprocess.TimeoutExpired:
+                    continue  # Still running, poll again
+            else:
+                # Overall deadline exceeded
+                raise subprocess.TimeoutExpired(
+                    cmd="powershell.exe", timeout=TOTAL_TIMEOUT
+                )
+
+            if process.returncode != 0:
+                logger.error(f"[INVENTORY] PowerShell failed: {(stderr or '')[:200]}")
                 return None
-            
-            # Parse JSON output
-            output = result.stdout.strip()
+
+            output = (stdout or '').strip()
             if not output:
                 logger.warning("[INVENTORY] Empty output from PowerShell")
                 return []
-            
+
             try:
                 apps_data = json.loads(output)
                 if not isinstance(apps_data, list):
@@ -326,65 +582,78 @@ $AllApps | ConvertTo-Json -Compress -Depth 10
             except json.JSONDecodeError as e:
                 logger.error(f"[INVENTORY] Failed to parse JSON: {e}")
                 return None
-            
+
             apps = []
             for app_data in apps_data:
                 try:
-                    # Support both old 'Name' and new 'DisplayName' keys
                     name = app_data.get('DisplayName') or app_data.get('Name') or ''
                     name = name.strip()
-                    
-                    # FIX: Normalize GUID names to friendly names
+
                     name_lower = name.lower()
                     if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', name_lower):
                         friendly = GUID_TO_FRIENDLY_NAME.get(name_lower)
                         if friendly:
-                            logger.debug(f"[INVENTORY] Mapped GUID {name} → {friendly}")
+                            logger.debug(f"[INVENTORY] Mapped GUID {name} -> {friendly}")
                             name = friendly
                         else:
                             logger.debug(f"[INVENTORY] Unknown GUID app: {name}")
                             name = f"System App ({name[:8]}...)"
-                    
+
                     version = app_data.get('DisplayVersion') or app_data.get('Version') or 'Unknown'
                     publisher = app_data.get('Publisher') or 'Unknown'
-                    
-                    # FIX: Normalize GUID publishers to company names
+
                     publisher_upper = publisher.upper() if publisher else ''
                     if publisher_upper in GUID_TO_PUBLISHER:
                         publisher = GUID_TO_PUBLISHER[publisher_upper]
                         logger.debug(f"[INVENTORY] Mapped publisher GUID to {publisher}")
-                    
+
                     install_location = app_data.get('InstallLocation')
                     install_date = app_data.get('InstallDate')
-                    source = app_data.get('Source')  # Registry-HKLM, Registry-HKCU, MicrosoftStore
-                    
+                    source = app_data.get('Source')
+                    architecture = app_data.get('Architecture')
+                    uninstall_command = app_data.get('UninstallCommand')
+                    estimated_size_kb = app_data.get('EstimatedSizeKB')
+
                     app = Application(
                         name=name,
                         version=version,
                         publisher=publisher,
                         install_location=install_location,
                         install_date=install_date,
-                        source=source
+                        source=source,
+                        architecture=architecture,
+                        uninstall_command=uninstall_command,
+                        estimated_size_kb=estimated_size_kb
                     )
                     if app.name:
-                        # Diagnostic logging for missing data
                         if not install_location:
                             logger.debug(f"[INVENTORY] {name}: No install location")
                         if not install_date:
                             logger.debug(f"[INVENTORY] {name}: No install date")
                         apps.append(app)
-                except Exception as e:
+                except Exception:
                     continue
-            
+
+            self._consecutive_timeouts = 0
+            self._timeout_cooldown_until = 0.0
             return apps
-            
+
         except subprocess.TimeoutExpired:
+            self._kill_process_tree(process)
+
+            self._consecutive_timeouts += 1
             logger.error("[INVENTORY] PowerShell timeout (120s)")
+            logger.error(f"[INVENTORY] [HEALTH] Timeout streak: {self._consecutive_timeouts}/{self._max_consecutive_timeouts}")
+            if self._consecutive_timeouts >= self._max_consecutive_timeouts:
+                self._timeout_cooldown_until = time.time() + self._timeout_cooldown_seconds
+                logger.error(f"[INVENTORY] [HEALTH] Circuit breaker OPEN for {self._timeout_cooldown_seconds}s")
+                self._consecutive_timeouts = 0
             return None
         except Exception as e:
             logger.error(f"[INVENTORY] Collection error: {e}")
+            self._kill_process_tree(process)
             return None
-    
+
     def should_check(self) -> bool:
         """
         Determine if we should check inventory.
@@ -633,8 +902,8 @@ $AllApps | ConvertTo-Json -Compress -Depth 10
         validated_name = re.sub(r'\s+', ' ', validated_name)  # Replace multiple spaces with single space
         validated_name = validated_name[:100]  # Limit length
         
-        # Validate other fields (FIXED: Added install_date and source)
-        for field in ['version', 'publisher', 'install_location', 'install_date', 'source']:
+        # Validate other fields (FIXED: Added install_date, source, arch, etc.)
+        for field in ['version', 'publisher', 'install_location', 'install_date', 'source', 'architecture', 'uninstall_command', 'estimated_size_kb']:
             if field in app_data:
                 value = app_data[field]
                 
@@ -656,9 +925,12 @@ $AllApps | ConvertTo-Json -Compress -Depth 10
             name=validated_name,
             version=validated_data.get('version') or 'Unknown',
             publisher=validated_data.get('publisher') or 'Unknown',
-            install_location=validated_data.get('install_location'),  # None if not available
-            source=validated_data.get('source'),  # None if not available
-            install_date=validated_data.get('install_date')  # None if not available
+            install_location=validated_data.get('install_location'),
+            source=validated_data.get('source'),
+            install_date=validated_data.get('install_date'),
+            architecture=validated_data.get('architecture'),
+            uninstall_command=validated_data.get('uninstall_command'),
+            estimated_size_kb=validated_data.get('estimated_size_kb')
         )
         
         return validated_app

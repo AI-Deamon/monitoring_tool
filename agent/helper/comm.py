@@ -81,13 +81,55 @@ class CoreCommunicator:
                 },
                 method='POST'
             )
-            
+            # mTLS support
+            context = None
+            if url.startswith('https://') and self.config.ssl_enabled:
+                import ssl
+                context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+                if os.path.exists(self.config.client_cert_path):
+                    try:
+                        context.load_cert_chain(
+                            certfile=self.config.client_cert_path,
+                            keyfile=self.config.client_key_path
+                        )
+                        context.load_verify_locations(cafile=self.config.ca_cert_path)
+                        context.verify_mode = ssl.CERT_REQUIRED
+                        # For local communication, hostname check can be tricky with self-signed
+                        context.check_hostname = False 
+                        logger.debug("[SECURITY] Loaded mTLS certificates for Core communication")
+                    except Exception as e:
+                        logger.error(f"[SECURITY] Failed to load mTLS certificates: {e}")
+                else:
+                    logger.warning(f"[SECURITY] mTLS cert not found: {self.config.client_cert_path}")
+
             # Send request
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                response_data = response.read().decode('utf-8')
-                if response_data:
-                    return json.loads(response_data)
-                return {'status': 'ok'}
+            try:
+                with urllib.request.urlopen(req, timeout=timeout, context=context) as response:
+                    response_data = response.read().decode('utf-8')
+                    if response_data:
+                        return json.loads(response_data)
+                    return {'status': 'ok'}
+            except urllib.error.URLError as e:
+                # SSL/protocol mismatch: Core may be running HTTP while we tried HTTPS
+                if url.startswith('https://') and ('WRONG_VERSION_NUMBER' in str(e) or 'SSL' in str(e)):
+                    http_url = url.replace('https://', 'http://')
+                    logger.warning(f"[COMM] SSL error, falling back to HTTP: {http_url}")
+                    http_req = urllib.request.Request(
+                        http_url,
+                        data=json.dumps(data).encode('utf-8'),
+                        headers={
+                            'Content-Type': 'application/json',
+                            'X-Agent-Id': self.agent_id
+                        },
+                        method='POST'
+                    )
+                    with urllib.request.urlopen(http_req, timeout=timeout) as response:
+                        response_data = response.read().decode('utf-8')
+                        if response_data:
+                            return json.loads(response_data)
+                        return {'status': 'ok'}
+                else:
+                    raise
                 
         except urllib.error.HTTPError as e:
             logger.error(f"HTTP error {e.code} for {endpoint}: {e.reason}")
@@ -218,6 +260,65 @@ class CoreCommunicator:
         self._flush_queue()
         return True
     
+    def send_hardware(self, hardware: Dict) -> bool:
+        """
+        Queue and send hardware asset info to core
+        
+        Args:
+            hardware: Hardware data dict
+            
+        Returns:
+            True if successful
+        """
+        self.queue.add(hardware, '/hardware')
+        self._flush_queue()
+        return True
+    
+    def send_extended_inventory(self, data: Dict) -> bool:
+        """
+        Queue and send extended inventory data to core
+        
+        Args:
+            data: Extended inventory data dict (cli_tools, drivers, extensions, etc.)
+            
+        Returns:
+            True if successful
+        """
+        self.queue.add(data, '/extended-inventory')
+        self._flush_queue()
+        return True
+    
+    def send_security_indicators(self, data: Dict) -> bool:
+        """
+        Queue and send security indicator data to core.
+        
+        Args:
+            data: Security indicators dict with 'indicators' and 'summary'
+            
+        Returns:
+            True if successful
+        """
+        self.queue.add(data, '/security-indicators')
+        self._flush_queue()
+        return True
+
+    def send_system_visibility(self, data: Dict) -> bool:
+        """
+        Queue and send raw system visibility snapshot to core.
+
+        Args:
+            data: Snapshot dict with open_ports, network_connections, startup_programs, scheduled_tasks, disk_usage
+
+        Returns:
+            True if accepted for queued delivery
+        """
+        if not data:
+            return True
+
+        self.queue.add(data, '/system-visibility')
+        self._flush_queue()
+        return True
+    
     def ping(self) -> bool:
         """
         Ping core to check connectivity
@@ -284,5 +385,22 @@ class CoreCommunicator:
         }
         
         self.queue.add(payload, '/screentime_spans')
+        self._flush_queue()
+        return True
+    
+    def send_eol_data(self, eol_data: Dict) -> bool:
+        """
+        Queue and send EOL data to core.
+        
+        Args:
+            eol_data: EOL data dict with updates, metering, product_keys, esu, warranty
+            
+        Returns:
+            True if successful
+        """
+        if not eol_data:
+            return True
+        
+        self.queue.add(eol_data, '/eol-data')
         self._flush_queue()
         return True

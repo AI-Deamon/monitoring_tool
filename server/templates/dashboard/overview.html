@@ -28,7 +28,8 @@
 
     <!-- Fleet Summary Cards -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
+        <div
+            class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
             <img src="{{ url_for('static', filename='agents.png') }}" class="w-8 h-8" />
             <div>
                 <div class="text-xs font-semibold text-gray-500 uppercase">Total Agents</div>
@@ -36,7 +37,8 @@
             </div>
         </div>
 
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
+        <div
+            class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
             <img src="{{ url_for('static', filename='online.png') }}" class="w-8 h-8" />
             <div>
                 <div class="text-xs font-semibold text-gray-500 uppercase">Online Now</div>
@@ -44,7 +46,8 @@
             </div>
         </div>
 
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
+        <div
+            class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
             <img src="{{ url_for('static', filename='no.png') }}" class="w-8 h-8" />
             <div>
                 <div class="text-xs font-semibold text-gray-500 uppercase">Offline</div>
@@ -54,56 +57,66 @@
     </div>
 
     <!-- MAIN CONTENT -->
-    <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-4">
+    <div class="grid grid-cols-1 xl:grid-cols-6 gap-4 mb-4">
 
-        <!-- PIE CHARTS -->
+        <!-- PIE CHARTS (Screen Time) -->
         <div class="xl:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
             <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                <h3 class="text-sm font-semibold">Agent & Screen Time Overview</h3>
+                <h3 class="text-sm font-semibold">Agent & Screen Time</h3>
             </div>
-            <div class="p-4 grid grid-cols-2 gap-3">
-                <div class="h-50">
+            <div class="p-4 grid grid-cols-2 gap-3 h-[240px]">
+                <div class="h-full">
                     <canvas id="agent-status-chart"></canvas>
                 </div>
-                <div class="h-50">
+                <div class="h-full">
                     <canvas id="screentime-chart"></canvas>
                 </div>
             </div>
         </div>
 
-        <!-- TOP 5 AGENTS -->
+        <!-- EOL RISK CHART (New) -->
+        <div class="xl:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+            <div
+                class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex justify-between items-center">
+                <h3 class="text-sm font-semibold">Fleet Lifecycle Risk</h3>
+                <span class="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">REAL-TIME</span>
+            </div>
+            <div class="p-4 flex flex-col items-center justify-center h-[240px]">
+                <div class="w-full h-[180px]">
+                    <canvas id="eolRiskChart"></canvas>
+                </div>
+                <div class="mt-2 flex gap-4 text-xs">
+                    <div class="flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-red-600"></span>
+                        <span>EOL Products: <span id="eol-counter" class="font-bold text-red-600">-</span></span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                        <span>Compliance: <span id="compliance-rate" class="font-bold text-green-600">-</span></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TOP 5 AGENTS (Moved/Resized) -->
         <div class="xl:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
             <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                <h3 class="text-sm font-semibold">
-                    <img src="{{ url_for('static', filename='throphy.png') }}" class="w-4 h-4 inline mr-1" />
-                    Top 5 Agents
+                <h3 class="text-sm font-semibold flex items-center gap-2">
+                    <img src="{{ url_for('static', filename='throphy.png') }}" class="w-4 h-4" />
+                    Top Performance
                 </h3>
             </div>
-            <div class="p-4">
-                <div class="grid grid-cols-3 gap-4">
-                    <!-- Idle -->
-                    <div>
-                        <h4 class="text-xs font-semibold text-warning-600 mb-1">Idle</h4>
-                        <div class="grid grid-cols-[1fr_auto] text-xs text-gray-400 mb-1">
-                            <span>Agent</span><span class="text-right">Time</span>
-                        </div>
-                        <ul id="top-idle-list" class="space-y-1 text-sm font-mono"></ul>
-                    </div>
+            <div class="p-4 h-[240px] overflow-y-auto">
+                <div class="grid grid-cols-2 gap-4">
                     <!-- Active -->
                     <div>
-                        <h4 class="text-xs font-semibold text-success-600 mb-1">Active</h4>
-                        <div class="grid grid-cols-[1fr_auto] text-xs text-gray-400 mb-1">
-                            <span>Agent</span><span class="text-right">Time</span>
-                        </div>
-                        <ul id="top-active-list" class="space-y-1 text-sm font-mono"></ul>
+                        <h4 class="text-[10px] font-bold text-success-600 uppercase mb-2">Most Active</h4>
+                        <ul id="top-active-list" class="space-y-1.5 text-xs font-mono"></ul>
                     </div>
-                    <!-- Locked -->
+                    <!-- Idle -->
                     <div>
-                        <h4 class="text-xs font-semibold text-red-600 mb-1">Locked</h4>
-                        <div class="grid grid-cols-[1fr_auto] text-xs text-gray-400 mb-1">
-                            <span>Agent</span><span class="text-right">Time</span>
-                        </div>
-                        <ul id="top-locked-list" class="space-y-1 text-sm font-mono"></ul>
+                        <h4 class="text-[10px] font-bold text-warning-600 uppercase mb-2">Most Idle</h4>
+                        <ul id="top-idle-list" class="space-y-1.5 text-xs font-mono"></ul>
                     </div>
                 </div>
             </div>
@@ -147,4 +160,5 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/overview.js') }}"></script>
+<script src="{{ url_for('static', filename='js/eol-dashboard.js') }}"></script>
 {% endblock %}

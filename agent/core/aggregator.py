@@ -110,7 +110,7 @@ class HeartbeatAggregator:
         
         DATA FLOW:
         1. state_machine.py calculates time (ONLY place)
-        2. state_detector.get_cumulative_deltas() reads from state_machine
+        2. state_detector.get_cumulative_totals() reads from state_machine
         3. collector.collect_heartbeat() reads from state_detector
         4. aggregator (THIS FILE) reads from heartbeat - NO CALCULATION
         5. uploader reads from aggregator - NO CALCULATION
@@ -125,37 +125,51 @@ class HeartbeatAggregator:
         hb = latest_hb['data']
         screentime = hb.get('screentime', {})
         
-        # ✅ PHASE 3: Extract cumulative totals (already calculated by state_machine.py)
-        # NO MATH HERE - just reading and routing
-        cumulative_active = screentime.get('delta_active_seconds', 0)
-        cumulative_idle = screentime.get('delta_idle_seconds', 0)
-        cumulative_locked = screentime.get('delta_locked_seconds', 0)
-        cumulative_away = screentime.get('delta_away_seconds', 0)  # NEW: track away time
+        # DIAGNOSTIC: Log exactly what we read from the heartbeat
+        logger.info(
+            f"[DIAG] Aggregator screentime from heartbeat: "
+            f"keys={list(screentime.keys())}, "
+            f"active={screentime.get('active_seconds', 'MISSING')}, "
+            f"idle={screentime.get('idle_seconds', 'MISSING')}, "
+            f"locked={screentime.get('locked_seconds', 'MISSING')}, "
+            f"ts={hb.get('timestamp', 'MISSING')}"
+        )
         
-        # Get metadata from latest heartbeat
-        latest_timestamp = hb.get('timestamp')
+        # Extract session_start for reset detection
+        # When agent restarts, session_start changes → server resets GREATEST() logic
+        session_start = screentime.get('session_start')
+        
+        # Extract cumulative totals (already calculated by state_machine.py)
+        # NO MATH HERE - just reading and routing
+        cumulative_active = screentime.get('active_seconds', 0)
+        cumulative_idle = screentime.get('idle_seconds', 0)
+        cumulative_locked = screentime.get('locked_seconds', 0)
+        cumulative_away = screentime.get('away_seconds', 0)
+        
+        # Get metadata from latest heartbeat (fallback to current UTC if missing)
+        latest_timestamp = hb.get('timestamp') or datetime.now(timezone.utc).isoformat()
         username = hb.get('username', 'unknown')
         
-        # FIX: Prioritize system_state (from StateDetector) over idle.state
-        system_state = hb.get('system_state')
-        idle_state = hb.get('idle', {}).get('state', 'active')
-        current_state = system_state if system_state else idle_state
+        # Read system_state directly (single authority — no fallback)
+        current_state = hb.get('system_state', 'active')
         
         # Only store if there's actual time to report
         if cumulative_active == 0 and cumulative_idle == 0 and cumulative_locked == 0 and cumulative_away == 0:
+            logger.info(f"[DIAG] Aggregator: all screentime values are 0, SKIPPING event")
             return
         
-        # ✅ PHASE 3: Create event for uploader with CUMULATIVE values (router only)
-        # Server will use GREATEST() to ensure monotonic updates
+        # Create event for uploader with CUMULATIVE values (router only)
+        # Server uses GREATEST() for same session, REPLACE for new session
         event = {
             'agent_id': agent_id,
             'username': username,
             'type': 'screentime',
             'timestamp': latest_timestamp,
-            'delta_active_seconds': cumulative_active,
-            'delta_idle_seconds': cumulative_idle,
-            'delta_locked_seconds': cumulative_locked,
-            'delta_away_seconds': cumulative_away,  # NEW
+            'session_start': session_start,
+            'active_seconds': cumulative_active,
+            'idle_seconds': cumulative_idle,
+            'locked_seconds': cumulative_locked,
+            'away_seconds': cumulative_away,
             'current_state': current_state
         }
         

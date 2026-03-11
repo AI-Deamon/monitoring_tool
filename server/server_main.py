@@ -21,14 +21,9 @@ from flask import jsonify
 logger = logging.getLogger(__name__)
 
 def init_database(app):
-    """Initialize database tables."""
-    with app.app_context():
-        try:
-            db.create_all()
-            logger.info("Database tables created/verified")
-        except Exception as e:
-            logger.error(f"Database init failed: {e}")
-            raise
+    """Note: Tables are now managed exclusively via Alembic migrations."""
+    logger.info("Database schema is managed via Alembic migrations.")
+    # db.create_all() removed to enforce Alembic-only schema management.
 
 def apply_startup_fixes(app):
     """Run self-healing scripts on startup."""
@@ -282,12 +277,22 @@ def main():
     logger.info("Press Ctrl+C to stop")
     
     try:
+        ssl_context = None
+        if config.USE_TLS:
+            import ssl
+            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            ssl_context.load_cert_chain(config.SSL_CERT_PATH, config.SSL_KEY_PATH)
+            ssl_context.load_verify_locations(config.SSL_CA_PATH)
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+            logger.info(f"mTLS enabled for development server")
+
         application.run(
             host=host,
             port=port,
             debug=False,
             threaded=True,
-            use_reloader=False
+            use_reloader=False,
+            ssl_context=ssl_context
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down...")

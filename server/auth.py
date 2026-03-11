@@ -20,6 +20,11 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# Lazy import to avoid circular dependency
+def get_password_reset_service():
+    from password_reset import PasswordResetService
+    return PasswordResetService
+
 # ============================================================================
 # VALIDATION HELPERS
 # ============================================================================
@@ -102,9 +107,14 @@ class DashboardUser(db.Model):
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='user')  # 'admin' or 'user'
+    org_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=True, index=True) # Multi-tenant link
     
     # Link to agent data (for user role - matched by Windows username)
     linked_username = db.Column(db.String(255), nullable=True)  # Windows username from agent
+    
+    # Contact info
+    email = db.Column(db.String(255), nullable=True)
+    email_verified = db.Column(db.Boolean, default=False)
     
     # Account status
     is_active = db.Column(db.Boolean, default=True)
@@ -112,6 +122,9 @@ class DashboardUser(db.Model):
     failed_login_count = db.Column(db.Integer, default=0)
     locked_until = db.Column(db.DateTime, nullable=True)
     last_login = db.Column(db.DateTime, nullable=True)
+    
+    # Session Management
+    session_version = db.Column(db.Integer, default=1, nullable=False)
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -162,9 +175,15 @@ def login_required(f):
         
         # Load current user
         user = DashboardUser.query.filter_by(id=session['user_id']).first()
-        if not user or not user.is_active:
+        
+        # Session Invalidation Check:
+        # If the user doesn't exist, is inactive, OR their session version mismatch (e.g., password reset occurred)
+        current_session_version = session.get('session_version', 1)
+        if not user or not user.is_active or user.session_version != current_session_version:
+            if user:
+                logger.info(f"[AUTH] Terminated outdated session for {user.username} (Version mismatch or inactive)")
             session.clear()
-            flash('Your session has expired. Please log in again.', 'warning')
+            flash('Your session has expired or your password was changed. Please log in again.', 'warning')
             return redirect(url_for('auth.login'))
         
         # Store user in g for access in views
@@ -251,6 +270,100 @@ def get_user_filter():
 # ROUTES
 # ============================================================================
 
+try:
+    from server_app import limiter
+    LIMITER_AVAILABLE = True
+except ImportError:
+    LIMITER_AVAILABLE = False
+    
+def conditional_limit(limit_string):
+    """Apply rate limit only if limiter is available"""
+    def decorator(f):
+        if LIMITER_AVAILABLE and limiter is not None:
+            return limiter.limit(limit_string)(f)
+        return f
+    return decorator
+
+@auth_bp.route('/forgot-password', methods=['GET', 'POST'])
+@conditional_limit("3 per 15 minute")
+def forgot_password():
+    """Request a password reset link via email"""
+    if 'user_id' in session:
+        return redirect(url_for('dashboard.dashboard_home'))
+        
+    if request.method == 'POST':
+        if not validate_csrf_token():
+            flash('Invalid request. Please try again.', 'danger')
+            return render_template('auth/forgot_password.html')
+            
+        email = request.form.get('email', '').strip()
+        if not email:
+            flash('Please enter your email address.', 'danger')
+            return render_template('auth/forgot_password.html')
+            
+        user = DashboardUser.query.filter_by(email=email).first()
+        if user:
+            # Generate token and send email
+            svc = get_password_reset_service()
+            token = svc.generate_reset_token(user.id)
+            if svc.send_reset_email(user, token):
+                logger.info(f"[AUTH] Password reset email queued for {email}")
+            else:
+                logger.error(f"[AUTH] Failed to send email to {email}")
+                flash('An error occurred while sending the email. Please contact the administrator.', 'danger')
+                return render_template('auth/forgot_password.html')
+                
+        # Always show success regardless of whether email exists to prevent email enumeration
+        flash('If an account exists with that email, a password reset link has been sent.', 'success')
+        return redirect(url_for('auth.login'))
+        
+    return render_template('auth/forgot_password.html')
+
+
+@auth_bp.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    """Reset password using a token from an email link"""
+    if 'user_id' in session:
+        return redirect(url_for('dashboard.dashboard_home'))
+        
+    svc = get_password_reset_service()
+    is_valid, user = svc.validate_reset_token(token)
+    
+    if not is_valid:
+        flash('Invalid or expired reset link. Please request a new one.', 'danger')
+        return redirect(url_for('auth.forgot_password'))
+        
+    if request.method == 'POST':
+        if not validate_csrf_token():
+            flash('Invalid request. Please try again.', 'danger')
+            return render_template('auth/reset_password.html', token=token)
+            
+        new_password = request.form.get('new_password', '')
+        confirm_password = request.form.get('confirm_password', '')
+        
+        if not new_password or not confirm_password:
+            flash('Please fill out all fields.', 'danger')
+            return render_template('auth/reset_password.html', token=token)
+            
+        if new_password != confirm_password:
+            flash('Passwords do not match.', 'danger')
+            return render_template('auth/reset_password.html', token=token)
+            
+        if len(new_password) < 8:
+            flash('Password must be at least 8 characters.', 'danger')
+            return render_template('auth/reset_password.html', token=token)
+            
+        if svc.reset_user_password(token, new_password):
+            flash('Your password has been reset successfully. You can now log in.', 'success')
+            logger.info(f"[AUTH] Password successfully reset for {user.username} via token")
+            return redirect(url_for('auth.login'))
+        else:
+            flash('Error resetting password. The link may have expired.', 'danger')
+            return redirect(url_for('auth.forgot_password'))
+            
+    return render_template('auth/reset_password.html', token=token)
+
+
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     """Login page and handler"""
@@ -299,6 +412,7 @@ def login():
                 session['user_id'] = user.id
                 session['username'] = user.username
                 session['role'] = user.role
+                session['session_version'] = user.session_version  # Track session validity
                 session.permanent = True
                 
                 # Update user record
@@ -389,11 +503,17 @@ def change_password():
             flash('Password must be at least 8 characters.', 'danger')
             return render_template('auth/change_password.html')
         
+        
+        # Increment session version to invalidate other devices
+        g.current_user.session_version += 1
         g.current_user.set_password(new_password)
         db.session.commit()
         
+        # Keep the user logged into *this* specific session they just used
+        session['session_version'] = g.current_user.session_version
+        
         logger.info(f"[AUTH] Password changed: {g.current_user.username}")
-        flash('Password changed successfully.', 'success')
+        flash('Password changed successfully. All other devices have been logged out.', 'success')
         return redirect(url_for('dashboard.dashboard_home'))
     
     return render_template('auth/change_password.html')
@@ -560,13 +680,27 @@ def api_me():
 # ============================================================================
 
 def create_default_admin():
-    """Create default admin user if none exists"""
+    """Create default admin user and organization if none exists"""
+    import server_models
+    
+    # Ensure default organization exists
+    default_org = server_models.Organization.query.filter_by(slug='default').first()
+    if not default_org:
+        default_org = server_models.Organization(
+            name='Default Organization',
+            slug='default'
+        )
+        db.session.add(default_org)
+        db.session.commit()
+        logger.info("[AUTH] Default organization created")
+    
     if DashboardUser.query.filter_by(role='admin').first():
         return False  # Admin already exists
     
     admin = DashboardUser(
         username='admin',
         role='admin',
+        org_id=default_org.id,
         is_active=True
     )
     admin.set_password('changeme123')
@@ -574,7 +708,7 @@ def create_default_admin():
     db.session.add(admin)
     db.session.commit()
     
-    logger.info("[AUTH] Default admin user created: admin / changeme123")
+    logger.info("[AUTH] Default admin user created: admin / changeme123 (linked to Default Org)")
     return True
 
 
@@ -589,7 +723,7 @@ def init_auth(app):
     # Register blueprint
     app.register_blueprint(auth_bp)
     
-    # Create tables and default admin
+    # Note: Schema now managed exclusively via Alembic migrations.
+    # db.create_all() removed.
     with app.app_context():
-        db.create_all()
         create_default_admin()
