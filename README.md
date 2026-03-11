@@ -10,20 +10,13 @@ This project is designed to provide comprehensive monitoring capabilities for va
 ## Architecture Diagram
 ![Architecture Diagram](link-to-diagram.png)
 
-## Quick Start Guide
-1. Clone the repository: `git clone https://github.com/BSOL-IRI/monitoring_tool.git`
-2. Install dependencies: `npm install`
-3. Start the server: `npm start`
 
 ## Features
 - Real-time monitoring
 - Historical data analysis
 - Alerting system
 
-## System Requirements
-- Node.js >= 14
-- MongoDB >= 4.0
-- Docker (optional)
+
 
 ## Project Structure
 ```
