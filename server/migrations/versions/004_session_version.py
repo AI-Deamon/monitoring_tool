@@ -15,15 +15,27 @@ branch_labels = None
 depends_on = None
 
 def upgrade() -> None:
-    # Add session_version to dashboard_users table
-    op.add_column('dashboard_users', sa.Column('session_version', sa.Integer(), nullable=True))
-    
-    # Initialize existing users with session_version 1
-    op.execute("UPDATE dashboard_users SET session_version = 1")
-    
-    # Make it non-nullable after setting defaults
-    op.alter_column('dashboard_users', 'session_version', existing_type=sa.Integer(), nullable=False)
+    # Guard: dashboard_users may not exist on fresh DBs (created by df29e57c74bb)
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'dashboard_users') THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'dashboard_users' AND column_name = 'session_version'
+                ) THEN
+                    ALTER TABLE dashboard_users ADD COLUMN session_version INTEGER DEFAULT 1;
+                    UPDATE dashboard_users SET session_version = 1;
+                    ALTER TABLE dashboard_users ALTER COLUMN session_version SET NOT NULL;
+                END IF;
+            END IF;
+        END $$;
+    """)
 
 def downgrade() -> None:
-    # Remove the column
-    op.drop_column('dashboard_users', 'session_version')
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'dashboard_users') THEN
+                ALTER TABLE dashboard_users DROP COLUMN IF EXISTS session_version;
+            END IF;
+        END $$;
+    """)

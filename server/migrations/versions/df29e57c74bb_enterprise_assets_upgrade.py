@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # 1. Create Organizations table if not exists (using manual SQL for safety since it might exist)
+    # 1. Create Organizations table if not exists
     op.execute('CREATE TABLE IF NOT EXISTS organizations ('
                'id SERIAL PRIMARY KEY, '
                'org_id UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(), '
@@ -28,7 +28,18 @@ def upgrade() -> None:
                'slug VARCHAR(100) UNIQUE NOT NULL, '
                'created_at TIMESTAMP DEFAULT NOW())')
 
-    # 2. Add org_id to existing tables if not exists
+    # 2. Create dashboard_users if it doesn't exist yet (on fresh DBs it won't)
+    op.execute('''
+        CREATE TABLE IF NOT EXISTS dashboard_users (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(50) UNIQUE NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            role VARCHAR(20) DEFAULT 'viewer',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    ''')
+
+    # 3. Add org_id to existing tables if not exists
     # dashboard_users
     op.execute('ALTER TABLE dashboard_users ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id)')
     op.execute('CREATE INDEX IF NOT EXISTS idx_dashboard_users_org_id ON dashboard_users(org_id)')
@@ -37,9 +48,15 @@ def upgrade() -> None:
     op.execute('ALTER TABLE agents ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id)')
     op.execute('CREATE INDEX IF NOT EXISTS idx_agents_org_id ON agents(org_id)')
 
-    # asset_info
-    op.execute('ALTER TABLE asset_info ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id)')
-    op.execute('CREATE INDEX IF NOT EXISTS idx_asset_info_org_id ON asset_info(org_id)')
+    # asset_info (may not exist on fresh DB)
+    op.execute('''
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'asset_info') THEN
+                ALTER TABLE asset_info ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id);
+                CREATE INDEX IF NOT EXISTS idx_asset_info_org_id ON asset_info(org_id);
+            END IF;
+        END $$
+    ''')
 
 
 def downgrade() -> None:

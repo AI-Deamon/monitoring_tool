@@ -21,38 +21,48 @@ depends_on = None
 
 def upgrade():
     """Add EOL enhancement fields to asset_info table."""
+    # Guard: asset_info may not exist on fresh DBs (created later in the chain)
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'asset_info') THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'asset_info' AND column_name = 'os_edition'
+                ) THEN
+                    ALTER TABLE asset_info ADD COLUMN os_edition VARCHAR(50);
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'asset_info' AND column_name = 'os_sku'
+                ) THEN
+                    ALTER TABLE asset_info ADD COLUMN os_sku INTEGER;
+                END IF;
+            END IF;
+        END $$;
+    """)
     
-    # Add os_edition column to asset_info
-    op.add_column(
-        'asset_info',
-        sa.Column('os_edition', sa.String(50), nullable=True)
-    )
+    # Create index only if table and column exist
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'asset_info') THEN
+                CREATE INDEX IF NOT EXISTS ix_asset_info_os_edition ON asset_info(os_edition);
+            END IF;
+        END $$;
+    """)
     
-    # Add os_sku column to asset_info
-    op.add_column(
-        'asset_info',
-        sa.Column('os_sku', sa.Integer, nullable=True)
-    )
-    
-    # Create index on os_edition for faster EOL queries
-    op.create_index(
-        'ix_asset_info_os_edition',
-        'asset_info',
-        ['os_edition'],
-        unique=False
-    )
-    
-    print("[MIGRATION] Added os_edition and os_sku columns to asset_info")
+    print("[MIGRATION] Added os_edition and os_sku columns to asset_info (if table exists)")
 
 
 def downgrade():
     """Remove EOL enhancement fields from asset_info table."""
-    
-    # Drop index first
-    op.drop_index('ix_asset_info_os_edition', table_name='asset_info')
-    
-    # Drop columns
-    op.drop_column('asset_info', 'os_sku')
-    op.drop_column('asset_info', 'os_edition')
+    op.execute("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'asset_info') THEN
+                DROP INDEX IF EXISTS ix_asset_info_os_edition;
+                ALTER TABLE asset_info DROP COLUMN IF EXISTS os_sku;
+                ALTER TABLE asset_info DROP COLUMN IF EXISTS os_edition;
+            END IF;
+        END $$;
+    """)
     
     print("[MIGRATION] Removed os_edition and os_sku columns from asset_info")

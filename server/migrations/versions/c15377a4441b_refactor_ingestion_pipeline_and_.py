@@ -286,7 +286,7 @@ def upgrade() -> None:
     # Legacy tables from 001 that were missed
     for table_name in ['events', 'applications', 'app_inventory_changes', 
                       'screen_time_logs', 'app_usage_logs', 'domain_usage_logs', 
-                     'process_sessions', 'batch_deduplication']:
+                     'process_sessions', 'batch_deduplication', 'state_changes']:
         try:
             op.alter_column(table_name, 'agent_id',
                         existing_type=sa.VARCHAR(length=128),
@@ -352,7 +352,7 @@ def upgrade() -> None:
                 print(f"Skipping malformed sub_event: {sub_event}. Error: {e}")
 
     # Drop old tables
-    op.drop_table('app_inventory_changes')
+    # op.drop_table('app_inventory_changes')  # Kept, still used in server_models
     op.drop_table('process_sessions')
     op.drop_table('batch_deduplication')
     op.drop_table('domain_usage_logs')

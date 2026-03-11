@@ -139,6 +139,38 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     
+    # Create state_changes table
+    op.create_table('state_changes',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('agent_id', sa.String(length=128), nullable=False),
+    sa.Column('username', sa.String(length=255), nullable=True),
+    sa.Column('previous_state', sa.String(length=50), nullable=False),
+    sa.Column('current_state', sa.String(length=50), nullable=False),
+    sa.Column('timestamp', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP')),
+    sa.ForeignKeyConstraint(['agent_id'], ['agents.agent_id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_state_changes_agent_id'), 'state_changes', ['agent_id'], unique=False)
+
+    # Create dashboard_users table
+    op.create_table('dashboard_users',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('username', sa.String(length=100), nullable=False),
+    sa.Column('password_hash', sa.String(length=255), nullable=False),
+    sa.Column('role', sa.String(length=20), server_default='user'),
+    sa.Column('linked_username', sa.String(length=255), nullable=True),
+    sa.Column('is_active', sa.Boolean(), server_default='true'),
+    sa.Column('is_locked', sa.Boolean(), server_default='false'),
+    sa.Column('failed_login_count', sa.Integer(), server_default='0'),
+    sa.Column('locked_until', sa.DateTime(), nullable=True),
+    sa.Column('last_login', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP')),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP')),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('username')
+    )
+    
     # Create merged_event_logs table
     op.create_table('merged_event_logs',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -186,6 +218,9 @@ def downgrade() -> None:
     op.drop_table('batch_deduplication')
     op.drop_index('ix_merged_event_logs_agent_id', table_name='merged_event_logs')
     op.drop_table('merged_event_logs')
+    op.drop_table('dashboard_users')
+    op.drop_index('ix_state_changes_agent_id', table_name='state_changes')
+    op.drop_table('state_changes')
     op.drop_table('process_sessions')
     op.drop_index('ix_domain_visits_agent_id', table_name='domain_visits')
     op.drop_table('domain_visits')
