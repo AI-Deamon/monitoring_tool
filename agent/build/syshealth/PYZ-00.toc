@@ -868,6 +868,9 @@
    'C:\\Users\\Pittala '
    'Bhaskar\\AppData\\Local\\Programs\\Python\\Python314\\Lib\\json\\scanner.py',
    'PYMODULE'),
+  ('logger',
+   'D:\\monitoring_tool-main\\monitoring_tool\\agent\\logger.py',
+   'PYMODULE'),
   ('logging',
    'C:\\Users\\Pittala '
    'Bhaskar\\AppData\\Local\\Programs\\Python\\Python314\\Lib\\logging\\__init__.py',

@@ -209,19 +209,19 @@ class DataCollector:
         # Check for midnight crossing (new day)
         current_date = now.date()
         if current_date != self._current_date:
-            logger.info(f"[COLLECTOR] Day changed: {self._current_date} -> {current_date}")
-            logger.info(f"[COLLECTOR] Resetting cumulative counters...")
+            logger.info(f"[COLLECTOR] Day changed (UTC): {self._current_date} -> {current_date}")
 
-            # Reset StateDetector cumulative counters (NEW: StateDetector is source of truth)
-            if self.state_detector:
-                self.state_detector.reset_cumulative()
+            # NOTE: Do NOT reset state machine counters here.
+            # The state machine's own check_daily_boundary() handles
+            # midnight resets using LOCAL time (not UTC).
+            # Resetting here caused triple-reset bugs (see PLAN-screentime-reset.md).
 
             # Update current date
             self._current_date = current_date
             self._session_start = now
             self._heartbeat_count = 0
 
-            logger.info("[COLLECTOR] Cumulative counters reset for new day")
+            logger.info("[COLLECTOR] Day changed, counters managed by state machine")
             
             # FIX: Reset WindowTracker timestamp to prevent overnight duration overflow
             if self.window_tracker:

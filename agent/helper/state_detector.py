@@ -450,7 +450,7 @@ class StateDetector:
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
     def _handle_suspend(self):
-        """Handle OS suspend event and mark gap as AWAY in state machine."""
+        """Handle OS suspend event. LOCKED is terminal — sleep cannot override it."""
         try:
             if self._suspended:
                 return
@@ -465,11 +465,19 @@ class StateDetector:
             except Exception as e:
                 logger.debug(f"[STATE] Suspend domain close failed: {e}")
 
-            # Mark sleep and move accounting to AWAY.
+            # Mark sleep for gap handling on resume/restart.
             self.screen_time_engine.mark_sleep()
-            self.screen_time_engine.transition(ScreenState.AWAY)
-            self.current_state = "away"
-            self.authority.set_state(SystemState.AWAY, source="os")
+
+            # LOCKED is terminal — sleep cannot override it.
+            # If already locked (Win+L before lid close), stay LOCKED.
+            # If not locked, transition to AWAY.
+            if self.current_state == "locked":
+                logger.info("[STATE] System suspending while LOCKED — keeping LOCKED state")
+                # Don't transition — stay LOCKED through sleep
+            else:
+                self.screen_time_engine.transition(ScreenState.AWAY)
+                self.current_state = "away"
+                self.authority.set_state(SystemState.AWAY, source="os")
 
             # Prevent stale elapsed time from being turned into active/idle spans on resume.
             self._last_state_change_time = self._suspend_started_at

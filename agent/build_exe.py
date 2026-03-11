@@ -43,11 +43,13 @@ def clean_build():
 
 
 def get_hidden_imports():
-    """Common hidden imports needed by the agent"""
+    """Common hidden imports needed by the agent.
+    
+    AUDIT (2026-03-11): Verified against actual module files in core/ and helper/.
+    Includes lazy imports from collector.py (security_collector, extended_inventory).
+    """
     return [
-        "psutil",
-        "requests",
-        "urllib3",
+        # stdlib extensions (needed by PyInstaller)
         "json",
         "hashlib",
         "hmac",
@@ -55,17 +57,33 @@ def get_hidden_imports():
         "pathlib",
         "ctypes",
         "ctypes.wintypes",
+        "threading",
+        "enum",
+        
+        # third-party
+        "psutil",
+        "requests",
+        "urllib3",
+        "pytz",
+        
         # pywin32
         "win32api",
         "win32con",
+        "win32gui",
         "win32security",
         "win32process",
         "win32event",
-        "win32gui",
         "win32ts",
+        "win32service",
+        "win32serviceutil",
+        "servicemanager",
         "pywintypes",
         "winerror",
-        # core modules
+        
+        # root-level modules
+        "logger",
+        
+        # core modules (13 files)
         "core",
         "core.service",
         "core.config",
@@ -79,7 +97,8 @@ def get_hidden_imports():
         "core.integrity",
         "core.secure_store",
         "core.updater",
-        # helper modules
+        
+        # helper modules (20 files)
         "helper",
         "helper.main",
         "helper.collector",
@@ -93,6 +112,7 @@ def get_hidden_imports():
         "helper.eol_collector",
         "helper.hardware_collector",
         "helper.security",
+        "helper.security_collector",    # lazy-imported by collector.py
         "helper.performance",
         "helper.persistence",
         "helper.state_detector",

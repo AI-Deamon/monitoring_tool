@@ -9,7 +9,8 @@ CRITICAL CONTRACT (2026-02-03):
 
 States: ACTIVE | IDLE | LOCKED | AWAY
 - Shutdown is NOT a state (gap ignored)
-- Sleep/Hibernate → AWAY (counted)
+- Sleep/Hibernate → LOCKED if was locked before sleep, else AWAY
+- LOCKED is terminal — sleep cannot override it
 - Crash → gap ignored (reliability > accuracy)
 
 This module is the ONLY place that calculates screen time deltas.
@@ -55,9 +56,10 @@ class ScreenTimeEngine:
     4. Gaps are handled by handle_startup()
     
     CRITICAL:
-    - Sleep gaps → counted as AWAY
+    - Sleep gaps → counted as LOCKED (if locked before sleep) or AWAY
     - Shutdown gaps → ignored
     - Crash gaps → ignored (reliability > accuracy)
+    - reset_daily() is idempotent — only fires once per calendar day
     """
     
     def __init__(self, data_dir: Path, agent_id: str = "unknown"):
@@ -81,6 +83,9 @@ class ScreenTimeEngine:
         
         # Current date tracking (for midnight detection)
         self.current_date = datetime.now().date()
+        
+        # Idempotency guard: only allow one reset per calendar day
+        self._last_reset_date = None
         
         logger.info("[STATE_MACHINE] Screen Time Engine initialized")
         logger.info(f"[STATE_MACHINE] State file: {self.state_file}")
@@ -202,7 +207,7 @@ class ScreenTimeEngine:
         Handle agent startup/restart with gap handling.
         
         CRITICAL GAP HANDLING RULES:
-        1. Sleep → count gap as AWAY
+        1. Sleep → count as LOCKED (if locked before sleep) or AWAY
         2. Shutdown → ignore gap
         3. Crash → ignore gap (reliability > accuracy)
         4. Unknown → ignore gap (reliability > accuracy)
@@ -246,17 +251,32 @@ class ScreenTimeEngine:
             
             # ✅ CRITICAL: Gap handling logic
             if last_event == LastEvent.SLEEP:
-                # Sleep/Hibernate → count as AWAY
-                self.away_seconds += gap
-                logger.info(
-                    f"[STATE_MACHINE] Sleep gap: {gap:.1f}s ({gap/3600:.1f}h) "
-                    f"counted as AWAY"
-                )
-                return {
-                    "action": "counted_as_away",
-                    "gap_seconds": gap,
-                    "gap_hours": gap / 3600
-                }
+                # Sleep/Hibernate → LOCKED is terminal (stays LOCKED)
+                # If agent was locked before sleep, count gap as LOCKED
+                # Otherwise count as AWAY
+                pre_sleep_state = last_state_str.upper()
+                if pre_sleep_state == "LOCKED":
+                    self.locked_seconds += gap
+                    logger.info(
+                        f"[STATE_MACHINE] Sleep gap: {gap:.1f}s ({gap/3600:.1f}h) "
+                        f"counted as LOCKED (was locked before sleep)"
+                    )
+                    return {
+                        "action": "counted_as_locked",
+                        "gap_seconds": gap,
+                        "gap_hours": gap / 3600
+                    }
+                else:
+                    self.away_seconds += gap
+                    logger.info(
+                        f"[STATE_MACHINE] Sleep gap: {gap:.1f}s ({gap/3600:.1f}h) "
+                        f"counted as AWAY (was {pre_sleep_state} before sleep)"
+                    )
+                    return {
+                        "action": "counted_as_away",
+                        "gap_seconds": gap,
+                        "gap_hours": gap / 3600
+                    }
             
             elif last_event == LastEvent.SHUTDOWN:
                 # Shutdown → ignore gap
@@ -364,6 +384,9 @@ class ScreenTimeEngine:
                 f"{self.current_date} -> {current_date}"
             )
             
+            # Flush current state time before reading final totals
+            self.tick()
+            
             # Get final totals for yesterday (before reset)
             final_totals = self.get_daily_totals()
             logger.info(
@@ -385,13 +408,24 @@ class ScreenTimeEngine:
     
     def reset_daily(self):
         """
-        Reset counters at midnight.
+        Reset counters at midnight (IDEMPOTENT).
         
         CRITICAL:
+        - Only fires once per calendar day (_last_reset_date guard)
         - Reset counters to 0
-        - Keep current_state (AWAY continuity matters)
+        - Keep current_state (LOCKED/AWAY continuity matters)
         - Reset last_timestamp to now
         """
+        current_date = datetime.now().date()
+        if self._last_reset_date == current_date:
+            logger.info(
+                f"[STATE_MACHINE] Daily reset already done for {current_date}, "
+                f"skipping (idempotent guard)"
+            )
+            return
+        
+        self._last_reset_date = current_date
+        
         logger.info(
             f"[STATE_MACHINE] Resetting daily counters "
             f"(keeping state={self.current_state.value})"
@@ -429,6 +463,7 @@ class ScreenTimeEngine:
                 "locked_seconds": self.locked_seconds,
                 "away_seconds": self.away_seconds,
                 "current_date": self.current_date.isoformat(),
+                "last_reset_date": self._last_reset_date.isoformat() if self._last_reset_date else None,
                 "agent_id": self.agent_id,
                 "persisted_at": time.time()
             }
@@ -464,6 +499,16 @@ class ScreenTimeEngine:
                 f"date={data.get('current_date')}"
             )
             
+            # Restore idempotency guard
+            saved_reset_date = data.get('last_reset_date')
+            if saved_reset_date:
+                try:
+                    from datetime import date as date_type
+                    self._last_reset_date = date_type.fromisoformat(saved_reset_date)
+                    logger.info(f"[STATE_MACHINE] Restored _last_reset_date: {self._last_reset_date}")
+                except (ValueError, TypeError):
+                    self._last_reset_date = None
+            
             # Restore counters if same date
             saved_date = data.get('current_date')
             if saved_date == self.current_date.isoformat():
@@ -494,7 +539,10 @@ class ScreenTimeEngine:
         """Mark that system is going to sleep (for gap handling)"""
         self.last_event = LastEvent.SLEEP
         self._persist()
-        logger.info("[STATE_MACHINE] Marked as SLEEP (gap will be counted as AWAY)")
+        logger.info(
+            f"[STATE_MACHINE] Marked as SLEEP "
+            f"(gap will be counted as {'LOCKED' if self.current_state == ScreenState.LOCKED else 'AWAY'})"
+        )
     
     def mark_shutdown(self):
         """Mark that system is shutting down (for gap handling)"""
