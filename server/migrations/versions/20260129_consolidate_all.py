@@ -153,7 +153,9 @@ def upgrade():
             SELECT * INTO v_existing_record
             FROM screen_time
             WHERE agent_id = p_agent_id::UUID AND date = p_date;
-            
+            IF p_date < (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE THEN
+                RAISE NOTICE 'Historical data detected for agent %, on %', p_agent_id, p_date;
+            END IF;
             IF FOUND THEN
                 UPDATE screen_time
                 SET active_seconds = GREATEST(active_seconds, p_active_seconds),
@@ -161,7 +163,7 @@ def upgrade():
                     locked_seconds = GREATEST(locked_seconds, p_locked_seconds),
                     away_seconds = GREATEST(away_seconds, p_away_seconds),
                     username = COALESCE(p_username, username),
-                    last_updated = NOW()
+                    last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata')
                 WHERE agent_id = p_agent_id::UUID AND date = p_date;
                 
                 RETURN QUERY SELECT 'updated'::text, 'Screen time updated'::text;
@@ -226,12 +228,12 @@ def upgrade():
             
             -- Update or insert app_usage
             INSERT INTO app_usage (agent_id, date, app, duration_seconds, session_count, last_updated)
-            VALUES (p_agent_id::UUID, v_session_date, p_app, p_duration_seconds, 1, NOW())
+            VALUES (p_agent_id::UUID, v_session_date, p_app, p_duration_seconds, 1, (NOW() AT TIME ZONE 'Asia/Kolkata'))
             ON CONFLICT (agent_id, date, app)
             DO UPDATE SET
                 duration_seconds = app_usage.duration_seconds + EXCLUDED.duration_seconds,
                 session_count = app_usage.session_count + 1,
-                last_updated = NOW();
+                last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
             
             RETURN QUERY SELECT 'inserted'::text, 'App session created'::text;
         END;
@@ -284,12 +286,12 @@ def upgrade():
             
             -- Update or insert domain_usage
             INSERT INTO domain_usage (agent_id, date, domain, duration_seconds, session_count, last_updated)
-            VALUES (p_agent_id::UUID, v_session_date, p_domain, p_duration_seconds, 1, NOW())
+            VALUES (p_agent_id::UUID, v_session_date, p_domain, p_duration_seconds, 1, (NOW() AT TIME ZONE 'Asia/Kolkata'))
             ON CONFLICT (agent_id, date, domain)
             DO UPDATE SET
                 duration_seconds = domain_usage.duration_seconds + EXCLUDED.duration_seconds,
                 session_count = domain_usage.session_count + 1,
-                last_updated = NOW();
+                last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
             
             RETURN QUERY SELECT 'inserted'::text, 'Domain session created'::text;
         END;
@@ -320,7 +322,7 @@ def upgrade():
             ON CONFLICT (agent_id, date)
             DO UPDATE SET
                 active_seconds = GREATEST(screen_time.active_seconds, EXCLUDED.active_seconds),
-                last_updated = NOW()
+                last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata')
             RETURNING screen_time.agent_id, TRUE;
         END;
         $$ LANGUAGE plpgsql;
@@ -350,7 +352,7 @@ def upgrade():
             DO UPDATE SET
                 duration_seconds = EXCLUDED.duration_seconds,
                 session_count = EXCLUDED.session_count,
-                last_updated = NOW();
+                last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
             
             GET DIAGNOSTICS v_count = ROW_COUNT;
             RETURN v_count;
@@ -382,7 +384,7 @@ def upgrade():
             DO UPDATE SET
                 duration_seconds = EXCLUDED.duration_seconds,
                 session_count = EXCLUDED.session_count,
-                last_updated = NOW();
+                last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
             
             GET DIAGNOSTICS v_count = ROW_COUNT;
             RETURN v_count;

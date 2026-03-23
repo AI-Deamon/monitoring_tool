@@ -215,6 +215,17 @@ if "%LEGACY_FOUND%"=="1" (
 
         rmdir /s /q "C:\Program Files\SentinelEdge\" 2>nul
         rmdir /s /q "C:\ProgramData\SentinelEdge\" 2>nul
+        for /d %%U in ("C:\Users\*") do (
+            if exist "%%U\AppData\Roaming\SentinelEdge\" (
+                rmdir /s /q "%%U\AppData\Roaming\SentinelEdge\" 2>nul
+            )
+        )
+        
+        for /d %%U in ("C:\Users\*") do (
+            if exist "%%U\AppData\Roaming\SentinelEdge\" (
+                rmdir /s /q "%%U\AppData\Roaming\SentinelEdge\" 2>nul
+            )
+        )
         echo [OK] Legacy installation removed
     )
 ) else (

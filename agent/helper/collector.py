@@ -6,7 +6,10 @@ Now includes session-based domain tracking integrated with app/idle tracking.
 """
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+# IST Timezone for Asia/Kolkata
+IST = timezone(timedelta(hours=5, minutes=30))
 from pathlib import Path
 from typing import Dict, List, Optional
 import logging
@@ -51,9 +54,10 @@ class DataCollector:
     - Supports session recovery after restarts
     """
     
-    def __init__(self, config: HelperConfig):
+    def __init__(self, config: HelperConfig, buffer_db=None):
         self.config = config
         self.state_detector = None  # Link set by main.py
+        self.buffer_db = buffer_db
 
         try:
             # Initialize enhanced modules
@@ -97,11 +101,11 @@ class DataCollector:
             self._last_foreground_app = None
 
             # Enhanced: Session tracking
-            self._session_start = datetime.now(timezone.utc)
+            self._session_start = datetime.now(IST)
             self._heartbeat_count = 0
 
             # Track current date for midnight detection
-            self._current_date = datetime.now(timezone.utc).date()
+            self._current_date = datetime.now(IST).date()
 
             self.window_tracking_failures = 0
             logger.info("[INIT] [OK] Initialization complete")
@@ -202,7 +206,7 @@ class DataCollector:
         Returns:
             Heartbeat dict ready to send to core
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(IST)
         self.sequence_number += 1
         self._heartbeat_count += 1
 
@@ -375,6 +379,17 @@ class DataCollector:
         self._last_idle_state = current_state
         self._last_foreground_app = current_app.get('app_name')
 
+        # Store collected data in BufferDB for upload
+        if self.buffer_db:
+            try:
+                # Store merged events (app switches, state changes) - from heartbeat
+                # Note: The heartbeat contains current app info, but we need to extract events from state detector
+                # For now, we'll store what we have in the heartbeat as a merged event
+                # In a more complete implementation, we'd collect state spans and domain sessions separately
+                pass  # Will implement after checking what data we actually have to store
+            except Exception as e:
+                logger.error(f"[BUFFER] Error storing data in BufferDB: {e}")
+
         return heartbeat
 
     def collect_state_spans(self) -> List[Dict]:
@@ -391,6 +406,13 @@ class DataCollector:
             spans = self.state_detector.get_pending_spans()
             if spans:
                 logger.info(f"[COLLECTOR] Collected {len(spans)} state spans")
+                # Store state spans in BufferDB for upload
+                if self.buffer_db:
+                    for span in spans:
+                        try:
+                            self.buffer_db.store_state_span(span)
+                        except Exception as e:
+                            logger.error(f"[BUFFER] Failed to store state span: {e}")
             return spans
         except Exception as e:
             logger.error(f"State span collection error: {e}")
@@ -406,7 +428,7 @@ class DataCollector:
             'agent_id': self.config.agent_id,
             'state': 'idle',
             'duration_seconds': round(duration, 1),
-            'timestamp': datetime.now(timezone.utc).isoformat()
+            'timestamp': datetime.now(IST).isoformat()
         }
         
         logger.info(f"[COLLECTOR] Dispatching clean idle event: {duration:.1f}s")
@@ -435,6 +457,13 @@ class DataCollector:
             sessions = self.active_domain_tracker.get_pending_sessions()
             if sessions:
                 logger.debug(f"[COLLECTOR] Collected {len(sessions)} domain sessions")
+                # Store domain sessions in BufferDB for upload
+                if self.buffer_db:
+                    for session in sessions:
+                        try:
+                            self.buffer_db.store_domain_sessions([session])  # store_domain_sessions expects a list
+                        except Exception as e:
+                            logger.error(f"[BUFFER] Failed to store domain session: {e}")
                 self._save_state()
             return sessions
         except Exception as e:
@@ -497,7 +526,14 @@ class DataCollector:
                 # Add agent_id to the result
                 inventory['agent_id'] = self.config.agent_id
                 
-                self.last_inventory_time = datetime.now(timezone.utc).isoformat()
+                # Store inventory in BufferDB for upload
+                if self.buffer_db:
+                    try:
+                        self.buffer_db.store_inventory(inventory)
+                    except Exception as e:
+                        logger.error(f"[BUFFER] Failed to store inventory: {e}")
+                
+                self.last_inventory_time = datetime.now(IST).isoformat()
                 self._save_state()
                 
                 return inventory

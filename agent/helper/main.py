@@ -21,6 +21,7 @@ from helper.comm import CoreCommunicator
 from helper.identity_sync import IdentitySynchronizer
 from helper.state_detector import StateDetector, SystemState
 from helper.performance import get_cpu_throttler, get_memory_enforcer, init_performance_monitoring
+from core.buffer import BufferDB
 
 
 class SentinelHelper:
@@ -34,7 +35,8 @@ class SentinelHelper:
         self._setup_logging()
         
         # Initialize components
-        self.collector = DataCollector(self.config)
+        self.buffer = BufferDB(self.config.state_dir / 'buffer.db')
+        self.collector = DataCollector(self.config, buffer_db=self.buffer)
         self.communicator = CoreCommunicator(self.config)
         self.identity_sync = IdentitySynchronizer(self.config)
         
@@ -404,6 +406,7 @@ class SentinelHelper:
         self.logger.info("Entering main monitoring loop...")
         loop_iteration = 0
         
+        fatal_loop_error = False
         try:
             while self.running and not self.shutdown_event.is_set():
                 loop_iteration += 1
@@ -589,9 +592,10 @@ class SentinelHelper:
         except KeyboardInterrupt:
             self.logger.info("Shutdown requested via Ctrl+C")
         except Exception as e:
+            fatal_loop_error = True
             self.logger.error(f"Fatal error in main loop: {e}", exc_info=True)
         finally:
-            self.stop()
+            self.stop(crashed=fatal_loop_error)
     
     def _send_initial_inventory(self):
         """Send initial inventory on startup"""
@@ -935,19 +939,22 @@ class SentinelHelper:
         except Exception as e:
             self.logger.error(f"Hardware check error: {e}", exc_info=True)
     
-    def stop(self):
+    def stop(self, crashed: bool = False):
         """Stop helper gracefully"""
         self.logger.info("Stopping helper...")
         self.running = False
         self.shutdown_event.set()
         
-        # Mark shutdown in state machine BEFORE stopping state detector
-        # This ensures handle_startup() ignores the gap on next boot
+        # Mark stop reason in state machine BEFORE stopping state detector.
         try:
-            self.state_detector.screen_time_engine.mark_shutdown()
-            self.logger.info("[STATE] Marked SHUTDOWN in state machine")
+            if crashed:
+                self.state_detector.screen_time_engine.mark_crash()
+                self.logger.info("[STATE] Marked CRASH in state machine")
+            else:
+                self.state_detector.screen_time_engine.mark_shutdown()
+                self.logger.info("[STATE] Marked SHUTDOWN in state machine")
         except Exception as e:
-            self.logger.error(f"Error marking shutdown: {e}")
+            self.logger.error(f"Error marking stop reason: {e}")
         
         # Stop state detector
         try:

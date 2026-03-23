@@ -159,44 +159,29 @@ async function loadFullReport(isManual = false) {
                     <img src="${window.USER_ICON_URL}" class="w-8 h-8 mr-2 inline-block" />
                     ${data.agent.username}
                 `;
-            }
-            document.getElementById('registered-at').textContent = data.agent.registered_at ? new Date(data.agent.registered_at).toLocaleDateString() : '-';
-            document.getElementById('first-seen-today').textContent = data.agent.first_seen_today
-                ? new Date(data.agent.first_seen_today).toLocaleTimeString('en-IN', {
-               year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                })
-                : 'No activity';
-            document.getElementById('last-seen').textContent = data.agent.last_seen
-                ? new Date(data.agent.last_seen).toLocaleString('en-IN', {
-                 
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                })
-                : 'No activity';
-            
-            // Update current state - show detailed state for admin users
-            const stateEl = document.getElementById('current-state');
-            const currentState = data.live_status?.current_state || (data.agent.is_online ? 'active' : 'offline');
-            
-            // Map states to display text and colors
-            const stateConfig = {
-                'active': { text: 'Active', class: 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' },
-                'idle': { text: 'Idle', class: 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' },
-                'locked': { text: 'Locked', class: 'bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200' },
-                'offline': { text: 'Offline', class: 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200' }
-            };
-            
-            const config = stateConfig[currentState] || stateConfig['offline'];
-            stateEl.textContent = config.text;
-            stateEl.className = `inline-block px-2 py-1 ${config.class} text-xs font-medium rounded-full`;
         }
+
+        document.getElementById('registered-at').textContent = data.agent.registered_at
+            ? new Date(data.agent.registered_at).toLocaleDateString()
+            : '-';
+        document.getElementById('first-seen-today').textContent = data.agent.first_seen_today
+            ? new Date(data.agent.first_seen_today).toLocaleTimeString('en-IN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            })
+            : 'No activity';
+        document.getElementById('last-seen').textContent = data.agent.last_seen
+            ? new Date(data.agent.last_seen).toLocaleString('en-IN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            })
+            : 'No activity';
 
         // Live status
         if (data.live_status && data.live_status.current_app) {
@@ -209,32 +194,9 @@ async function loadFullReport(isManual = false) {
             document.getElementById('live-status-banner').classList.add('hidden');
             document.getElementById('current-activity').innerHTML = '<span class="opacity-70">Offline</span>';
         }
-        document.getElementById('registered-at').textContent = data.agent.registered_at ? new Date(data.agent.registered_at).toLocaleDateString() : '-';
-        document.getElementById('first-seen-today').textContent = data.agent.first_seen
-            ? new Date(data.agent.first_seen).toLocaleTimeString('en-IN', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            })
-            : 'No telemetry yet';
-        document.getElementById('last-seen').textContent = data.agent.last_seen
-            ? new Date(data.agent.last_seen).toLocaleString('en-IN', {
 
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            })
-            : 'No activity';
-
-        // Update current state - show detailed state for admin users
         const stateEl = document.getElementById('current-state');
         const currentState = data.live_status?.current_state || (data.agent.is_online ? 'active' : 'offline');
-
-        // Map states to display text and colors
         const stateConfig = {
             'active': { text: 'Active', class: 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' },
             'idle': { text: 'Idle', class: 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' },
@@ -242,34 +204,10 @@ async function loadFullReport(isManual = false) {
             'offline': { text: 'Offline', class: 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200' }
         };
 
-        const config = stateConfig[currentState] || stateConfig['offline'];
+        const config = stateConfig[currentState] || stateConfig.offline;
         stateEl.textContent = config.text;
         stateEl.className = `inline-block px-2 py-1 ${config.class} text-xs font-medium rounded-full`;
     }
-
-        // Screen time
-        const st = data.screen_time || {};
-        const activeSeconds = st.active_seconds || 0;
-        const idleSeconds = st.idle_seconds || 0;
-        const lockedSeconds = st.locked_seconds || 0;
-        const awaySeconds = st.away_seconds || 0;
-        const totalTracked = activeSeconds + idleSeconds + lockedSeconds + awaySeconds;
-
-        document.getElementById('active-time').textContent = formatTime(activeSeconds);
-        document.getElementById('idle-time').textContent = formatTime(idleSeconds);
-        document.getElementById('locked-time').textContent = formatTime(lockedSeconds);
-        document.getElementById('away-time').textContent = formatTime(awaySeconds);
-        document.getElementById('total-time').textContent = formatTime(totalTracked);
-const pct = (value, total) => {
-  if (!total || total <= 0) return "0%";
-  const percent = Math.round((value / total) * 100);
-  return (isNaN(percent) ? 0 : percent) + "%";
-};
-
-document.getElementById('active-pct').textContent = pct(activeSeconds, totalTracked);
-document.getElementById('idle-pct').textContent = pct(idleSeconds, totalTracked);
-document.getElementById('locked-pct').textContent = pct(lockedSeconds, totalTracked);
-document.getElementById('away-pct').textContent = pct(awaySeconds, totalTracked);
 
     // Screen time
     const st = data.screen_time || {};
@@ -896,7 +834,7 @@ async function loadSecurityIndicators() {
 
     loading.classList.add('hidden');
 
-    if (!data || data.length === 0) {
+    if (!Array.isArray(data)) {
         empty.classList.remove('hidden');
         content.classList.add('hidden');
         return;
@@ -904,6 +842,34 @@ async function loadSecurityIndicators() {
 
     empty.classList.add('hidden');
     content.classList.remove('hidden');
+
+    if (data.length === 0) {
+        const scoreEl = document.getElementById('security-score');
+        const scoreBar = document.getElementById('security-score-bar');
+        const scoreLabel = document.getElementById('security-score-label');
+
+        if (scoreEl) {
+            scoreEl.textContent = '100';
+            scoreEl.className = 'text-4xl font-bold text-green-600 dark:text-green-400 mt-1';
+        }
+        if (scoreBar) scoreBar.style.width = '100%';
+        if (scoreLabel) scoreLabel.textContent = 'No active security indicators reported';
+
+        document.getElementById('critical-count').textContent = '0';
+        document.getElementById('warning-count').textContent = '0';
+
+        renderCriticalAlerts([]);
+        renderSecurityTable('network-body', [], 'network');
+        renderSecurityTable('extensions-body', [], 'extension');
+        renderSecurityTable('persistence-body', [], 'persistence');
+        renderSecurityTable('audit-body', [], 'audit');
+
+        document.getElementById('network-count').textContent = '0 indicators';
+        document.getElementById('extensions-count').textContent = '0 indicators';
+        document.getElementById('persistence-count').textContent = '0 indicators';
+        document.getElementById('audit-count').textContent = '0 indicators';
+        return;
+    }
 
     // Group indicators by type
     const grouped = {

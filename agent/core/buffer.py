@@ -15,6 +15,65 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
+# Standardize buffered timestamps to IST (UTC+05:30).
+IST_OFFSET = timedelta(hours=5, minutes=30)
+IST = timezone(IST_OFFSET, name='IST')
+
+
+def _get_ist_now() -> datetime:
+    """Get current time in IST."""
+    return datetime.now(IST)
+
+
+def _get_ist_timestamp() -> str:
+    """Get current ISO timestamp in IST."""
+    return _get_ist_now().isoformat()
+
+
+def _parse_timestamp_to_ist(value) -> Optional[datetime]:
+    """
+    Parse an incoming timestamp value and normalize to IST.
+    Naive datetimes are treated as UTC for backward compatibility.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return dt.astimezone(IST)
+
+
+def _normalize_timestamp_to_ist(value, fallback_to_now: bool = False) -> Optional[str]:
+    """
+    Normalize timestamp-like values to IST ISO8601 strings.
+    If parsing fails, preserve original non-empty value to avoid silent data loss.
+    """
+    parsed = _parse_timestamp_to_ist(value)
+    if parsed is not None:
+        return parsed.isoformat()
+
+    if value is None:
+        return _get_ist_timestamp() if fallback_to_now else None
+
+    raw = str(value).strip()
+    if not raw:
+        return _get_ist_timestamp() if fallback_to_now else None
+
+    return raw
+
+
 class BufferDB:
     """SQLite buffer for telemetry data with thread-safety"""
     
@@ -123,6 +182,8 @@ class BufferDB:
         Returns: Number of rows deleted
         """
         try:
+            cleanup_cutoff = (_get_ist_now() - timedelta(days=7)).isoformat()
+
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 total_deleted = 0
@@ -131,8 +192,8 @@ class BufferDB:
                 cursor.execute('''
                     DELETE FROM heartbeats 
                     WHERE processed = 1 
-                    AND timestamp < datetime('now', '-7 days')
-                ''')
+                    AND timestamp < ?
+                ''', (cleanup_cutoff,))
                 deleted_hb = cursor.rowcount
                 total_deleted += deleted_hb
 
@@ -140,8 +201,8 @@ class BufferDB:
                 cursor.execute('''
                     DELETE FROM merged_events 
                     WHERE uploaded = 1 
-                    AND timestamp < datetime('now', '-7 days')
-                ''')
+                    AND end_time < ?
+                ''', (cleanup_cutoff,))
                 deleted_events = cursor.rowcount
                 total_deleted += deleted_events
 
@@ -149,8 +210,8 @@ class BufferDB:
                 cursor.execute('''
                     DELETE FROM domain_active_sessions 
                     WHERE uploaded = 1 
-                    AND start_time < datetime('now', '-7 days')
-                ''')
+                    AND start_time < ?
+                ''', (cleanup_cutoff,))
                 deleted_domains = cursor.rowcount
                 total_deleted += deleted_domains
 
@@ -158,8 +219,8 @@ class BufferDB:
                 cursor.execute('''
                     DELETE FROM state_spans 
                     WHERE uploaded = 1 
-                    AND start_time < datetime('now', '-7 days')
-                ''')
+                    AND start_time < ?
+                ''', (cleanup_cutoff,))
                 deleted_spans = cursor.rowcount
                 total_deleted += deleted_spans
 
@@ -615,6 +676,7 @@ class BufferDB:
                 
                 # Use faster JSON serialization
                 payload = json.dumps(heartbeat, separators=(',', ':'))
+                heartbeat_ts = _normalize_timestamp_to_ist(heartbeat.get('timestamp'))
                 
                 cursor.execute('''
                     INSERT INTO heartbeats (agent_id, sequence, timestamp, payload, received_at)
@@ -622,9 +684,9 @@ class BufferDB:
                 ''', (
                     heartbeat.get('agent_id'),
                     heartbeat.get('sequence'),
-                    heartbeat.get('timestamp'),
+                    heartbeat_ts,
                     payload,
-                    datetime.now(timezone.utc).isoformat()
+                    _get_ist_timestamp()
                 ))
                 
                 row_id = cursor.lastrowid or 0
@@ -651,15 +713,16 @@ class BufferDB:
                         with self._get_connection() as conn:
                             cursor = conn.cursor()
                             payload = json.dumps(heartbeat, separators=(',', ':'))
+                            heartbeat_ts = _normalize_timestamp_to_ist(heartbeat.get('timestamp'))
                             cursor.execute('''
                                 INSERT INTO heartbeats (agent_id, sequence, timestamp, payload, received_at)
                                 VALUES (?, ?, ?, ?, ?)
                             ''', (
                                 heartbeat.get('agent_id'),
                                 heartbeat.get('sequence'),
-                                heartbeat.get('timestamp'),
+                                heartbeat_ts,
                                 payload,
-                                datetime.now(timezone.utc).isoformat()
+                                _get_ist_timestamp()
                             ))
                             return cursor.lastrowid or 0
                     except Exception as retry_error:
@@ -720,8 +783,14 @@ class BufferDB:
             
             # Screentime events don't have start/end, use timestamp instead
             if event.get('type') == 'screentime':
-                start_time = event.get('timestamp')
-                end_time = event.get('timestamp')
+                start_time = _normalize_timestamp_to_ist(event.get('timestamp'))
+                end_time = start_time
+                
+                # CRITICAL FIX: Reject screentime without a timestamp
+                if not start_time:
+                    logger.error('[BUFFER] Rejecting screentime event: MISSING TIMESTAMP')
+                    return 0
+                    
                 duration = 0
                 state_data = {
                     'active_seconds': event.get('active_seconds', 0),
@@ -732,8 +801,8 @@ class BufferDB:
                 }
             else:
                 # Regular session-based events (app, idle, etc.)
-                start_time = event['start']
-                end_time = event['end']
+                start_time = _normalize_timestamp_to_ist(event['start'])
+                end_time = _normalize_timestamp_to_ist(event['end'])
                 duration = event.get('duration_seconds', 0)
                 state_data = event.get('state', {})
 
@@ -783,27 +852,29 @@ class BufferDB:
             
             results = []
             for row in cursor.fetchall():
+                state_data = json.loads(row['state_data'])
+                start_time = _normalize_timestamp_to_ist(row['start_time'])
+                end_time = _normalize_timestamp_to_ist(row['end_time'])
                 event = {
                     'id': row['id'],
                     'agent_id': row['agent_id'],
                     'username': row['username'] if 'username' in row.keys() else 'unknown',
                     'type': row['event_type'],
-                    'start': row['start_time'],
-                    'end': row['end_time'],
+                    'start': start_time,
+                    'end': end_time,
                     'duration_seconds': row['duration_seconds'],
-                    'state': json.loads(row['state_data']),
+                    'state': state_data,
                     'heartbeat_count': row['heartbeat_count']
                 }
                 
                 # For screentime events, extract cumulative values from state_data
                 if event['type'] == 'screentime':
-                    state_data = json.loads(row['state_data'])
                     event['active_seconds'] = state_data.get('active_seconds', 0)
                     event['idle_seconds'] = state_data.get('idle_seconds', 0)
                     event['locked_seconds'] = state_data.get('locked_seconds', 0)
                     event['away_seconds'] = state_data.get('away_seconds', 0)
                     event['current_state'] = state_data.get('current_state', 'active')
-                    event['timestamp'] = row['start_time']  # Use start_time as timestamp
+                    event['timestamp'] = start_time  # Use start_time as timestamp
                 
                 results.append(event)
             
@@ -831,9 +902,10 @@ class BufferDB:
             inserted = 0
             
             for visit in visits:
+                visit_timestamp = _normalize_timestamp_to_ist(visit.get('timestamp'))
                 idempotency_key = self._make_idempotency_key("domain_visit", {
                     'agent_id': visit.get('agent_id'),
-                    'timestamp': visit.get('timestamp'),
+                    'timestamp': visit_timestamp,
                     'domain': visit.get('domain'),
                     'url': visit.get('url'),
                     'title': visit.get('title'),
@@ -845,7 +917,7 @@ class BufferDB:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     visit.get('agent_id'),
-                    visit.get('timestamp'),
+                    visit_timestamp,
                     visit.get('domain'),
                     visit.get('url'),
                     visit.get('title'),
@@ -871,8 +943,14 @@ class BufferDB:
                 ORDER BY id ASC
                 LIMIT ?
             ''', (limit,))
-            
-            return [dict(row) for row in cursor.fetchall()]
+
+            results = []
+            for row in cursor.fetchall():
+                item = dict(row)
+                item['timestamp'] = _normalize_timestamp_to_ist(item.get('timestamp'))
+                results.append(item)
+
+            return results
     
     def mark_domains_uploaded(self, ids: List[int]):
         """Mark domains as uploaded"""
@@ -900,14 +978,16 @@ class BufferDB:
             inserted = 0
             
             for session in sessions:
+                start_time = _normalize_timestamp_to_ist(session.get('start'))
+                end_time = _normalize_timestamp_to_ist(session.get('end'))
                 idempotency_key = self._make_idempotency_key("domain_session", {
                     'agent_id': session.get('agent_id'),
                     'domain': session.get('domain'),
                     'browser': session.get('browser'),
                     'url': session.get('url'),
                     'title': session.get('title'),
-                    'start': session.get('start'),
-                    'end': session.get('end'),
+                    'start': start_time,
+                    'end': end_time,
                     'duration_seconds': session.get('duration_seconds', 0),
                 })
                 cursor.execute('''
@@ -921,8 +1001,8 @@ class BufferDB:
                     session.get('browser'),
                     session.get('url'),
                     session.get('title'),
-                    session.get('start'),
-                    session.get('end'),
+                    start_time,
+                    end_time,
                     session.get('duration_seconds', 0),
                     idempotency_key
                 ))
@@ -948,6 +1028,8 @@ class BufferDB:
             
             results = []
             for row in cursor.fetchall():
+                start_time = _normalize_timestamp_to_ist(row['start_time'])
+                end_time = _normalize_timestamp_to_ist(row['end_time'])
                 results.append({
                     'id': row['id'],
                     'agent_id': row['agent_id'],
@@ -955,8 +1037,8 @@ class BufferDB:
                     'browser': row['browser'],
                     'url': row['url'],
                     'title': row['title'],
-                    'start': row['start_time'],
-                    'end': row['end_time'],
+                    'start': start_time,
+                    'end': end_time,
                     'duration_seconds': row['duration_seconds']
                 })
             
@@ -983,6 +1065,9 @@ class BufferDB:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                start_time = _normalize_timestamp_to_ist(span.get('start_time'))
+                end_time = _normalize_timestamp_to_ist(span.get('end_time'))
+                created_at = _normalize_timestamp_to_ist(span.get('created_at'), fallback_to_now=True)
                 # Use INSERT OR IGNORE for span_id idempotency
                 cursor.execute('''
                     INSERT OR IGNORE INTO state_spans (
@@ -993,10 +1078,10 @@ class BufferDB:
                     span.get('span_id'),
                     span.get('agent_id'),
                     span.get('state'),
-                    span.get('start_time'),
-                    span.get('end_time'),
+                    start_time,
+                    end_time,
                     span.get('duration_seconds'),
-                    span.get('created_at')
+                    created_at
                 ))
                 return True
         except Exception as e:
@@ -1015,8 +1100,16 @@ class BufferDB:
                 ORDER BY id ASC
                 LIMIT ?
             ''', (limit,))
-            
-            return [dict(row) for row in cursor.fetchall()]
+
+            results = []
+            for row in cursor.fetchall():
+                item = dict(row)
+                item['start_time'] = _normalize_timestamp_to_ist(item.get('start_time'))
+                item['end_time'] = _normalize_timestamp_to_ist(item.get('end_time'))
+                item['created_at'] = _normalize_timestamp_to_ist(item.get('created_at'))
+                results.append(item)
+
+            return results
 
     def mark_state_spans_uploaded(self, ids: List[int]):
         """Mark state spans as uploaded"""
@@ -1036,9 +1129,10 @@ class BufferDB:
             cursor = conn.cursor()
             apps_json = json.dumps(inventory.get('apps', []))
             changes_json = json.dumps(inventory.get('changes', {}))
+            inventory_ts = _normalize_timestamp_to_ist(inventory.get('timestamp'))
             idempotency_key = self._make_idempotency_key("inventory", {
                 'agent_id': inventory.get('agent_id'),
-                'timestamp': inventory.get('timestamp'),
+                'timestamp': inventory_ts,
                 'apps': inventory.get('apps', []),
                 'changes': inventory.get('changes', {})
             })
@@ -1049,7 +1143,7 @@ class BufferDB:
                 ) VALUES (?, ?, ?, ?, ?)
             ''', (
                 inventory.get('agent_id'),
-                inventory.get('timestamp'),
+                inventory_ts,
                 apps_json,
                 changes_json,
                 idempotency_key
@@ -1077,7 +1171,7 @@ class BufferDB:
                 results.append({
                     'id': row['id'],
                     'agent_id': row['agent_id'],
-                    'timestamp': row['timestamp'],
+                    'timestamp': _normalize_timestamp_to_ist(row['timestamp']),
                     'apps': json.loads(row['apps_json']),
                     'changes': json.loads(row['changes_json']) if row['changes_json'] else {}
                 })
@@ -1105,7 +1199,7 @@ class BufferDB:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             payload_json = json.dumps(data)
-            ts = data.get('collected_at', datetime.now(timezone.utc).isoformat())
+            ts = _normalize_timestamp_to_ist(data.get('collected_at'), fallback_to_now=True)
             idempotency_key = self._make_idempotency_key("hardware", {
                 'agent_id': data.get('agent_id'),
                 'timestamp': ts,
@@ -1145,7 +1239,7 @@ class BufferDB:
                 results.append({
                     'id': row['id'],
                     'agent_id': row['agent_id'],
-                    'timestamp': row['timestamp'],
+                    'timestamp': _normalize_timestamp_to_ist(row['timestamp']),
                     'data': json.loads(row['payload_json'])
                 })
             
@@ -1171,7 +1265,7 @@ class BufferDB:
         """Store extended inventory snapshot"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            ts = data.get('timestamp', datetime.now(timezone.utc).isoformat())
+            ts = _normalize_timestamp_to_ist(data.get('timestamp'), fallback_to_now=True)
             payload_json = json.dumps(data)
             idempotency_key = self._make_idempotency_key("ext_inventory", {
                 'agent_id': data.get('agent_id'),
@@ -1212,7 +1306,7 @@ class BufferDB:
                 results.append({
                     'id': row['id'],
                     'agent_id': row['agent_id'],
-                    'timestamp': row['timestamp'],
+                    'timestamp': _normalize_timestamp_to_ist(row['timestamp']),
                     'data': json.loads(row['payload_json'])
                 })
             
@@ -1238,7 +1332,7 @@ class BufferDB:
         """Store security indicators snapshot"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            ts = data.get('timestamp', datetime.now(timezone.utc).isoformat())
+            ts = _normalize_timestamp_to_ist(data.get('timestamp'), fallback_to_now=True)
             payload_json = json.dumps(data)
             idempotency_key = self._make_idempotency_key("security", {
                 'agent_id': data.get('agent_id'),
@@ -1279,7 +1373,7 @@ class BufferDB:
                 results.append({
                     'id': row['id'],
                     'agent_id': row['agent_id'],
-                    'timestamp': row['timestamp'],
+                    'timestamp': _normalize_timestamp_to_ist(row['timestamp']),
                     'data': json.loads(row['payload_json'])
                 })
             
@@ -1305,7 +1399,7 @@ class BufferDB:
         """Store raw system visibility snapshot."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            ts = data.get('timestamp', datetime.now(timezone.utc).isoformat())
+            ts = _normalize_timestamp_to_ist(data.get('timestamp'), fallback_to_now=True)
             payload_json = json.dumps(data)
             idempotency_key = self._make_idempotency_key("system_visibility", {
                 'agent_id': data.get('agent_id'),
@@ -1346,7 +1440,7 @@ class BufferDB:
                 results.append({
                     'id': row['id'],
                     'agent_id': row['agent_id'],
-                    'timestamp': row['timestamp'],
+                    'timestamp': _normalize_timestamp_to_ist(row['timestamp']),
                     'data': json.loads(row['payload_json'])
                 })
 
@@ -1372,7 +1466,7 @@ class BufferDB:
         """Store EOL data snapshot"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            ts = data.get('timestamp', datetime.now(timezone.utc).isoformat())
+            ts = _normalize_timestamp_to_ist(data.get('timestamp'), fallback_to_now=True)
             payload_json = json.dumps(data)
             idempotency_key = self._make_idempotency_key("eol", {
                 'agent_id': data.get('agent_id'),
@@ -1413,7 +1507,7 @@ class BufferDB:
                 results.append({
                     'id': row['id'],
                     'agent_id': row['agent_id'],
-                    'timestamp': row['timestamp'],
+                    'timestamp': _normalize_timestamp_to_ist(row['timestamp']),
                     'data': json.loads(row['data_json'])
                 })
             
@@ -1438,6 +1532,7 @@ class BufferDB:
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            state_timestamp = _normalize_timestamp_to_ist(event_data.get('timestamp'))
             
             # Store as a merged event with type 'state-change'
             state_data = {
@@ -1449,7 +1544,7 @@ class BufferDB:
                 'agent_id': event_data.get('agent_id'),
                 'previous_state': event_data.get('previous_state'),
                 'current_state': event_data.get('current_state'),
-                'timestamp': event_data.get('timestamp'),
+                'timestamp': state_timestamp,
                 'duration_seconds': event_data.get('duration_seconds', 0)
             })
             
@@ -1462,8 +1557,8 @@ class BufferDB:
                 event_data.get('agent_id'),
                 event_data.get('username', 'unknown'),
                 'state-change',
-                event_data.get('timestamp'),
-                event_data.get('timestamp'),  # end_time = start_time for instant events
+                state_timestamp,
+                state_timestamp,  # end_time = start_time for instant events
                 event_data.get('duration_seconds', 0),
                 json.dumps(state_data),
                 1,
@@ -1533,15 +1628,15 @@ class BufferDB:
             }
 
             oldest_pending_age_seconds = None
-            now = datetime.now(timezone.utc)
+            now = _get_ist_now()
             parsed = []
             for value in oldest_rows.values():
                 if not value:
                     continue
                 try:
-                    dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
+                    dt = _parse_timestamp_to_ist(value)
+                    if dt is None:
+                        continue
                     parsed.append((now - dt).total_seconds())
                 except Exception:
                     continue
@@ -1691,8 +1786,9 @@ class BufferDB:
         Returns:
             Dict with counts of deleted records by table
         """
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
-        heartbeat_cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        now_ist = _get_ist_now()
+        cutoff = (now_ist - timedelta(days=retention_days)).isoformat()
+        heartbeat_cutoff = (now_ist - timedelta(hours=24)).isoformat()
         
         deleted_counts = {
             'merged_events': 0,

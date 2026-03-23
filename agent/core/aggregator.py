@@ -146,8 +146,11 @@ class HeartbeatAggregator:
         cumulative_locked = screentime.get('locked_seconds', 0)
         cumulative_away = screentime.get('away_seconds', 0)
         
-        # Get metadata from latest heartbeat (fallback to current UTC if missing)
-        latest_timestamp = hb.get('timestamp') or datetime.now(timezone.utc).isoformat()
+        # Get metadata from latest heartbeat (strict - no fallback to now())
+        latest_timestamp = hb.get('timestamp')
+        if not latest_timestamp:
+             logger.warning(f"[AGGREGATOR] Heartbeat {latest_hb['id']} missing timestamp, skipping screentime")
+             return
         username = hb.get('username', 'unknown')
         
         # Read system_state directly (single authority — no fallback)
@@ -262,7 +265,19 @@ class HeartbeatAggregator:
         
         # Save final app
         if current_app and current_start:
-            end_time = datetime.now(timezone.utc)
+            # BUG FIX: Use the last heartbeat's timestamp, NOT now()
+            # This ensures historical data is attributed correctly.
+            last_hb = heartbeats[-1]['data']
+            last_ts_str = last_hb.get('timestamp')
+            
+            if last_ts_str:
+                try:
+                    end_time = datetime.fromisoformat(last_ts_str.replace('Z', '+00:00'))
+                except:
+                    end_time = datetime.now(timezone.utc) # Last resort fallback
+            else:
+                end_time = datetime.now(timezone.utc)
+                
             duration = (end_time - current_start).total_seconds()
             if duration > 0:
                 event = {

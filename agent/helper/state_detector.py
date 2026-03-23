@@ -28,7 +28,7 @@ import os
 from enum import Enum
 from typing import Callable, Optional
 
-# ✅ PHASE 2: Import state machine (single source of truth)
+# PHASE 2: Import state machine (single source of truth)
 from core.state_machine import ScreenTimeEngine, ScreenState, LastEvent
 
 logger = logging.getLogger(__name__)
@@ -138,13 +138,13 @@ class StateDetector:
         self.current_state = "active"   # active | idle | locked | away
         self.idle_start_ts = None       # monotonic timestamp
         
-        # ✅ NEW: Duration tracking
+        # NEW: Duration tracking
         self._last_state_change_time = time.time()  # Track time of last transition
         
-        # ✅ NEW: Span generation
+        # NEW: Span generation
         self.pending_spans = []  # List of completed spans awaiting collection
         
-        # ✅ NEW: Crash recovery
+        # NEW: Crash recovery
         import os
         if data_dir:
             self.state_file = Path(data_dir) / 'current_state.json'
@@ -162,7 +162,7 @@ class StateDetector:
         # Reference to IdleDetector for synchronization (set by main.py)
         self.idle_detector = None
         
-        # ✅ PHASE 2: Initialize state machine (ONLY place that calculates time)
+        # PHASE 2: Initialize state machine (ONLY place that calculates time)
         self.screen_time_engine = ScreenTimeEngine(
             data_dir=data_dir or Path(os.path.expanduser('~')) / '.sentineledge',
             agent_id=self.agent_id
@@ -182,7 +182,7 @@ class StateDetector:
             logger.info("[STATE] Started in ACTIVE state")
             self.current_state = "active"
             
-        # ✅ PHASE 2: Load persisted state and handle startup gap
+        # PHASE 2: Load persisted state and handle startup gap
         persisted = self.screen_time_engine.load_persisted_state()
         if persisted:
             gap_info = self.screen_time_engine.handle_startup(persisted)
@@ -240,7 +240,7 @@ class StateDetector:
         # New: Notify of initial state for timeline alignment
         if self.on_state_change:
             try:
-                self.on_state_change(SystemState.UNKNOWN, self.authority.state, 0.0)  # ✅ duration=0 for initial state
+                self.on_state_change(SystemState.UNKNOWN, self.authority.state, 0.0)  # duration=0 for initial state
                 logger.debug(f"[STATE] Dispatched initial state notification: {self.authority.state.value}")
             except Exception as e:
                 logger.error(f"[STATE] Initial notification callback error: {e}")
@@ -280,17 +280,32 @@ class StateDetector:
         except:
             return 0.0
 
-    def _transition(self, new_state: str):
-        """✅ PHASE 2: Use state machine for ALL time calculations"""
+    def _transition(self, new_state: str, source: str = "poll", remote_session_active: bool = False):
+        """PHASE 2: Use state machine for ALL time calculations"""
         prev_state = self.current_state
         if prev_state == new_state:
             return
+        try:
+            new_state_enum = SystemState(new_state)
+        except ValueError:
+            logger.warning(f"[STATE] Invalid transition target ignored: {new_state}")
+            return
+        if not self.authority.set_state(
+            new_state_enum,
+            source=source,
+            remote_session_active=remote_session_active
+        ):
+            logger.info(
+                f"[STATE] Transition blocked by authority: "
+                f"{prev_state} -> {new_state} (source={source}, remote={remote_session_active})"
+            )
+            return
         
-        # ✅ Calculate duration in previous state (for span generation only)
+        # Calculate duration in previous state (for span generation only)
         now = time.time()
         duration_seconds = now - self._last_state_change_time
         
-        # ✅ NEW: CREATE SPAN for the exiting state (timeline visualization only)
+        # NEW: CREATE SPAN for the exiting state (timeline visualization only)
         if prev_state in ("active", "idle", "locked") and self._last_state_change_time > 0 and duration_seconds >= 1.0:
             span = self._create_span(
                 state=prev_state,
@@ -301,7 +316,7 @@ class StateDetector:
             if span:
                 self.pending_spans.append(span)
         
-        # ✅ PHASE 2: ONLY place time is calculated - call state machine
+        # PHASE 2: ONLY place time is calculated - call state machine
         # Map local state names to ScreenState enum
         state_map = {
             "active": ScreenState.ACTIVE,
@@ -342,18 +357,10 @@ class StateDetector:
 
         # Mirror authority state locally
         self.current_state = new_state
-        
-        # Authority sync
-        try:
-            state_enum = SystemState(new_state)
-            self.authority.set_state(state_enum, source="os")
-        except:
-            pass
-        
-        # ✅ NEW: Persist current state for crash recovery
+        # NEW: Persist current state for crash recovery
         self._persist_current_state()
         
-        # ✅ Call callback with duration
+        # Call callback with duration
         if self.on_state_change:
             try:
                 prev_state_enum = SystemState(prev_state) if prev_state != "unknown" else SystemState.UNKNOWN
@@ -419,11 +426,11 @@ class StateDetector:
         if msg == WM_WTSSESSION_CHANGE:
             if wparam == WTS_SESSION_LOCK:
                 logger.info("[STATE] Screen LOCKED (OS Event)")
-                self._transition("locked")
+                self._transition("locked", source="os")
                 
             elif wparam == WTS_SESSION_UNLOCK:
                 logger.info("[STATE] Screen UNLOCKED (OS Event)")
-                self._transition("active")
+                self._transition("active", source="os")
         elif msg == WM_POWERBROADCAST:
             if wparam == PBT_APMSUSPEND:
                 self._handle_suspend()
@@ -432,7 +439,7 @@ class StateDetector:
                 self._handle_resume()
                 return 1
         elif msg == WM_QUERYENDSESSION:
-            # Windows is asking if we can shut down — mark shutdown before process dies
+            # Windows is asking if we can shut down - mark shutdown before process dies
             try:
                 self.screen_time_engine.mark_shutdown()
                 logger.info("[STATE] WM_QUERYENDSESSION: marked shutdown in state machine")
@@ -450,7 +457,7 @@ class StateDetector:
         return win32gui.DefWindowProc(hwnd, msg, wparam, lparam)
 
     def _handle_suspend(self):
-        """Handle OS suspend event. LOCKED is terminal — sleep cannot override it."""
+        """Handle OS suspend event. LOCKED is terminal - sleep cannot override it."""
         try:
             if self._suspended:
                 return
@@ -468,16 +475,14 @@ class StateDetector:
             # Mark sleep for gap handling on resume/restart.
             self.screen_time_engine.mark_sleep()
 
-            # LOCKED is terminal — sleep cannot override it.
+            # LOCKED is terminal - sleep cannot override it.
             # If already locked (Win+L before lid close), stay LOCKED.
             # If not locked, transition to AWAY.
             if self.current_state == "locked":
-                logger.info("[STATE] System suspending while LOCKED — keeping LOCKED state")
-                # Don't transition — stay LOCKED through sleep
+                logger.info("[STATE] System suspending while LOCKED - keeping LOCKED state")
+                # Don't transition - stay LOCKED through sleep
             else:
-                self.screen_time_engine.transition(ScreenState.AWAY)
-                self.current_state = "away"
-                self.authority.set_state(SystemState.AWAY, source="os")
+                self._transition("away", source="os")
 
             # Prevent stale elapsed time from being turned into active/idle spans on resume.
             self._last_state_change_time = self._suspend_started_at
@@ -490,21 +495,17 @@ class StateDetector:
         try:
             if not self._suspended:
                 return
-            resumed_at = time.time()
             self._suspended = False
             logger.info("[STATE] System RESUME detected (OS Event)")
 
-            # End sleep gap handling window.
-            self.screen_time_engine.mark_resume()
-
-            # Reset transition anchor to avoid attributing sleep gap to foreground state.
-            self._last_state_change_time = resumed_at
-
             # Reconcile final state based on lock status right after resume.
             if self._is_session_locked() and not self._is_remote_session():
-                self._transition("locked")
+                self._transition("locked", source="os")
             else:
-                self._transition("active")
+                self._transition("active", source="os")
+
+            # End sleep gap handling window AFTER reconciliation so sleep gap is counted.
+            self.screen_time_engine.mark_resume()
 
             self._persist_current_state()
         except Exception as e:
@@ -554,6 +555,8 @@ class StateDetector:
 
     def _update_state(self):
         """Drive transitions using single clock with multi-layer lock detection"""
+        self._check_daily_boundary()
+
         if self._suspended:
             return
 
@@ -561,25 +564,29 @@ class StateDetector:
         # On Windows 11, lockapp.exe shows as foreground but OpenInputDesktop
         # still returns a valid handle, so we check the app name first
         if self._foreground_app and self._foreground_app.lower() in LOCK_APPS:
-            self._transition("locked")
+            self._transition("locked", source="process")
             return
 
         # Layer 2: Desktop accessibility check (classic method)
-        if self._is_session_locked() and not self._is_remote_session():
-            self._transition("locked")
+        remote_session_active = self._is_remote_session()
+        if self._is_session_locked() and not remote_session_active:
+            self._transition("locked", source="desktop")
             return
 
         # If we reach here, neither lock detection triggered.
-        # If currently locked, the user must have unlocked → transition to active
+        # If currently locked, only OS unlock or remote-session activity may unlock.
         if self.authority.state == SystemState.LOCKED:
-            logger.info("[STATE] Screen UNLOCKED (detected via polling - no lock indicators)")
-            self._transition("active")
+            if remote_session_active:
+                logger.info("[STATE] Exiting LOCKED due to active remote session")
+                self._transition("active", source="remote", remote_session_active=True)
+            elif not HAS_WIN32:
+                # Fallback mode: no WTS unlock events available, use polling unlock.
+                logger.info("[STATE] Fallback unlock via polling (pywin32 unavailable)")
+                self._transition("active", source="os")
+            else:
+                logger.debug("[STATE] Staying LOCKED until OS unlock event")
             return  # Skip idle check for this tick
 
-        # Centralized Timing (SOLE Authority)
-        now = time.time()
-        idle_for = self._get_idle_seconds()
-        
         if self.idle_detector:
             # Centralized Timing (SOLE Authority)
             now = time.time()
@@ -589,11 +596,11 @@ class StateDetector:
             self.idle_detector.update(now - idle_for, now)
             
             if self.idle_detector.is_idle():
-                self._transition("idle")
+                self._transition("idle", source="idle")
             else:
-                self._transition("active")
+                self._transition("active", source="idle")
         else:
-            self._transition("active")
+            self._transition("active", source="idle")
 
     # ========================================================================
     # SPAN GENERATION
@@ -723,12 +730,26 @@ class StateDetector:
     # ========================================================================
     # CUMULATIVE TIME TRACKING (for heartbeat deltas)
     # ========================================================================
+
+    def _check_daily_boundary(self):
+        """Trigger state-machine midnight rollover while preserving current state continuity."""
+        try:
+            if self.screen_time_engine.check_daily_boundary():
+                logger.info(
+                    f"[STATE] Daily boundary handled by state machine "
+                    f"(state preserved: {self.current_state})"
+                )
+        except Exception as e:
+            logger.error(f"[STATE] Daily boundary check error: {e}", exc_info=True)
     
     def get_cumulative_totals(self) -> dict:
         """
         Read cumulative totals from state machine (ONLY source of truth).
         Calls tick() first to flush current state time.
         """
+        # Handle midnight/day rollover before reading counters.
+        self._check_daily_boundary()
+
         # CRITICAL: Call tick() to update counters before reading
         try:
             self.screen_time_engine.tick()
@@ -756,10 +777,11 @@ class StateDetector:
             }
     
     def reset_cumulative(self):
-        """✅ PHASE 2: Reset via state machine (ONLY place that manages counters)"""
+        """PHASE 2: Reset via state machine (ONLY place that manages counters)"""
         try:
             self.screen_time_engine.reset_daily()
             logger.info("[STATE] Daily counters reset via state machine")
         except Exception as e:
             logger.error(f"[STATE] Error resetting state machine: {e}", exc_info=True)
+
 
