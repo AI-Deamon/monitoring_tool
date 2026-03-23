@@ -32,6 +32,9 @@ def upgrade():
             v_session_changed BOOLEAN := FALSE;
         BEGIN
             v_date := p_timestamp::DATE;
+                    IF v_date < (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE THEN
+                        RAISE NOTICE 'Historical data detected for agent %, on %', p_agent_id, v_date;
+                    END IF;
 
             IF p_session_start IS NOT NULL THEN
                 SELECT session_start INTO v_existing_session_start
@@ -44,7 +47,7 @@ def upgrade():
             END IF;
 
             INSERT INTO screen_time (agent_id, date, session_start, active_seconds, idle_seconds, locked_seconds, away_seconds, last_updated)
-            VALUES (p_agent_id::UUID, v_date, p_session_start, p_active_total, p_idle_total, p_locked_total, p_away_total, NOW())
+            VALUES (p_agent_id::UUID, v_date, p_session_start, p_active_total, p_idle_total, p_locked_total, p_away_total, (NOW() AT TIME ZONE 'Asia/Kolkata'))
             ON CONFLICT (agent_id, date) DO UPDATE SET
                 session_start = CASE WHEN v_session_changed THEN EXCLUDED.session_start ELSE screen_time.session_start END,
                 -- LEAST(86400) caps each counter at 24h as defense-in-depth against clock jumps.
@@ -52,7 +55,7 @@ def upgrade():
                 idle_seconds = LEAST(GREATEST(screen_time.idle_seconds, EXCLUDED.idle_seconds), 86400),
                 locked_seconds = LEAST(GREATEST(screen_time.locked_seconds, EXCLUDED.locked_seconds), 86400),
                 away_seconds = LEAST(GREATEST(screen_time.away_seconds, EXCLUDED.away_seconds), 86400),
-                last_updated = NOW();
+                last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
 
             RETURN QUERY SELECT 'success'::text, 'Screentime processed'::text;
         EXCEPTION WHEN OTHERS THEN
@@ -80,6 +83,9 @@ def downgrade():
             v_session_changed BOOLEAN := FALSE;
         BEGIN
             v_date := p_timestamp::DATE;
+                    IF v_date < (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE THEN
+                        RAISE NOTICE 'Historical data detected for agent %, on %', p_agent_id, v_date;
+                    END IF;
 
             IF p_session_start IS NOT NULL THEN
                 SELECT session_start INTO v_existing_session_start
@@ -92,14 +98,14 @@ def downgrade():
             END IF;
 
             INSERT INTO screen_time (agent_id, date, session_start, active_seconds, idle_seconds, locked_seconds, away_seconds, last_updated)
-            VALUES (p_agent_id::UUID, v_date, p_session_start, p_active_total, p_idle_total, p_locked_total, p_away_total, NOW())
+            VALUES (p_agent_id::UUID, v_date, p_session_start, p_active_total, p_idle_total, p_locked_total, p_away_total, (NOW() AT TIME ZONE 'Asia/Kolkata'))
             ON CONFLICT (agent_id, date) DO UPDATE SET
                 session_start = CASE WHEN v_session_changed THEN EXCLUDED.session_start ELSE screen_time.session_start END,
                 active_seconds = GREATEST(screen_time.active_seconds, EXCLUDED.active_seconds),
                 idle_seconds = GREATEST(screen_time.idle_seconds, EXCLUDED.idle_seconds),
                 locked_seconds = GREATEST(screen_time.locked_seconds, EXCLUDED.locked_seconds),
                 away_seconds = GREATEST(screen_time.away_seconds, EXCLUDED.away_seconds),
-                last_updated = NOW();
+                last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
 
             RETURN QUERY SELECT 'success'::text, 'Screentime processed'::text;
         EXCEPTION WHEN OTHERS THEN

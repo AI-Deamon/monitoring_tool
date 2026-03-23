@@ -79,7 +79,7 @@ def update_telemetry_time(agent_id: str, event_timestamp: Optional[datetime] = N
         agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
         if agent:
             # Keep liveness heartbeat based on receive time (not event time).
-            agent.last_telemetry_time = datetime.utcnow()
+            agent.last_telemetry_time = datetime.now(get_server_tz())
 
             # Canonical first activity must come from telemetry event timestamp.
             if event_timestamp is not None:
@@ -117,7 +117,7 @@ def parse_agent_timestamp(ts_str: str, agent_id: str = None) -> datetime:
             ts = ts.replace(tzinfo=timezone.utc)
             
         # Validate timestamp range (enhanced from original)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(get_server_tz())
         max_future = now + timedelta(hours=2)  # Reduce clock drift tolerance
         min_past = now - timedelta(days=365)
         
@@ -141,7 +141,7 @@ def parse_agent_timestamp(ts_str: str, agent_id: str = None) -> datetime:
         if _PYTZ_AVAILABLE:
             return datetime.now(pytz.timezone(SERVER_TIMEZONE)).replace(tzinfo=None)
         else:
-            return datetime.now(timezone.utc).replace(tzinfo=None)
+            return datetime.now(get_server_tz()).replace(tzinfo=None)
 
 
 def safe_int(value, default=0, min_val=0, max_val=86400) -> int:
@@ -296,7 +296,7 @@ def store_raw_event(agent_id, event_type, payload, processed=False, error=None):
             event_type=event_type,
             sequence=payload.get('sequence'),
             payload=json.dumps(payload),
-            received_at=datetime.utcnow(),
+            received_at=datetime.now(get_server_tz()),
             processed=processed,
             error=error
         )
@@ -395,7 +395,10 @@ def telemetry_screentime():
     
     try:
         # Parse timestamp
-        ts_str = data.get('timestamp', datetime.utcnow().isoformat())
+        ts_str = data.get('timestamp')
+        if not ts_str:
+            logger.error(f'[{short_id}] screentime REJECTED: missing timestamp')
+            return jsonify({'error': 'Missing timestamp'}), 400
         logger.info(
             f"[{short_id}] [DIAG] screentime raw ts_str={ts_str!r}, "
             f"type={type(ts_str).__name__}, "
@@ -499,7 +502,7 @@ def telemetry_screentime():
                     event_type='screentime',
                     sequence=data.get('sequence'),
                     payload=json.dumps(data),
-                    received_at=datetime.utcnow(),
+                    received_at=datetime.now(get_server_tz()),
                     processed=False,
                     error=str(e)
                 )
@@ -755,8 +758,8 @@ def telemetry_app_switch():
         
         # ✅ FIXED: Use parse_agent_timestamp for proper timezone handling
         ts_str = data.get('timestamp', datetime.now(timezone.utc).isoformat())
-        start_str = data.get('session_start', datetime.utcnow().isoformat())
-        end_str = data.get('session_end', datetime.utcnow().isoformat())
+        start_str = data.get('session_start', datetime.now(get_server_tz()).isoformat())
+        end_str = data.get('session_end', datetime.now(get_server_tz()).isoformat())
         
         timestamp_naive = parse_agent_timestamp(ts_str, agent_id)
         start_naive = parse_agent_timestamp(start_str, agent_id)
@@ -826,7 +829,7 @@ def telemetry_app_switch():
                     event_type='app-switch',
                     sequence=data.get('sequence'),
                     payload=json.dumps(data),
-                    received_at=datetime.utcnow(),
+                    received_at=datetime.now(get_server_tz()),
                     processed=False,
                     error=str(e)
                 )
@@ -878,8 +881,8 @@ def telemetry_domain_switch():
         
         # ✅ FIXED: Use parse_agent_timestamp for proper timezone handling
         ts_str = data.get('timestamp', datetime.now(timezone.utc).isoformat())
-        start_str = data.get('session_start', datetime.utcnow().isoformat())
-        end_str = data.get('session_end', datetime.utcnow().isoformat())
+        start_str = data.get('session_start', datetime.now(get_server_tz()).isoformat())
+        end_str = data.get('session_end', datetime.now(get_server_tz()).isoformat())
         
         timestamp_naive = parse_agent_timestamp(ts_str, agent_id)
         start_naive = parse_agent_timestamp(start_str, agent_id)
@@ -948,7 +951,7 @@ def telemetry_domain_switch():
                     event_type='domain-switch',
                     sequence=data.get('sequence'),
                     payload=json.dumps(data),
-                    received_at=datetime.utcnow(),
+                    received_at=datetime.now(get_server_tz()),
                     processed=False,
                     error=str(e)
                 )
@@ -987,7 +990,10 @@ def telemetry_state_change():
     
     try:
         # ✅ FIXED: Use parse_agent_timestamp for proper timezone handling
-        ts_str = data.get('timestamp', datetime.utcnow().isoformat())
+        ts_str = data.get('timestamp')
+        if not ts_str:
+            logger.error(f'[{short_id}] screentime REJECTED: missing timestamp')
+            return jsonify({'error': 'Missing timestamp'}), 400
         ts_naive = parse_agent_timestamp(ts_str, agent_id)
         
         previous_state = data.get('previous_state', 'unknown')
@@ -1035,7 +1041,7 @@ def telemetry_state_change():
                 if actual_transfer > 0:
                     screen_time.locked_seconds = current_locked - actual_transfer
                     screen_time.away_seconds = (screen_time.away_seconds or 0) + actual_transfer
-                    screen_time.last_updated = datetime.utcnow()
+                    screen_time.last_updated = datetime.now(get_server_tz())
                     
                     logger.info(
                         f"[{short_id}] away_seconds updated: "
@@ -1068,7 +1074,7 @@ def telemetry_state_change():
                     event_type='state-change',
                     sequence=data.get('sequence'),
                     payload=json.dumps(data),
-                    received_at=datetime.utcnow(),
+                    received_at=datetime.now(get_server_tz()),
                     processed=False,
                     error=str(e)
                 )

@@ -22,11 +22,18 @@ import time
 import logging
 import threading
 from enum import Enum
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
+
+# Standardize day-boundary logic to IST (UTC+05:30).
+IST = timezone(timedelta(hours=5, minutes=30), name="IST")
+
+
+def _now_ist() -> datetime:
+    return datetime.now(IST)
 
 
 class ScreenState(Enum):
@@ -69,7 +76,7 @@ class ScreenTimeEngine:
         self.last_event = LastEvent.NORMAL
         
         # RACE-002 FIX: Thread lock for state mutation safety
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         
         # Daily counters (seconds) - ONLY place these exist
         self.active_seconds = 0.0
@@ -82,7 +89,7 @@ class ScreenTimeEngine:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         
         # Current date tracking (for midnight detection)
-        self.current_date = datetime.now().date()
+        self.current_date = _now_ist().date()
         
         # Idempotency guard: only allow one reset per calendar day
         self._last_reset_date = None
@@ -248,6 +255,11 @@ class ScreenTimeEngine:
             except ValueError:
                 logger.warning(f"[STATE_MACHINE] Unknown last_event: {last_event_str}, treating as CRASH")
                 last_event = LastEvent.CRASH
+
+            # Best-effort crash/sleep disambiguation.
+            if last_event == LastEvent.CRASH and self._was_system_asleep_during_gap(last_timestamp, now):
+                logger.info("[STATE_MACHINE] Crash gap inferred as sleep from uptime heuristic")
+                last_event = LastEvent.SLEEP
             
             # ✅ CRITICAL: Gap handling logic
             if last_event == LastEvent.SLEEP:
@@ -324,7 +336,34 @@ class ScreenTimeEngine:
             self.last_timestamp = time.time()
             self._persist()
             logger.debug("[STATE_MACHINE] Reset last_event to NORMAL after startup")
-    
+
+    def _was_system_asleep_during_gap(self, start_time: float, end_time: float) -> bool:
+        """
+        Best-effort crash/sleep disambiguation using system boot time.
+        Returns True only when heuristic confidence is high.
+        """
+        try:
+            import psutil  # Optional dependency
+        except Exception:
+            return False
+
+        try:
+            boot_time = float(psutil.boot_time())
+            start_time = float(start_time)
+            end_time = float(end_time)
+
+            # Reboot during the gap means shutdown/crash path, not sleep.
+            if boot_time > start_time:
+                return False
+
+            expected_delta = end_time - start_time
+            uptime_delta = (end_time - boot_time) - (start_time - boot_time)
+
+            # If wall-clock advanced much more than uptime, sleep likely occurred.
+            return (expected_delta - uptime_delta) > 60
+        except Exception:
+            return False
+
     def get_daily_totals(self) -> Dict:
         """
         Get current daily totals (READ-ONLY).
@@ -361,11 +400,11 @@ class ScreenTimeEngine:
     
     def check_daily_boundary(self) -> bool:
         """
-        Check if we crossed midnight (local time).
+        Check if we crossed midnight (IST).
         
-        IMPORTANT: Uses LOCAL time, not UTC.
-        - User in IST: midnight = 00:00 IST (not UTC)
-        - Daily totals align with user's calendar day
+        IMPORTANT: Uses IST time, not UTC.
+        - Midnight boundary is 00:00 IST (not UTC)
+        - Daily totals align with server/business-day expectations in IST
         
         CRITICAL: At midnight:
         1. Send final totals to server
@@ -376,35 +415,37 @@ class ScreenTimeEngine:
         Returns:
             True if boundary crossed, False otherwise
         """
-        current_date = datetime.now().date()
-        
-        if current_date != self.current_date:
-            logger.info(
-                f"[STATE_MACHINE] Daily boundary crossed: "
-                f"{self.current_date} -> {current_date}"
-            )
+        with self._lock:
+            current_date = _now_ist().date()
             
-            # Flush current state time before reading final totals
-            self.tick()
+            if current_date != self.current_date:
+                logger.info(
+                    f"[STATE_MACHINE] Daily boundary crossed: "
+                    f"{self.current_date} -> {current_date}"
+                )
+                
+                # Flush current state time before reading final totals
+                self.tick()
+                
+                # Get final totals for yesterday (before reset)
+                final_totals = self.get_daily_totals()
+                logger.info(
+                    f"[STATE_MACHINE] Final totals for {self.current_date}: "
+                    f"A={final_totals['active_seconds']}s, "
+                    f"I={final_totals['idle_seconds']}s, "
+                    f"L={final_totals['locked_seconds']}s, "
+                    f"W={final_totals['away_seconds']}s, "
+                    f"Total={final_totals['total_seconds']}s ({final_totals['total_seconds']/3600:.1f}h)"
+                )
+                
+                # Reset for new day but keep current state continuity.
+                self.reset_daily()
+                self.current_date = current_date
+                self._persist()
+                
+                return True
             
-            # Get final totals for yesterday (before reset)
-            final_totals = self.get_daily_totals()
-            logger.info(
-                f"[STATE_MACHINE] Final totals for {self.current_date}: "
-                f"A={final_totals['active_seconds']}s, "
-                f"I={final_totals['idle_seconds']}s, "
-                f"L={final_totals['locked_seconds']}s, "
-                f"W={final_totals['away_seconds']}s, "
-                f"Total={final_totals['total_seconds']}s ({final_totals['total_seconds']/3600:.1f}h)"
-            )
-            
-            # Reset for new day
-            self.reset_daily()
-            self.current_date = current_date
-            
-            return True
-        
-        return False
+            return False
     
     def reset_daily(self):
         """
@@ -416,31 +457,32 @@ class ScreenTimeEngine:
         - Keep current_state (LOCKED/AWAY continuity matters)
         - Reset last_timestamp to now
         """
-        current_date = datetime.now().date()
-        if self._last_reset_date == current_date:
+        with self._lock:
+            current_date = _now_ist().date()
+            if self._last_reset_date == current_date:
+                logger.info(
+                    f"[STATE_MACHINE] Daily reset already done for {current_date}, "
+                    f"skipping (idempotent guard)"
+                )
+                return
+            
+            self._last_reset_date = current_date
+            
             logger.info(
-                f"[STATE_MACHINE] Daily reset already done for {current_date}, "
-                f"skipping (idempotent guard)"
+                f"[STATE_MACHINE] Resetting daily counters "
+                f"(keeping state={self.current_state.value})"
             )
-            return
-        
-        self._last_reset_date = current_date
-        
-        logger.info(
-            f"[STATE_MACHINE] Resetting daily counters "
-            f"(keeping state={self.current_state.value})"
-        )
-        
-        self.active_seconds = 0.0
-        self.idle_seconds = 0.0
-        self.locked_seconds = 0.0
-        self.away_seconds = 0.0
-        self.last_timestamp = time.time()
-        
-        # Persist immediately
-        self._persist()
-        
-        logger.info("[STATE_MACHINE] Daily reset complete")
+            
+            self.active_seconds = 0.0
+            self.idle_seconds = 0.0
+            self.locked_seconds = 0.0
+            self.away_seconds = 0.0
+            self.last_timestamp = time.time()
+            
+            # Persist immediately
+            self._persist()
+            
+            logger.info("[STATE_MACHINE] Daily reset complete")
     
     def _persist(self):
         """

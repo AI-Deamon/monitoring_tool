@@ -111,6 +111,11 @@ def upgrade() -> None:
         op.drop_constraint('screen_time_spans_agent_id_fkey', 'screen_time_spans', type_='foreignkey')
     except Exception:
         pass
+    # Drop FK from state_changes (created in 001_initial_migration)
+    try:
+        op.drop_constraint('state_changes_agent_id_fkey', 'state_changes', type_='foreignkey')
+    except Exception:
+        pass
 
 
     # ### Schema changes ###
@@ -183,6 +188,7 @@ def upgrade() -> None:
     op.create_foreign_key('fk_idle_sessions_agent_id', 'idle_sessions', 'agents', ['agent_id'], ['agent_id'], ondelete='CASCADE')
     op.create_foreign_key('fk_inventory_snapshots_agent_id', 'inventory_snapshots', 'agents', ['agent_id'], ['agent_id'], ondelete='CASCADE')
     
+
     # Alter domain_active_sessions table
     op.alter_column('domain_active_sessions', 'agent_id',
                existing_type=sa.VARCHAR(length=128),
@@ -296,6 +302,11 @@ def upgrade() -> None:
         except Exception:
             pass # column or table might not exist in some states
 
+    # Re-add state_changes FK with UUID type now that both columns are UUID
+    try:
+        op.create_foreign_key('fk_state_changes_agent_id', 'state_changes', 'agents', ['agent_id'], ['agent_id'], ondelete='CASCADE')
+    except Exception:
+        pass
 
 
     # Data Migration

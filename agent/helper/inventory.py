@@ -371,11 +371,59 @@ foreach ($path in $userPaths) {
 
 # METHOD 3: Microsoft Store Apps
 try {
-    $storeApps = Get-AppxPackage -ErrorAction SilentlyContinue |
+         # Define common system noise packages to filter out
+         $SystemNoise = @(
+             'Microsoft.Windows.*',
+             'Microsoft.*Store*',
+             'Microsoft.*YourPhone*',
+             'Microsoft.*Xbox*',
+             'Microsoft.*OneConnector*',
+             'Microsoft.*People*',
+             'Microsoft.*Solitaire*',
+             'Microsoft.*Wallet*',
+             'Microsoft.*Weather*',
+             'Microsoft.*News*',
+             'Microsoft.*Sports*',
+             'Microsoft.*Money*',
+             'Microsoft.*Bing*',
+             'Microsoft.*GetHelp*',
+             'Microsoft.*FeedbackHub*',
+             'Microsoft.*Maps*',
+             'Microsoft.*Skype*',
+             'Microsoft.*MicrosoftOfficeHub*',
+             'Microsoft.*MicrosoftStickyNotes*',
+             'Microsoft.*Paint*',
+             'Microsoft.*Print3D*',
+             'Microsoft.*ScreenSketch*',
+             'Microsoft.*SnipAndClip*',
+             'Microsoft.*StickyNotes*',
+             'Microsoft.*Tip*',
+             'Microsoft.*WindowsAlarms*',
+             'Microsoft.*WindowsCalculator*',
+             'Microsoft.*WindowsCamera*',
+             'Microsoft.*WindowsCommunicationsApps*',
+             'Microsoft.*WindowsFeedbackHub*',
+             'Microsoft.*WindowsMaps*',
+             'Microsoft.*WindowsSoundRecorder*',
+             'Microsoft.*Xbox*',
+             'Microsoft.Zune*',
+             'Microsoft.Getstarted*',
+             'Microsoft.Microsoft3DViewer*',
+             'Microsoft.MicrosoftOfficeHub*',
+             'Microsoft.MicrosoftSolitaireCollection*',
+             'Microsoft.MicrosoftStickyNotes*',
+             'Microsoft.Office.OneNote*',
+             'Microsoft.Office.Sway*',
+             'Microsoft.People*',
+             'Microsoft.WindowsPhone*',
+             'Microsoft.WindowsSoundRecorder*'
+         )
+
+         $storeApps = Get-AppxPackage -ErrorAction SilentlyContinue |
                  Where-Object { 
-                     $name = $_.Name
+                     $_.Name -notin $SystemNoise -and
                      $_.Name -notmatch '^Microsoft\.Windows\.' -and
-                     -not ($SystemNoise | Where-Object { $name -like $_ })
+                     $_.PackageFullName -notmatch '^Microsoft\.Windows\.'
                  } |
                  ForEach-Object {
                      $pkg = $_
@@ -419,8 +467,23 @@ try {
 $portable = Scan-ForPortableApps -Drives @('C', 'D')
 if ($portable) { $script:AllApps += $portable }
 
-# Deduplicate by DisplayName
-$script:AllApps = $script:AllApps | Group-Object DisplayName | ForEach-Object { $_.Group[0] }
+ # Deduplicate by DisplayName with source priority: MicrosoftStore > Registry-HKCU > Registry-HKLM > DiskScan
+        $script:AllApps = $script:AllApps | 
+            Group-Object DisplayName | 
+            ForEach-Object {
+                # Sort by source priority (MicrosoftStore first, then HKCU, HKLM, DiskScan last)
+                $sorted = $_.Group | 
+                    Sort-Object {
+                        switch ($_.Source) {
+                            'MicrosoftStore' { 0 }
+                            'Registry-HKCU' { 1 }
+                            'Registry-HKLM' { 2 }
+                            'DiskScan' { 3 }
+                            default { 4 }
+                        }
+                    }
+                $sorted[0]  # Take the highest priority source
+            }
 
 # Output clean JSON with full width
 $script:AllApps | ConvertTo-Json -Compress -Depth 10

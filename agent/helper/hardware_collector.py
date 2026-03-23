@@ -281,6 +281,22 @@ class HardwareCollector:
         except Exception as e:
             logger.debug(f"[HARDWARE] PowerShell error: {e}")
             return None
+
+    @staticmethod
+    def _normalize_powershell_scalar(value: Any) -> str:
+        """Normalize PowerShell JSON output that may be scalar or single-item list."""
+        if isinstance(value, list):
+            value = value[0] if value else ""
+        return str(value).strip() if value is not None else ""
+
+    @staticmethod
+    def _normalize_powershell_list(value: Any) -> List[str]:
+        """Normalize PowerShell JSON output so single-item arrays stay lists."""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            value = [value]
+        return [str(item).strip() for item in value if item not in (None, "")]
     
     def _collect_identity(self) -> AssetIdentity:
         """Collect system identity information"""
@@ -447,13 +463,17 @@ class HardwareCollector:
             if ($adapter.IPAddress) { $ips += $adapter.IPAddress }
             if ($adapter.DNSServerSearchOrder) { $dns += $adapter.DNSServerSearchOrder }
         }
+
+        $ipv4 = @($ips | Where-Object { $_ -and $_ -notmatch ':' } | Select-Object -Unique)
+        $uniqueMacs = @($macs | Where-Object { $_ } | Select-Object -Unique)
+        $uniqueDns = @($dns | Where-Object { $_ } | Select-Object -Unique)
         
         @{
-            PrimaryMAC = if ($macs.Count -gt 0) { $macs[0] } else { "" }
-            PrimaryIP = if ($ips.Count -gt 0) { ($ips | Where-Object { $_ -notmatch ':' })[0] } else { "" }
-            AllMACs = $macs | Select-Object -Unique
-            AllIPs = $ips | Where-Object { $_ -notmatch ':' } | Select-Object -Unique
-            DNSServers = $dns | Select-Object -Unique
+            PrimaryMAC = if ($uniqueMacs.Count -gt 0) { $uniqueMacs[0] } else { "" }
+            PrimaryIP = if ($ipv4.Count -gt 0) { $ipv4[0] } else { "" }
+            AllMACs = $uniqueMacs
+            AllIPs = $ipv4
+            DNSServers = $uniqueDns
             DomainJoined = $cs.PartOfDomain
             DomainName = if ($cs.PartOfDomain) { $cs.Domain } else { "" }
         } | ConvertTo-Json -Depth 2
@@ -463,13 +483,13 @@ class HardwareCollector:
         if output:
             try:
                 data = json.loads(output)
-                network.primary_mac = data.get('PrimaryMAC', '') or ''
-                network.primary_ip = data.get('PrimaryIP', '') or ''
-                network.all_macs = data.get('AllMACs', []) or []
-                network.all_ips = data.get('AllIPs', []) or []
-                network.dns_servers = data.get('DNSServers', []) or []
+                network.primary_mac = self._normalize_powershell_scalar(data.get('PrimaryMAC'))
+                network.primary_ip = self._normalize_powershell_scalar(data.get('PrimaryIP'))
+                network.all_macs = self._normalize_powershell_list(data.get('AllMACs'))
+                network.all_ips = self._normalize_powershell_list(data.get('AllIPs'))
+                network.dns_servers = self._normalize_powershell_list(data.get('DNSServers'))
                 network.domain_joined = bool(data.get('DomainJoined', False))
-                network.domain_name = data.get('DomainName', '') or ''
+                network.domain_name = self._normalize_powershell_scalar(data.get('DomainName'))
             except json.JSONDecodeError:
                 logger.debug("[HARDWARE] Failed to parse network JSON")
         
@@ -501,7 +521,7 @@ class HardwareCollector:
         # Antivirus (Windows Security Center)
         $av = @()
         try {
-            $avProducts = Get-WmiObject -Namespace "root\SecurityCenter2" -Class AntiVirusProduct -ErrorAction SilentlyContinue
+            $avProducts = Get-WmiObject -Namespace "root\\SecurityCenter2" -Class AntiVirusProduct -ErrorAction SilentlyContinue
             foreach ($product in $avProducts) {
                 $av += $product.displayName
             }
@@ -536,7 +556,7 @@ class HardwareCollector:
         
         # Extract Windows edition from Caption (e.g., "Microsoft Windows 11 Pro" -> "Pro")
         $osCaption = $os.Caption
-        $osEdition = $osCaption -replace 'Microsoft Windows \d+ ' -replace 'Microsoft Windows ', ''
+        $osEdition = $osCaption -replace 'Microsoft Windows \\d+ ' -replace 'Microsoft Windows ', ''
         
         # Get SKU number for precise identification
         $osSku = $os.OperatingSystemSKU

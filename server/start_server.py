@@ -144,6 +144,9 @@ def install_stored_procedures(app):
                     v_session_changed BOOLEAN := FALSE;
                 BEGIN
                     v_date := p_timestamp::DATE;
+                    IF v_date < (NOW() AT TIME ZONE 'Asia/Kolkata')::DATE THEN
+                        RAISE NOTICE 'Historical data detected for agent %, on %', p_agent_id, v_date;
+                    END IF;
                     
                     -- Check if session changed (agent restart/reinstall detection)
                     IF p_session_start IS NOT NULL THEN
@@ -158,7 +161,7 @@ def install_stored_procedures(app):
                     END IF;
                     
                     INSERT INTO screen_time (agent_id, date, session_start, active_seconds, idle_seconds, locked_seconds, away_seconds, last_updated)
-                    VALUES (p_agent_id::UUID, v_date, p_session_start, p_active_total, p_idle_total, p_locked_total, p_away_total, NOW())
+                    VALUES (p_agent_id::UUID, v_date, p_session_start, p_active_total, p_idle_total, p_locked_total, p_away_total, (NOW() AT TIME ZONE 'Asia/Kolkata'))
                     ON CONFLICT (agent_id, date) DO UPDATE SET
                         -- Update session_start if changed
                         session_start = CASE WHEN v_session_changed
@@ -170,7 +173,7 @@ def install_stored_procedures(app):
                         idle_seconds = LEAST(GREATEST(screen_time.idle_seconds, EXCLUDED.idle_seconds), 86400),
                         locked_seconds = LEAST(GREATEST(screen_time.locked_seconds, EXCLUDED.locked_seconds), 86400),
                         away_seconds = LEAST(GREATEST(screen_time.away_seconds, EXCLUDED.away_seconds), 86400),
-                        last_updated = NOW();
+                        last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
                     RETURN QUERY SELECT 'success'::text, 'Screentime processed'::text;
                 EXCEPTION WHEN OTHERS THEN
                     RETURN QUERY SELECT 'error'::text, SQLERRM::text;
@@ -200,17 +203,17 @@ def install_stored_procedures(app):
                     END IF;
                     BEGIN
                         INSERT INTO app_sessions (agent_id, app, window_title, start_time, end_time, duration_seconds, created_at)
-                        VALUES (p_agent_id::UUID, p_app, p_window_title, p_session_start, p_session_end, p_total_seconds, NOW());
+                        VALUES (p_agent_id::UUID, p_app, p_window_title, p_session_start, p_session_end, p_total_seconds, (NOW() AT TIME ZONE 'Asia/Kolkata'));
                     EXCEPTION WHEN unique_violation THEN
                         RETURN QUERY SELECT 'skipped'::text, 'Duplicate'::text;
                         RETURN;
                     END;
                     INSERT INTO app_usage (agent_id, date, app, duration_seconds, session_count, last_updated)
-                    VALUES (p_agent_id::UUID, v_date, p_app, p_total_seconds, 1, NOW())
+                    VALUES (p_agent_id::UUID, v_date, p_app, p_total_seconds, 1, (NOW() AT TIME ZONE 'Asia/Kolkata'))
                     ON CONFLICT (agent_id, date, app) DO UPDATE SET
                         duration_seconds = app_usage.duration_seconds + EXCLUDED.duration_seconds,
                         session_count = app_usage.session_count + 1,
-                        last_updated = NOW();
+                        last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
                     RETURN QUERY SELECT 'success'::text, 'Processed'::text;
                 EXCEPTION WHEN OTHERS THEN
                     RETURN QUERY SELECT 'error'::text, SQLERRM::text;
@@ -235,11 +238,11 @@ def install_stored_procedures(app):
                     VALUES (p_agent_id::UUID, p_domain, p_raw_title, p_raw_url, p_browser,
                         p_session_start, p_session_end, p_duration_seconds, 'agent', FALSE, p_idempotency_key);
                     INSERT INTO domain_usage (agent_id, date, domain, duration_seconds, session_count, last_updated)
-                    VALUES (p_agent_id::UUID, v_date, p_domain, p_duration_seconds, 1, NOW())
+                    VALUES (p_agent_id::UUID, v_date, p_domain, p_duration_seconds, 1, (NOW() AT TIME ZONE 'Asia/Kolkata'))
                     ON CONFLICT (agent_id, date, domain) DO UPDATE SET
                         duration_seconds = domain_usage.duration_seconds + EXCLUDED.duration_seconds,
                         session_count = domain_usage.session_count + 1,
-                        last_updated = NOW();
+                        last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
                     RETURN QUERY SELECT 'success'::text, 'Processed'::text;
                 EXCEPTION WHEN OTHERS THEN
                     RETURN QUERY SELECT 'error'::text, SQLERRM::text;
@@ -341,7 +344,7 @@ def install_sync_functions(app):
                     ON CONFLICT (agent_id, date, app) DO UPDATE SET
                         duration_seconds = EXCLUDED.duration_seconds,
                         session_count = EXCLUDED.session_count,
-                        last_updated = NOW();
+                        last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
                 END;
                 $$ LANGUAGE plpgsql;
             """)
@@ -366,7 +369,7 @@ def install_sync_functions(app):
                     ON CONFLICT (agent_id, date, domain) DO UPDATE SET
                         duration_seconds = EXCLUDED.duration_seconds,
                         session_count = EXCLUDED.session_count,
-                        last_updated = NOW();
+                        last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
                 END;
                 $$ LANGUAGE plpgsql;
             """)
@@ -388,10 +391,10 @@ def install_sync_functions(app):
                         GROUP BY s.agent_id
                     LOOP
                         INSERT INTO screen_time (agent_id, date, active_seconds, idle_seconds, locked_seconds, last_updated)
-                        VALUES (r.agent_id, p_date, r.total_active, 0, 0, NOW())
+                        VALUES (r.agent_id, p_date, r.total_active, 0, 0, (NOW() AT TIME ZONE 'Asia/Kolkata'))
                         ON CONFLICT (agent_id, date) DO UPDATE SET
                             active_seconds = EXCLUDED.active_seconds,
-                            last_updated = NOW();
+                            last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
                             
                         agent_id := r.agent_id;
                         active_seconds := r.total_active;
