@@ -255,31 +255,30 @@ class HardwareCollector:
     def _run_powershell(self, script: str, timeout: int = 30) -> Optional[str]:
         """Run PowerShell command and return output"""
         try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-            
+            # Use CREATE_NO_WINDOW for robust background execution
             result = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive",
                  "-ExecutionPolicy", "Bypass", "-Command", script],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='ignore',
                 timeout=timeout,
-                startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
-                logger.debug(f"[HARDWARE] PowerShell error: {result.stderr[:100]}")
+                stderr_preview = result.stderr[:100] if result.stderr else "No stderr"
+                logger.debug(f"[HARDWARE] PowerShell execution failed (code {result.returncode}): {stderr_preview}")
                 return None
                 
         except subprocess.TimeoutExpired:
             logger.warning(f"[HARDWARE] PowerShell timeout ({timeout}s)")
             return None
         except Exception as e:
-            logger.debug(f"[HARDWARE] PowerShell error: {e}")
+            logger.debug(f"[HARDWARE] PowerShell process creation failed: {e}")
             return None
 
     @staticmethod

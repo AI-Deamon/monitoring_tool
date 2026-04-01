@@ -46,12 +46,10 @@ def get_config() -> SimpleNamespace:
         CLEANUP_INTERVAL_HOURS=int(os.getenv('CLEANUP_INTERVAL_HOURS', '24')),
         
         # Email / SMTP
-        MAIL_SERVER=os.getenv('MAIL_SERVER', 'smtp.gmail.com'),
-        MAIL_PORT=int(os.getenv('MAIL_PORT', '587')),
-        MAIL_USE_TLS=os.getenv('MAIL_USE_TLS', 'true').lower() == 'true',
-        MAIL_USERNAME=os.getenv('MAIL_USERNAME', ''),
-        MAIL_PASSWORD=os.getenv('MAIL_PASSWORD', ''),
-        MAIL_DEFAULT_SENDER=os.getenv('MAIL_DEFAULT_SENDER', 'security@sentineledge.com'),
+        SMTP_SERVER=os.getenv('SMTP_SERVER', 'smtp.gmail.com'),
+        SMTP_PORT=int(os.getenv('SMTP_PORT', '587')),
+        EMAIL_ADDRESS=os.getenv('EMAIL_ADDRESS', ''),
+        EMAIL_PASSWORD=os.getenv('EMAIL_PASSWORD', ''),
         
         # SSL/mTLS
         SSL_CERT_PATH=os.getenv('SSL_CERT_PATH', 'certs/server.crt'),

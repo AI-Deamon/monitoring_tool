@@ -97,6 +97,9 @@
                 Username
               </th>
               <th class="px-6 py-3 text-left font-semibold text-slate-500 uppercase tracking-wider">
+                Email
+              </th>
+              <th class="px-6 py-3 text-left font-semibold text-slate-500 uppercase tracking-wider">
                 Role
               </th>
               <th class="px-6 py-3 text-left font-semibold text-slate-500 uppercase tracking-wider">
@@ -119,6 +122,10 @@
             <tr class="hover:bg-slate-50 transition">
               <td class="px-6 py-4 font-medium text-slate-900">
                 {{ user.username }}
+              </td>
+
+              <td class="px-6 py-4 text-slate-600">
+                {{ user.email or '—' }}
               </td>
 
               <td class="px-6 py-4">

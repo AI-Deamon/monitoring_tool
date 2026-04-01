@@ -38,3 +38,6 @@ Flask-Limiter>=3.5.0
 
 # Email Processing
 Flask-Mail==0.10.0
+
+# request module
+requests==2.33.0

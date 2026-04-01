@@ -29,9 +29,10 @@ def upgrade():
         sa.Column('install_path', sa.String(500), nullable=True),
         sa.Column('first_detected', sa.DateTime(), nullable=True),
         sa.Column('last_updated', sa.DateTime(), nullable=True),
+        sa.Column('source', sa.String(50), nullable=True),
         sa.PrimaryKeyConstraint('id'),
         sa.ForeignKeyConstraint(['agent_id'], ['agents.agent_id'], ondelete='CASCADE'),
-        sa.UniqueConstraint('agent_id', 'extension_id', name='uq_vscode_ext_agent_ext')
+        sa.UniqueConstraint('agent_id', 'extension_id', 'source', name='uq_vscode_ext_agent_ext_source')
     )
     op.create_index('ix_vscode_extensions_agent_id', 'vscode_extensions', ['agent_id'])
     print("[MIGRATION] Created vscode_extensions table")

@@ -69,7 +69,8 @@ class VSCodeExtension:
     publisher: str = "Unknown"
     version: str = "Unknown"
     install_path: Optional[str] = None         # was installed_path
-    
+    source: str = 'Unknown'
+
     def to_dict(self) -> Dict:
         return asdict(self)
 
@@ -166,32 +167,34 @@ class ExtendedInventoryCollector:
     def _run_powershell(self, script: str, timeout: int = 120) -> Optional[str]:
         """Run PowerShell command and return output"""
         try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
+            # Force UTF-8 output to prevent JSON corruption from down-converted smart quotes
+            utf8_script = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {script}"
             
+            # Use CREATE_NO_WINDOW to hide the console window without complex startupinfo
+            # This is more robust against 'Access is denied' errors on some Windows versions
             result = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive",
-                 "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                 "-Command", script],
+                 "-ExecutionPolicy", "Bypass", "-Command", utf8_script],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='ignore',
                 timeout=timeout,
-                startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
-                logger.debug(f"[EXTENDED] PowerShell error: {result.stderr[:200]}")
+                stderr_preview = result.stderr[:200] if result.stderr else "No stderr"
+                logger.debug(f"[EXTENDED] PowerShell execution failed (code {result.returncode}): {stderr_preview}")
                 return None
                 
         except subprocess.TimeoutExpired:
             logger.warning(f"[EXTENDED] PowerShell timeout ({timeout}s)")
             return None
         except Exception as e:
-            logger.error(f"[EXTENDED] PowerShell error: {e}")
+            logger.error(f"[EXTENDED] PowerShell process creation failed: {e}")
             return None
     
     # =========================================================================
@@ -439,23 +442,59 @@ class ExtendedInventoryCollector:
         return drivers
     
     # =========================================================================
-    # VS CODE EXTENSIONS COLLECTION
+    # IDE EXTENSIONS COLLECTION
     # =========================================================================
-    
+
     def collect_vscode_extensions(self) -> List[VSCodeExtension]:
-        """Collect VS Code and VS Code Insiders extensions"""
+        """Collect VS Code-like IDE extensions dynamically"""
         extensions = []
         
         script = r'''
         $ProgressPreference = 'SilentlyContinue'
         $extensions = @()
         
-        # VS Code extension paths
-        $extensionPaths = @{
-            'stable' = "$env:USERPROFILE\.vscode\extensions"
-            'insiders' = "$env:USERPROFILE\.vscode-insiders\extensions"
+        # Helper: Resolve localized %key% strings from package.nls.json
+        function Resolve-VscMsg {
+            param($MsgStr, $ExtPath)
+            if (-not $MsgStr -or -not $MsgStr.StartsWith('%') -or -not $MsgStr.EndsWith('%')) { return $MsgStr }
+            $msgKey = $MsgStr.Trim('%')
+            
+            $nlsPath = Join-Path $ExtPath 'package.nls.json'
+            if (Test-Path $nlsPath) {
+                try {
+                    $nlsRaw = Get-Content $nlsPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+                    if (-not $nlsRaw) { $nlsRaw = Get-Content $nlsPath -Raw -ErrorAction SilentlyContinue }
+                    if ($nlsRaw) {
+                        $nlsData = $nlsRaw | ConvertFrom-Json
+                        $match = $nlsData.PSObject.Properties | Where-Object { $_.Name -ieq $msgKey } | Select-Object -First 1
+                        if ($match) { return $match.Value }
+                    }
+                } catch {}
+            }
+            return $MsgStr
         }
-        
+    
+        # ✅ Dynamically detect all VS Code-like IDEs
+        # Uses -Force to catch both hidden and non-hidden dot folders
+        $extensionPaths = @{}
+    
+        Get-ChildItem "$env:USERPROFILE" -Directory -Force -ErrorAction SilentlyContinue | 
+            Where-Object { $_.Name.StartsWith('.') } |
+            ForEach-Object {
+                $extPath = Join-Path $_.FullName "extensions"
+                if (Test-Path $extPath) {
+                    # Confirm it's VS Code format by checking for package.json inside
+                    $hasPackageJson = Get-ChildItem $extPath -Directory -ErrorAction SilentlyContinue |
+                        Select-Object -First 5 |
+                        Where-Object { Test-Path (Join-Path $_.FullName "package.json") }
+                    
+                    if ($hasPackageJson) {
+                        $ideName = $_.Name.TrimStart('.')
+                        $extensionPaths[$ideName] = $extPath
+                    }
+                }
+            }
+    
         foreach ($type in $extensionPaths.Keys) {
             $path = $extensionPaths[$type]
             if (Test-Path $path) {
@@ -465,21 +504,31 @@ class ExtendedInventoryCollector:
                         try {
                             $pkg = Get-Content $packageJson -Raw | ConvertFrom-Json
                             
-                            # Parse extension ID from folder name (publisher.extension-version)
+                            # Parse extension ID correctly from folder name
                             $folderName = $_.Name
-                            $parts = $folderName -split '-'
-                            $publisher = $parts[0]
-                            $extName = $parts[1]
+                            if ($folderName -match '^(.+)-(\d+\.\d+.*)$') {
+                                $nameWithPublisher = $matches[1]
+                                $dotIndex = $nameWithPublisher.IndexOf('.')
+                                if ($dotIndex -gt 0) {
+                                    $publisher = $nameWithPublisher.Substring(0, $dotIndex)
+                                    $extName = $nameWithPublisher.Substring($dotIndex + 1)
+                                    $extensionID = "$publisher.$extName"
+                                } else {
+                                    $extensionID = $nameWithPublisher
+                                }
+                            } else {
+                                $extensionID = $folderName
+                            }
                             
                             $extensions += @{
-                                ExtensionID = "$publisher.$extName"
-                                Name = $pkg.displayName
-                                Publisher = $pkg.publisher
-                                Version = $pkg.version
-                                Description = $pkg.description
-                                Path = $_.FullName
+                                ExtensionID = $extensionID
+                                Name        = Resolve-VscMsg -MsgStr $pkg.displayName -ExtPath $_.FullName
+                                Publisher   = if ($pkg.publisherDisplayName) { Resolve-VscMsg -MsgStr $pkg.publisherDisplayName -ExtPath $_.FullName } else { $pkg.publisher }
+                                Version     = $pkg.version
+                                Description = Resolve-VscMsg -MsgStr $pkg.description -ExtPath $_.FullName
+                                Path        = $_.FullName
                                 InstallDate = $_.CreationTime.ToString('yyyy-MM-dd')
-                                VSCodeType = $type
+                                VSCodeType  = $type
                             }
                         } catch {}
                     }
@@ -493,7 +542,6 @@ class ExtendedInventoryCollector:
         output = self._run_powershell(script, timeout=60)
         if output:
             try:
-                # BUG-004 FIX: Validate output before parsing
                 cleaned = output.strip()
                 if not cleaned or cleaned in ('null', 'None', ''):
                     logger.debug("[EXTENDED] VS Code extensions returned empty output")
@@ -506,10 +554,11 @@ class ExtendedInventoryCollector:
                 for item in data:
                     ext = VSCodeExtension(
                         extension_id=item.get('ExtensionID', 'Unknown'),
-                        display_name=item.get('Name', 'Unknown'),
+                        display_name=item.get('Name') or item.get('ExtensionID', 'Unknown'),
                         publisher=item.get('Publisher', 'Unknown'),
                         version=item.get('Version', 'Unknown'),
-                        install_path=item.get('Path')
+                        install_path=item.get('Path'),
+                        source=item.get('VSCodeType', 'Unknown')
                     )
                     extensions.append(ext)
                     
@@ -536,6 +585,47 @@ class ExtendedInventoryCollector:
         $ProgressPreference = 'SilentlyContinue'
         $extensions = @()
         
+        # Helper: Resolve localized __MSG_key__ strings from _locales directory
+        function Resolve-Msg {
+            param($MsgStr, $ExtPath, $DefaultLocale)
+            if (-not $MsgStr -or -not $MsgStr.StartsWith('__MSG_')) { return $MsgStr }
+            $msgKey = $MsgStr.Substring(6).TrimEnd('_')
+            
+            $localesPath = Join-Path $ExtPath '_locales'
+            if (Test-Path $localesPath) {
+                # 1. Determine preferred locales
+                $preferredLocales = @()
+                if ($DefaultLocale) { $preferredLocales += $DefaultLocale.Replace('-', '_') }
+                $preferredLocales += @('en', 'en_US', 'en_GB', 'en-US', 'en-GB')
+                
+                # 2. Get all available locales
+                $allLocales = (Get-ChildItem $localesPath -Directory -ErrorAction SilentlyContinue).Name
+                
+                # 3. Combine: Preferred first, then everything else
+                $searchOrder = ($preferredLocales + $allLocales) | Select-Object -Unique
+                
+                foreach ($loc in $searchOrder) {
+                    $msgJson = Join-Path $localesPath (Join-Path $loc 'messages.json')
+                    if (Test-Path $msgJson) {
+                        try {
+                            $msgRaw = Get-Content $msgJson -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+                            if (-not $msgRaw) { $msgRaw = Get-Content $msgJson -Raw -ErrorAction SilentlyContinue } # Fallback encoding
+                            
+                            if ($msgRaw) {
+                                $msgData = $msgRaw | ConvertFrom-Json
+                                $props = $msgData.PSObject.Properties
+                                $match = $props | Where-Object { $_.Name -ieq $msgKey } | Select-Object -First 1
+                                if ($match -and $match.Value.message) {
+                                    return $match.Value.message
+                                }
+                            }
+                        } catch {}
+                    }
+                }
+            }
+            return $MsgStr
+        }
+
         # Helper: Parse Chromium-based browser extensions with multi-profile support
         function Get-ChromiumExtensions {
             param($BrowserName, $UserDataPath)
@@ -591,15 +681,25 @@ class ExtendedInventoryCollector:
                                 try {
                                     $m = Get-Content $manifest -Raw | ConvertFrom-Json
                                     
-                                    # Get name (handle localized names like __MSG_appName__)
-                                    $name = $m.name
+                                    # Get name & resolve __MSG__ tokens
+                                    $defaultLocale = $m.default_locale
+                                    $name = Resolve-Msg -MsgStr $m.name -ExtPath $latestVersion.FullName -DefaultLocale $defaultLocale
+                                    
+                                    # If it's still unresolved or broke, try fallback from Preferences
                                     if ($name -and $name.StartsWith('__MSG_')) {
                                         if ($enabledExtensions[$extId].Name) {
                                             $name = $enabledExtensions[$extId].Name
-                                        } else {
-                                            $name = $extId
                                         }
                                     }
+                                    
+                                    # Final fallback to ID if still unresolved
+                                    if ($name -and $name.StartsWith('__MSG_')) {
+                                        $name = $extId
+                                    }
+                                    if (-not $name) { $name = $extId }
+                                    
+                                    # Resolve description tokens
+                                    $description = Resolve-Msg -MsgStr $m.description -ExtPath $latestVersion.FullName -DefaultLocale $defaultLocale
                                     
                                     # Determine enabled status
                                     $isEnabled = $true
@@ -613,7 +713,7 @@ class ExtendedInventoryCollector:
                                         Name = $name
                                         Version = $m.version
                                         Publisher = $m.author
-                                        Description = $m.description
+                                        Description = $description
                                         Path = $latestVersion.FullName
                                         Profile = $profile
                                         Enabled = $isEnabled
