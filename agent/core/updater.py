@@ -74,6 +74,7 @@ class AgentUpdater:
         self.updates_dir = self.data_dir / 'updates'
         self.backup_dir = self.data_dir / 'backup'
         self.pending_file = self.data_dir / 'update_pending.json'
+        self.failed_swap_file = self.data_dir / 'failed_swap.json'
         self.update_lock_file = self.data_dir / 'update.lock'
         self.version_file = self.install_dir / 'version.json'
 
@@ -82,6 +83,7 @@ class AgentUpdater:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
 
         self._current_version = self._read_current_version()
+        self._last_update_check_reason = "not_checked"
         logger.info(f"[UPDATER] Initialized. Version={self._current_version}, "
                      f"Install={self.install_dir}")
 
@@ -160,8 +162,10 @@ class AgentUpdater:
         """
         key = self._get_signing_key()
         if not key:
-            logger.warning("[UPDATER] Skipping signature verification - no key")
-            return True  # Allow unsigned updates if no key configured
+            logger.warning(
+                "[UPDATER] Skipping signature verification - no signing key"
+            )
+            return True
 
         received_sig = metadata.get('signature', '')
         if not received_sig:
@@ -203,6 +207,7 @@ class AgentUpdater:
             Metadata includes 'force_check' bool if server set force_update_check.
         """
         try:
+            self._last_update_check_reason = "checking"
             url = f"{self.config.server_url}/api/v1/updates/latest"
             headers = {
                 'X-Agent-ID': self.config.agent_id,
@@ -213,15 +218,31 @@ class AgentUpdater:
             with urllib.request.urlopen(req, timeout=30) as response:
                 data = json.loads(response.read().decode('utf-8'))
 
+            # Server may request clearing local swap-failure gate.
+            if data.get('clear_failed_swap'):
+                if self.failed_swap_file.exists():
+                    logger.info(
+                        "[UPDATER] Server signaled clear_failed_swap - removing "
+                        "failed_swap.json"
+                    )
+                    try:
+                        self.failed_swap_file.unlink()
+                    except Exception as e:
+                        logger.warning(
+                            f"[UPDATER] Failed to remove failed_swap.json: {e}"
+                        )
+
             if not data.get('update_available', False):
-                logger.debug("[UPDATER] No updates available")
+                self._last_update_check_reason = "no_update_available"
+                logger.info("[UPDATER] No updates available")
                 return None
 
             server_version = data.get('version', '0.0.0')
 
             # Version comparison
             if self.compare_versions(server_version, self._current_version) <= 0:
-                logger.debug(
+                self._last_update_check_reason = "already_up_to_date"
+                logger.info(
                     f"[UPDATER] Already up to date: "
                     f"{self._current_version} >= {server_version}"
                 )
@@ -229,6 +250,7 @@ class AgentUpdater:
 
             # Verify HMAC signature
             if not self.verify_signature(data):
+                self._last_update_check_reason = "signature_verification_failed"
                 logger.error("[UPDATER] Update rejected - invalid signature")
                 return None
 
@@ -241,12 +263,15 @@ class AgentUpdater:
                 f"[UPDATER] [NEW] Update available: "
                 f"{self._current_version} -> {server_version}"
             )
+            self._last_update_check_reason = "update_available"
             return data
 
         except urllib.error.URLError as e:
-            logger.debug(f"[UPDATER] Server unreachable: {e}")
+            self._last_update_check_reason = f"server_unreachable: {e}"
+            logger.warning(f"[UPDATER] Server unreachable during update check: {e}")
             return None
         except Exception as e:
+            self._last_update_check_reason = f"update_check_error: {e}"
             logger.error(f"[UPDATER] Error checking for updates: {e}")
             return None
 
@@ -258,7 +283,7 @@ class AgentUpdater:
         version meets the server's minimum requirements.
 
         Returns:
-            (compatible, message) — if False, agent should NOT proceed.
+            (compatible, message) â€” if False, agent should NOT proceed.
         """
         try:
             url = f"{self.config.server_url}/api/v1/updates/check-compatibility"
@@ -281,13 +306,13 @@ class AgentUpdater:
                     f"min={data.get('min_supported_version')})"
                 )
             else:
-                logger.debug(f"[UPDATER] Compatibility OK: {message}")
+                logger.info(f"[UPDATER] Compatibility OK: {message}")
 
             return compatible, message
 
         except Exception as e:
             # If we can't reach the server, assume compatible (fail-open)
-            logger.debug(f"[UPDATER] Compatibility check skipped: {e}")
+            logger.warning(f"[UPDATER] Compatibility check skipped: {e}")
             return True, 'Check unavailable'
 
     # =========================================================================
@@ -323,51 +348,80 @@ class AgentUpdater:
         version_dir.mkdir(parents=True)
 
         zip_path = version_dir / f'sentineledge-agent-{version}.zip'
+        token = self.config.api_token or self.config.api_key
+        if not token:
+            logger.warning("[UPDATER] No API token available for update download")
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'X-Agent-ID': self.config.agent_id,
+        }
 
-        try:
-            # Auth headers for download
-            token = self.config.api_token or self.config.api_key
-            headers = {
-                'Authorization': f'Bearer {token}',
-                'X-Agent-ID': self.config.agent_id,
-            }
-
-            req = urllib.request.Request(download_url, headers=headers)
-
-            logger.info(f"[UPDATER] Downloading {version} from {download_url}...")
-
-            with urllib.request.urlopen(req, timeout=120) as response:
-                with open(zip_path, 'wb') as f:
-                    while True:
-                        chunk = response.read(8192)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-
-            # Verify SHA256
-            actual_sha256 = self._compute_sha256(zip_path)
-            if actual_sha256 != expected_sha256:
-                logger.error(
-                    f"[UPDATER] [FAIL] SHA256 mismatch! "
-                    f"Expected: {expected_sha256[:16]}... "
-                    f"Got: {actual_sha256[:16]}..."
+        max_retries = 5
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(
+                    f"[UPDATER] Downloading {version} "
+                    f"(attempt {attempt}/{max_retries})..."
                 )
-                zip_path.unlink()
+                req = urllib.request.Request(download_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=120) as response:
+                    with open(zip_path, 'wb') as f:
+                        while True:
+                            chunk = response.read(8192)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+
+                # Verify SHA256
+                actual_sha256 = self._compute_sha256(zip_path)
+                if actual_sha256 != expected_sha256:
+                    logger.error(
+                        f"[UPDATER] [FAIL] SHA256 mismatch on attempt {attempt}! "
+                        f"Expected: {expected_sha256[:16]}... "
+                        f"Got: {actual_sha256[:16]}..."
+                    )
+                    try:
+                        zip_path.unlink()
+                    except Exception:
+                        pass
+                    return None
+
+                file_size = zip_path.stat().st_size
+                logger.info(
+                    f"[UPDATER] [OK] Downloaded and verified: "
+                    f"{file_size:,} bytes, SHA256 OK"
+                )
+                return zip_path
+
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+                logger.warning(
+                    f"[UPDATER] Download attempt {attempt}/{max_retries} failed: {e}"
+                )
+                if zip_path.exists():
+                    try:
+                        zip_path.unlink()
+                    except Exception:
+                        pass
+                if attempt < max_retries:
+                    wait_seconds = min(2 ** attempt, 30)
+                    logger.info(
+                        f"[UPDATER] Retrying download in {wait_seconds}s..."
+                    )
+                    time.sleep(wait_seconds)
+                else:
+                    logger.error(
+                        f"[UPDATER] Download failed after {max_retries} attempts"
+                    )
+            except Exception as e:
+                logger.error(f"[UPDATER] Download failed: {e}")
+                if zip_path.exists():
+                    try:
+                        zip_path.unlink()
+                    except Exception:
+                        pass
                 return None
 
-            file_size = zip_path.stat().st_size
-            logger.info(
-                f"[UPDATER] [OK] Downloaded and verified: "
-                f"{file_size:,} bytes, SHA256 OK"
-            )
-            return zip_path
-
-        except Exception as e:
-            logger.error(f"[UPDATER] Download failed: {e}")
-            # Cleanup
-            if zip_path.exists():
-                zip_path.unlink()
-            return None
+        return None
 
     @staticmethod
     def _compute_sha256(file_path: Path) -> str:
@@ -717,6 +771,7 @@ class AgentUpdater:
         """Report update health status to server."""
         try:
             url = f"{self.config.server_url}/api/v1/updates/health"
+            token = self.config.api_token or self.config.api_key
             payload = {
                 'agent_id': self.config.agent_id,
                 'version': version,
@@ -731,6 +786,7 @@ class AgentUpdater:
             data = json.dumps(payload).encode('utf-8')
             headers = {
                 'Content-Type': 'application/json',
+                'Authorization': f'Bearer {token}',
                 'X-Agent-ID': self.config.agent_id,
             }
 
@@ -751,6 +807,7 @@ class AgentUpdater:
         """Report update progress to dashboard (downloading/installing)."""
         try:
             url = f"{self.config.server_url}/api/v1/updates/status"
+            token = self.config.api_token or self.config.api_key
             payload = {
                 'agent_id': self.config.agent_id,
                 'status': status,
@@ -761,6 +818,7 @@ class AgentUpdater:
             data = json.dumps(payload).encode('utf-8')
             headers = {
                 'Content-Type': 'application/json',
+                'Authorization': f'Bearer {token}',
                 'X-Agent-ID': self.config.agent_id,
             }
 
@@ -829,9 +887,11 @@ class AgentUpdater:
             'previous_version': previous_version,
             'zip_path': str(zip_path),
             'install_dir': str(self.install_dir),
+            'data_dir': str(self.data_dir),
             'backup_dir': str(self.backup_dir / f'pre_{version}'),
             'pid': os.getpid(),
             'service_name': 'WinDiagSvc',
+            'helper_task': 'SysHealthMon',
             'created_at': datetime.now(timezone.utc).isoformat(),
         }
 
@@ -855,27 +915,35 @@ class AgentUpdater:
             # Fallback to Python-based swapper script
             swapper_script = self.install_dir / 'tools' / 'swapper.py'
             if swapper_script.exists():
-                python_exe = sys.executable or 'python'
+                bundled_python = self.install_dir / 'python313' / 'python.exe'
+                if bundled_python.exists():
+                    python_exe = str(bundled_python)
+                elif Path(sys.executable).name.lower() in (
+                    'python.exe', 'pythonw.exe'
+                ):
+                    python_exe = sys.executable
+                else:
+                    python_exe = 'python'
                 try:
                     subprocess.Popen(
                         [python_exe, str(swapper_script), str(manifest_path)],
                         creationflags=(
                             subprocess.CREATE_NO_WINDOW |
                             subprocess.DETACHED_PROCESS
-                        ),
-                        close_fds=True,
+                        )
                     )
                     logger.info(
-                        f"[UPDATER] EXE swap script launched: {swapper_script}"
+                        f"[UPDATER] EXE swap script launched: {swapper_script} "
+                        f"(python={python_exe})"
                     )
                     return True
                 except Exception as e:
                     logger.error(f"[UPDATER] Failed to launch swap script: {e}")
                     return False
 
-            logger.warning(
-                "[UPDATER] No swapper executable found, falling back "
-                "to in-process update"
+            logger.error(
+                "[UPDATER] No swapper found at any candidate path - "
+                "exe_bundle update cannot proceed without swapper.py/.exe"
             )
             return False
 
@@ -886,8 +954,7 @@ class AgentUpdater:
                 creationflags=(
                     subprocess.CREATE_NO_WINDOW |
                     subprocess.DETACHED_PROCESS
-                ),
-                close_fds=True,
+                )
             )
             logger.info(f"[UPDATER] EXE swapper launched: {swapper_path}")
             return True
@@ -909,6 +976,58 @@ class AgentUpdater:
         Returns:
             True if update was applied (restart pending), False if no update
         """
+        prechecked_metadata = None
+
+        # Block auto-update retries until an admin clears failed_swap.json.
+        # We still poll /latest once so server can send clear_failed_swap.
+        if self.failed_swap_file.exists():
+            prechecked_metadata = self.check_for_update()
+            if self.failed_swap_file.exists():
+                self._last_update_check_reason = "blocked_failed_swap"
+                failed_data = {}
+                try:
+                    failed_data = json.loads(self.failed_swap_file.read_text())
+                except Exception as e:
+                    logger.warning(f"[UPDATER] Failed to parse failed_swap.json: {e}")
+
+                failed_version = str(failed_data.get('version', 'unknown'))
+                failed_previous = str(
+                    failed_data.get('previous_version', self._current_version)
+                )
+                failed_error = str(
+                    failed_data.get('error', 'Unknown swap failure')
+                )
+
+                logger.warning(
+                    f"[UPDATER] Update cycle blocked by failed_swap.json "
+                    f"(version={failed_version}, error={failed_error})"
+                )
+
+                if not bool(failed_data.get('reported_to_server', False)):
+                    self.report_health(
+                        'failed',
+                        failed_version,
+                        failed_previous,
+                        f"Blocked by failed_swap.json: {failed_error}",
+                    )
+                    failed_data['reported_to_server'] = True
+                    failed_data['reported_at'] = datetime.now(
+                        timezone.utc
+                    ).isoformat()
+                    try:
+                        self.failed_swap_file.write_text(
+                            json.dumps(failed_data, indent=2)
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[UPDATER] Could not update failed_swap.json: {e}"
+                        )
+                return False
+            logger.info(
+                "[UPDATER] failed_swap.json cleared by server signal - "
+                "resuming update cycle"
+            )
+
         # UPD-002: Prevent concurrent update cycles
         if self.update_lock_file.exists():
             # Check if lock is stale (older than 30 mins)
@@ -917,7 +1036,7 @@ class AgentUpdater:
                 try: self.update_lock_file.unlink()
                 except: pass
             else:
-                logger.debug("[UPDATER] Update already in progress (lock exists)")
+                logger.info("[UPDATER] Update cycle skipped - lock file exists")
                 return False
 
         try:
@@ -925,19 +1044,24 @@ class AgentUpdater:
             self.update_lock_file.write_text(str(os.getpid()))
 
             # Check for updates
-            metadata = self.check_for_update()
+            metadata = prechecked_metadata
+            if metadata is None:
+                metadata = self.check_for_update()
             if not metadata:
-                self.update_lock_file.unlink()
+                logger.info(
+                    f"[UPDATER] Update cycle complete - no update applied "
+                    f"(reason={self._last_update_check_reason})"
+                )
                 return False
 
             version = metadata['version']
             logger.info(f"[UPDATER] Starting update to {version}...")
 
-            # ── Compatibility preflight (AUE-16) ─────────────────────
+            # â”€â”€ Compatibility preflight (AUE-16) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             compatible, compat_msg = self.check_compatibility()
             if not compatible:
                 logger.warning(
-                    f"[UPDATER] Update aborted — compatibility failed: {compat_msg}"
+                    f"[UPDATER] Update aborted â€” compatibility failed: {compat_msg}"
                 )
                 self.report_health(
                     'failed', version, self._current_version,
@@ -960,23 +1084,28 @@ class AgentUpdater:
             # Report: installing
             self.report_status('installing', version)
 
-            # ── EXE bundle handling ──────────────────────────────────
+            # â”€â”€ EXE bundle handling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             artifact_type = metadata.get('artifact_type', 'zip')
-            is_frozen = getattr(sys, 'frozen', False)  # True when running as PyInstaller EXE
 
-            if artifact_type == 'exe_bundle' and is_frozen:
-                # Use detached swapper to avoid file-lock on running EXE
+            if artifact_type == 'exe_bundle':
+                # EXE bundles must be applied by external swapper.
                 if self.trigger_exe_swap(zip_path, metadata):
                     logger.info(
-                        "[UPDATER] EXE swap initiated — service will restart"
+                        "[UPDATER] EXE swap initiated - service will restart"
                     )
                     return True
-                # Fallback: try standard apply (may fail on locked files)
-                logger.warning(
-                    "[UPDATER] EXE swap failed, attempting in-process apply"
-                )
 
-            # Standard apply (non-EXE or fallback)
+                logger.error(
+                    "[UPDATER] EXE swap failed - cannot apply exe_bundle "
+                    "without swapper"
+                )
+                self.report_health(
+                    'failed', version, self._current_version,
+                    'EXE swap failed - swapper unavailable or launch failed'
+                )
+                return False
+
+            # Standard apply (non-EXE bundles)
             if not self.apply_update(zip_path, metadata):
                 self.report_health(
                     'failed', version, self._current_version,
@@ -1033,3 +1162,4 @@ class AgentUpdater:
                 logger.info(f"[UPDATER] Cleaned old backup: {old_backup.name}")
         except Exception as e:
             logger.warning(f"[UPDATER] Backup cleanup error: {e}")
+

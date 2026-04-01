@@ -266,8 +266,10 @@ class CoreConfig:
         # Database
         self.db_path = self.buffer_dir / 'core_buffer.db'
         
-        # Handle both api_key and api_token (backward compatibility)
-        self.api_key = config.get("api_key", "")
+        # Authentication settings (prefer schema v2 location)
+        authentication = config.get("authentication", {})
+        auth_api_key = authentication.get("api_key", "")
+        self.api_key = auth_api_key or config.get("api_key", "")
         self.api_token = config.get("api_token", "") or self.api_key
         
         # Secure token handling
@@ -286,8 +288,9 @@ class CoreConfig:
                 self.api_key = token  # Set both attributes
                 return
         
-        # Fallback to config.json - try api_key first, then api_token
-        api_key = self.config.get('api_key', '')
+        # Fallback to config.json - prefer authentication.api_key, then legacy roots
+        authentication = self.config.get('authentication', {})
+        api_key = authentication.get('api_key', '') or self.config.get('api_key', '')
         api_token = self.config.get('api_token', '')
         
         # Use whichever is present
@@ -462,6 +465,14 @@ class CoreConfig:
                 # Update agent section
                 self.config["agent"]["agent_id"] = self.agent_id
                 self.config["agent"]["local_agent_key"] = self.local_agent_key
+
+                if "authentication" not in self.config or not isinstance(self.config["authentication"], dict):
+                    self.config["authentication"] = {}
+
+                token = self.api_token or self.api_key
+                self.config["authentication"]["api_key"] = token
+                self.config["authentication"]["api_key_stored_securely"] = bool(token and self.secure_storage)
+                self.config["authentication"]["registered"] = bool(token)
                 
                 # Store token securely if available
                 if self.api_token and self.secure_storage:
@@ -506,6 +517,12 @@ class CoreConfig:
         
         self.api_token = ''
         self.api_key = ''
+
+        if "authentication" not in self.config or not isinstance(self.config["authentication"], dict):
+            self.config["authentication"] = {}
+        self.config["authentication"]["api_key"] = ''
+        self.config["authentication"]["registered"] = False
+        self.config["authentication"]["api_key_stored_securely"] = False
         
         if self.secure_storage:
             self.secure_storage.clear_secure_token(str(self.config_path))

@@ -46,6 +46,7 @@ updates_bp = Blueprint('updates', __name__, url_prefix='/api/v1/updates')
 
 UPDATES_DIR = Path(os.environ.get('SENTINELEDGE_UPDATES_DIR',
                                    Path(__file__).parent / 'updates'))
+CLEAR_FAILED_SWAP_SENTINEL = "__CLEAR_FAILED_SWAP__"
 
 
 # =============================================================================
@@ -253,20 +254,37 @@ def get_latest_version():
         
         config = _get_updates_config()
         
-        # Capture force flag BEFORE clearing it (Fix #2: was clearing first)
+        # Capture control flags before clearing them
         force_flag = False
+        clear_failed_swap_flag = False
         agent = _get_agent_from_db(agent_id)
         if agent:
             try:
                 from extensions import db
                 force_flag = bool(agent.force_update_check)
+                clear_failed_swap_flag = (
+                    agent.last_update_error == CLEAR_FAILED_SWAP_SENTINEL
+                )
                 agent.last_update_check = datetime.utcnow()
                 # Clear force flag after capturing
                 if agent.force_update_check:
                     agent.force_update_check = False
+                if clear_failed_swap_flag:
+                    agent.last_update_error = None
                 db.session.commit()
             except Exception:
                 pass
+
+        def _no_update(message: str):
+            payload = {
+                'update_available': False,
+                'message': message
+            }
+            if force_flag:
+                payload['force_check'] = True
+            if clear_failed_swap_flag:
+                payload['clear_failed_swap'] = True
+            return jsonify(payload)
         
         # ── Policy gate ─────────────────────────────────────────────
         policy = _get_global_policy()
@@ -276,20 +294,14 @@ def get_latest_version():
             logger.debug(
                 f"[UPDATES] Auto-update disabled globally, agent={agent_id}"
             )
-            return jsonify({
-                'update_available': False,
-                'message': 'Auto-update is disabled by admin policy'
-            })
+            return _no_update('Auto-update is disabled by admin policy')
         
         # Check update window (Phase 2: AUE-11)
         if policy and not _is_within_update_window(policy):
             logger.debug(
                 f"[UPDATES] Outside update window for agent={agent_id}"
             )
-            return jsonify({
-                'update_available': False,
-                'message': 'Outside update window'
-            })
+            return _no_update('Outside update window')
         
         # ── Target version check ────────────────────────────────────
         target_version = None
@@ -302,20 +314,14 @@ def get_latest_version():
                 f"[UPDATES] No update for agent={agent_id}, "
                 f"current={current_ver}, target={target_version}"
             )
-            return jsonify({
-                'update_available': False,
-                'message': 'Agent is up to date'
-            })
+            return _no_update('Agent is up to date')
         
         # Check if target is actually newer
         if _parse_version(target_version) <= _parse_version(current_ver):
             logger.debug(
                 f"[UPDATES] Target {target_version} <= current {current_ver}, skipping"
             )
-            return jsonify({
-                'update_available': False,
-                'message': 'Agent version is current or newer'
-            })
+            return _no_update('Agent version is current or newer')
         
         # ── Compatibility preflight (Phase 2: AUE-16) ──────────────
         if policy and policy.min_version:
@@ -324,20 +330,16 @@ def get_latest_version():
                     f"[UPDATES] Agent {agent_id} version {current_ver} below "
                     f"min_version {policy.min_version} — needs manual update"
                 )
-                return jsonify({
-                    'update_available': False,
-                    'message': f'Agent version too old for auto-update. '
-                               f'Minimum: {policy.min_version}'
-                })
+                return _no_update(
+                    f'Agent version too old for auto-update. '
+                    f'Minimum: {policy.min_version}'
+                )
         
         # Load version metadata from latest.json
         version_file = config['updates_dir'] / 'latest.json'
         if not version_file.exists():
             logger.warning("[UPDATES] latest.json not found")
-            return jsonify({
-                'update_available': False,
-                'message': 'Update package not available on server'
-            })
+            return _no_update('Update package not available on server')
         
         version_info = json.loads(version_file.read_text())
         package_version = version_info.get('version', 'unknown')
@@ -348,10 +350,9 @@ def get_latest_version():
                 f"[UPDATES] Package version {package_version} != "
                 f"target {target_version} for agent {agent_id}"
             )
-            return jsonify({
-                'update_available': False,
-                'message': f'Target {target_version} not yet available as package'
-            })
+            return _no_update(
+                f'Target {target_version} not yet available as package'
+            )
         
         # Build response
         version_info['package_url'] = f'/api/v1/updates/download/{package_version}'
@@ -361,6 +362,8 @@ def get_latest_version():
         # Include force_update_check flag (captured before clearing)
         if force_flag:
             version_info['force_check'] = True
+        if clear_failed_swap_flag:
+            version_info['clear_failed_swap'] = True
         
         logger.info(
             f"[UPDATES] Update available: agent={agent_id}, "
@@ -943,6 +946,53 @@ def trigger_update_check():
 
     except Exception as e:
         logger.error(f"[UPDATES] Trigger-check error: {e}")
+        try:
+            from extensions import db
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify({'error': str(e)}), 500
+
+
+@updates_bp.route('/clear-failure/<agent_id>', methods=['POST'])
+def clear_failure(agent_id: str):
+    """
+    Queue a one-time clear_failed_swap signal for an agent.
+    """
+    try:
+        from flask import session
+        if 'user_id' not in session:
+            return jsonify({'error': 'Authentication required'}), 401
+    except Exception:
+        pass
+
+    try:
+        agent = _get_agent_from_db(agent_id)
+        if not agent:
+            return jsonify({'error': 'Agent not found'}), 404
+
+        from extensions import db
+        agent.force_update_check = True
+        agent.last_update_error = CLEAR_FAILED_SWAP_SENTINEL
+        db.session.commit()
+
+        _log_update_event(
+            agent_id,
+            'trigger_check',
+            agent.target_version or '',
+            'Admin requested clear_failed_swap'
+        )
+        logger.info(f"[UPDATES] clear-failure queued for agent={agent_id}")
+
+        return jsonify({
+            'cleared': True,
+            'message': 'Agent will clear failed swap gate on next check',
+            'agent_id': agent_id,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+
+    except Exception as e:
+        logger.error(f"[UPDATES] clear-failure error for {agent_id}: {e}")
         try:
             from extensions import db
             db.session.rollback()

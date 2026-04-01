@@ -275,6 +275,21 @@ if exist "nssm\" (
 
 echo [OK] Files copied
 
+:: Write version.json so updater reports a real current version on first install
+set "AGENT_VERSION=2.0.0"
+if exist "VERSION.txt" (
+    for /f "tokens=2 delims=: " %%v in ('findstr /b /c:"Version:" "VERSION.txt"') do set "AGENT_VERSION=%%v"
+    if "!AGENT_VERSION!"=="" (
+        set "AGENT_VERSION=2.0.0"
+        echo [WARN] Could not parse Version from VERSION.txt; using default 2.0.0
+    )
+) else (
+    echo [WARN] VERSION.txt missing; using default 2.0.0
+)
+
+echo {"version": "!AGENT_VERSION!", "installed_at": "%DATE% %TIME%"} > "%INSTALL_DIR%\version.json"
+echo [OK] version.json created (v!AGENT_VERSION!)
+
 :: ============================================================================
 :: STEP 10: Configure Agent Identity
 :: ============================================================================
@@ -413,6 +428,11 @@ echo   },
 echo   "dynamic_reload": {
 echo     "enabled": true,
 echo     "check_interval": 30
+echo   },
+echo   "updates": {
+echo     "enabled": true,
+echo     "check_interval": 21600,
+echo     "signing_key": ""
 echo   },
 echo   "api_token": ""
 echo }

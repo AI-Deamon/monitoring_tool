@@ -15,8 +15,15 @@ echo   SentinelEdge Agent - Deployment Package Builder
 echo ========================================================================
 echo.
 
-:: Set version
-set "VERSION=2.1.0"
+:: Set version (prefer VERSION.txt, allow override)
+set "VERSION="
+if exist "VERSION.txt" (
+    for /f "tokens=2 delims=: " %%v in ('findstr /b /c:"Version:" "VERSION.txt"') do set "VERSION=%%v"
+)
+if "!VERSION!"=="" set "VERSION=2.1.0"
+set "DEFAULT_VERSION=!VERSION!"
+set /p "VERSION=Enter package version [!DEFAULT_VERSION!]: "
+if "!VERSION!"=="" set "VERSION=!DEFAULT_VERSION!"
 set "BUILD_DATE=%date:~10,4%%date:~4,2%%date:~7,2%"
 set "PACKAGE_NAME=SentinelEdge-Agent-%VERSION%"
 set "OUTPUT_DIR=..\deploy"

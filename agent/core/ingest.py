@@ -23,76 +23,79 @@ from .buffer import BufferDB
 
 logger = logging.getLogger(__name__)
 
+
 class ReplayProtectionCache:
     """LRU cache for replay protection with timestamp window"""
-    
+
     def __init__(self, max_size: int = 1000, window_seconds: int = 60):
         self.max_size = max_size
         self.window_seconds = window_seconds
         self.cache = OrderedDict()
         self.cleanup_interval = 120  # 2 minutes
         self.last_cleanup = time.time()
-    
+
     def is_valid(self, agent_id: str, timestamp: str, payload_hash: str) -> bool:
         """Check if request is valid (not replayed) and within time window"""
         current_time = time.time()
-        
+
         # Clean up old entries periodically
         if current_time - self.last_cleanup > self.cleanup_interval:
             self._cleanup()
-        
+
         try:
             # Parse timestamp
-            request_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            request_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             request_timestamp = request_time.timestamp()
-            
+
             # Check timestamp window (+/-60 seconds)
             time_diff = abs(current_time - request_timestamp)
             if time_diff > self.window_seconds:
-                logger.warning(f"Timestamp out of window: {time_diff}s > {self.window_seconds}s")
+                logger.warning(
+                    f"Timestamp out of window: {time_diff}s > {self.window_seconds}s"
+                )
                 return False
-            
+
             # Create cache key
             cache_key = f"{agent_id}:{payload_hash}"
-            
+
             # Check if already seen
             if cache_key in self.cache:
                 logger.warning(f"Replay detected for key: {cache_key[:20]}...")
                 return False
-            
+
             # Add to cache
             self.cache[cache_key] = current_time
-            
+
             # Maintain size limit
             if len(self.cache) > self.max_size:
                 # Remove oldest entry
                 self.cache.popitem(last=False)
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Replay protection validation error: {e}")
             return False
-    
+
     def _cleanup(self):
         """Remove old entries from cache"""
         current_time = time.time()
         cutoff_time = current_time - self.window_seconds
-        
+
         # Remove entries older than window
         keys_to_remove = []
         for key, timestamp in self.cache.items():
             if timestamp < cutoff_time:
                 keys_to_remove.append(key)
-        
+
         for key in keys_to_remove:
             del self.cache[key]
-        
+
         self.last_cleanup = current_time
         logger.debug(f"Replay cache cleanup: removed {len(keys_to_remove)} entries")
 
-class HelperRequestHandler(BaseHTTPRequestHandler):
 
+class HelperRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         logger.debug(format % args)
 
@@ -108,34 +111,34 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
 
     def _check_basic_auth(self) -> bool:
         """Check Basic Authentication for Dashboard"""
-        auth_header = self.headers.get('Authorization')
+        auth_header = self.headers.get("Authorization")
         if not auth_header:
             self.send_response(401)
-            self.send_header('WWW-Authenticate', 'Basic realm="SentinelEdge Dashboard"')
+            self.send_header("WWW-Authenticate", 'Basic realm="SentinelEdge Dashboard"')
             self.end_headers()
             return False
-        
+
         try:
-            auth_type, encoded_credentials = auth_header.split(' ', 1)
-            if auth_type.lower() != 'basic':
+            auth_type, encoded_credentials = auth_header.split(" ", 1)
+            if auth_type.lower() != "basic":
                 return False
-            
+
             decoded_bytes = base64.b64decode(encoded_credentials)
-            decoded_str = decoded_bytes.decode('utf-8')
-            username, password = decoded_str.split(':', 1)
-            
+            decoded_str = decoded_bytes.decode("utf-8")
+            username, password = decoded_str.split(":", 1)
+
             # Simple hardcoded auth for debugging tool
             # In production this should come from secure config
-            valid_user = os.environ.get('DASHBOARD_USER', 'admin')
-            valid_pass = os.environ.get('DASHBOARD_PASS', 'sentinel')
-            
+            valid_user = os.environ.get("DASHBOARD_USER", "admin")
+            valid_pass = os.environ.get("DASHBOARD_PASS", "sentinel")
+
             if username == valid_user and password == valid_pass:
                 return True
         except:
             pass
-            
+
         self.send_response(401)
-        self.send_header('WWW-Authenticate', 'Basic realm="SentinelEdge Dashboard"')
+        self.send_header("WWW-Authenticate", 'Basic realm="SentinelEdge Dashboard"')
         self.end_headers()
         return False
 
@@ -171,7 +174,7 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
             # Identity sync (No auth required for local helper)
             if self.path == "/identity":
                 return self._handle_identity()
-            
+
             # Dashboard routes (Require Basic Auth)
             if self.path == "/" or self.path.startswith("/api/"):
                 if not self._check_basic_auth():
@@ -179,7 +182,7 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
 
             if self.path == "/":
                 return self._handle_dashboard()
-            elif self.path == "/status": # Legacy alias
+            elif self.path == "/status":  # Legacy alias
                 return self._handle_api_status()
             elif self.path == "/api/status":
                 return self._handle_api_status()
@@ -196,15 +199,17 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"GET handler error: {e}", exc_info=True)
             self._send_error("Internal server error", 500)
-    
+
     def _handle_identity(self):
         """Return Core's identity for Helper synchronization"""
         identity = {
             "agent_id": self.server.config.agent_id,
             "local_agent_key": self.server.config.local_agent_key,
-            "token_present": bool(self.server.config.api_token)
+            "token_present": bool(self.server.config.api_token),
         }
-        logger.info(f"[SYNC] Helper requesting identity: {identity['agent_id'][:16]}...")
+        logger.info(
+            f"[SYNC] Helper requesting identity: {identity['agent_id'][:16]}..."
+        )
         self._send_json(identity)
 
     # ============================
@@ -214,39 +219,39 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
         """Return general status JSON"""
         buffer_counts = self.server.buffer.get_counts()
         live_stats = {}
-        if hasattr(self.server, 'live_telemetry') and self.server.live_telemetry:
+        if hasattr(self.server, "live_telemetry") and self.server.live_telemetry:
             live_stats = self.server.live_telemetry.get_stats()
 
         status = {
-            'agent_id': self.server.config.agent_id,
-            'server_url': self.server.config.server_url,
-            'is_registered': self.server.config.is_registered(),
-            'server_available': live_stats.get('server_available', False),
-            'live': live_stats,
-            'buffer': buffer_counts,
-            'timestamp': datetime.now().isoformat()
+            "agent_id": self.server.config.agent_id,
+            "server_url": self.server.config.server_url,
+            "is_registered": self.server.config.is_registered(),
+            "server_available": live_stats.get("server_available", False),
+            "live": live_stats,
+            "buffer": buffer_counts,
+            "timestamp": datetime.now().isoformat(),
         }
         self._send_json(status)
 
     def _handle_api_activity(self):
         """Return recent activity (merged events)"""
         events = self.server.buffer.get_recent_activity(limit=50)
-        self._send_json({'data': events})
+        self._send_json({"data": events})
 
     def _handle_api_apps(self):
         """Return recent app sessions"""
         apps = self.server.buffer.get_recent_apps(limit=50)
-        self._send_json({'data': apps})
+        self._send_json({"data": apps})
 
     def _handle_api_domains(self):
         """Return recent domain sessions"""
         domains = self.server.buffer.get_recent_domains(limit=50)
-        self._send_json({'data': domains})
+        self._send_json({"data": domains})
 
     def _handle_api_inventory(self):
         """Return latest inventory"""
         apps = self.server.buffer.get_latest_inventory()
-        self._send_json({'data': apps})
+        self._send_json({"data": apps})
 
     def _handle_dashboard(self):
         """Serve the Dashboard SPA"""
@@ -513,7 +518,7 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
 </body>
 </html>
         """
-        
+
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(html)))
@@ -542,22 +547,22 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
             # Routing
             if self.path == "/ping":
                 return self._send_json({"status": "ok"})
-            
+
             if self.path == "/heartbeat":
                 return self._handle_heartbeat(data)
 
             elif self.path == "/domains":
                 return self._handle_domains(data)
-            
+
             elif self.path == "/domains_active":
                 return self._handle_domains_active(data)
 
             elif self.path == "/inventory":
                 return self._handle_inventory(data)
-            
+
             elif self.path == "/hardware":
                 return self._handle_hardware(data)
-            
+
             elif self.path == "/telemetry/state-change":
                 return self._handle_state_change(data)
 
@@ -572,7 +577,7 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
 
             elif self.path == "/system-visibility":
                 return self._handle_system_visibility(data)
-            
+
             elif self.path == "/eol-data":
                 return self._handle_eol_data(data)
 
@@ -598,30 +603,31 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
             # FAST PATH: Store heartbeat in buffer FIRST (this is the backup)
             row_id = self.server.buffer.store_heartbeat(data)
             logger.debug(f"Stored heartbeat id={row_id}")
-            
+
             # QUEUE live telemetry processing to background thread
-            if hasattr(self.server, 'live_telemetry') and self.server.live_telemetry:
+            if hasattr(self.server, "live_telemetry") and self.server.live_telemetry:
                 try:
-                    self.server.request_queue.put({
-                        'type': 'heartbeat',
-                        'data': data,
-                        'timestamp': time.time()
-                    }, timeout=0.1)
+                    self.server.request_queue.put(
+                        {"type": "heartbeat", "data": data, "timestamp": time.time()},
+                        timeout=0.1,
+                    )
                 except Full:
                     # Queue full - but data is already in buffer!
                     # Background uploader will handle it
-                    logger.warning("[QUEUE] Request queue full, heartbeat stored in buffer for batch upload")
+                    logger.warning(
+                        "[QUEUE] Request queue full, heartbeat stored in buffer for batch upload"
+                    )
                 except Exception as e:
                     logger.debug(f"Queue error (non-critical): {e}")
-            
+
             # Notify Helper monitor that heartbeat was received
-            if hasattr(self.server, 'ingest_server') and self.server.ingest_server:
+            if hasattr(self.server, "ingest_server") and self.server.ingest_server:
                 if self.server.ingest_server.heartbeat_callback:
                     try:
                         self.server.ingest_server.heartbeat_callback()
                     except Exception as e:
                         logger.debug(f"Heartbeat callback error: {e}")
-            
+
             self._send_json({"status": "ok", "id": row_id})
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
             pass  # Client closed connection
@@ -644,22 +650,22 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Domain storage error: {e}")
             self._send_error("Storage failed", 500)
-    
+
     def _handle_domains_active(self, data):
         """Handle domain active sessions (session-based tracking)"""
         try:
             sessions = data.get("domains_active", [])
             agent_id = data.get("agent_id")
-            
+
             # Add agent_id to each session
             for session in sessions:
                 session["agent_id"] = agent_id
-            
+
             count = self.server.buffer.store_domain_sessions(sessions)
-            
+
             total_duration = sum(s.get("duration_seconds", 0) for s in sessions)
             logger.info(f"Stored {count} domain sessions ({total_duration:.0f}s total)")
-            
+
             self._send_json({"status": "ok", "count": count})
 
         except Exception as e:
@@ -673,7 +679,7 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Inventory error: {e}")
             self._send_error("Storage failed", 500)
-    
+
     def _handle_hardware(self, data):
         """Handle hardware asset data from Helper"""
         try:
@@ -682,7 +688,7 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Hardware storage error: {e}")
             self._send_error("Storage failed", 500)
-    
+
     def _handle_state_change(self, data):
         """
         Handle immediate state-change telemetry from Helper.
@@ -690,66 +696,73 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
         """
         try:
             # Validate required fields
-            required_fields = ['previous_state', 'current_state', 'timestamp']
+            required_fields = ["previous_state", "current_state", "timestamp"]
             for field in required_fields:
                 if field not in data:
-                    return self._send_error(f'Missing required field: {field}', 400)
-            
+                    return self._send_error(f"Missing required field: {field}", 400)
+
             # Prepare event data
             event_data = {
-                'agent_id': data.get('agent_id', self.server.config.agent_id),
-                'event_type': 'state-change',
-                'previous_state': data['previous_state'],
-                'current_state': data['current_state'],
-                'timestamp': data['timestamp'],
-                'username': data.get('username', ''),
-                'duration_seconds': data.get('duration_seconds', 0)
+                "agent_id": data.get("agent_id", self.server.config.agent_id),
+                "event_type": "state-change",
+                "previous_state": data["previous_state"],
+                "current_state": data["current_state"],
+                "timestamp": data["timestamp"],
+                "username": data.get("username", ""),
+                "duration_seconds": data.get("duration_seconds", 0),
             }
-            
+
             # Store in buffer for upload
             row_id = self.server.buffer.store_state_change(event_data)
-            
+
             logger.info(
                 f"[STATE] State-change received: "
                 f"{data['previous_state']} -> {data['current_state']}"
             )
-            
+
             # Queue for immediate upload (if live telemetry enabled)
-            if hasattr(self.server, 'live_telemetry') and self.server.live_telemetry:
+            if hasattr(self.server, "live_telemetry") and self.server.live_telemetry:
                 try:
-                    self.server.request_queue.put({
-                        'type': 'state-change',
-                        'data': event_data,
-                        'timestamp': time.time()
-                    }, timeout=0.1)
+                    self.server.request_queue.put(
+                        {
+                            "type": "state-change",
+                            "data": event_data,
+                            "timestamp": time.time(),
+                        },
+                        timeout=0.1,
+                    )
                 except Exception as e:
-                    logger.debug(f"Queue full, state-change will upload via buffer: {e}")
-            
-            self._send_json({'status': 'ok', 'id': row_id, 'queued': True})
-            
+                    logger.debug(
+                        f"Queue full, state-change will upload via buffer: {e}"
+                    )
+
+            self._send_json({"status": "ok", "id": row_id, "queued": True})
+
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
             pass  # Client closed connection
         except Exception as e:
             logger.error(f"State-change handler error: {e}", exc_info=True)
-            self._send_error('Storage failed', 500)
+            self._send_error("Storage failed", 500)
 
     def _handle_screentime_spans(self, data):
         """Handle state spans from Helper for screen time tracking"""
         try:
             spans = data.get("spans", [])
             agent_id = data.get("agent_id")
-            
+
             if not spans:
                 return self._send_json({"status": "ok", "count": 0})
-            
+
             count = 0
             for span in spans:
                 span["agent_id"] = agent_id
                 if self.server.buffer.store_state_span(span):
                     count += 1
-            
-            logger.info(f"[INGEST] Received {len(spans)} spans, stored {count} in buffer")
-            
+
+            logger.info(
+                f"[INGEST] Received {len(spans)} spans, stored {count} in buffer"
+            )
+
             self._send_json({"status": "ok", "count": count})
 
         except Exception as e:
@@ -785,7 +798,7 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"System visibility storage error: {e}")
             self._send_error("Storage failed", 500)
-    
+
     def _handle_eol_data(self, data):
         """Handle EOL (End of Life) data from Helper"""
         try:
@@ -799,7 +812,7 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
 
 class IngestServer:
     """Local HTTP server for receiving helper data - Config-driven"""
-    
+
     def __init__(self, config: CoreConfig, buffer: BufferDB):
         self.config = config
         self.buffer = buffer
@@ -807,67 +820,69 @@ class IngestServer:
         self.thread = None
         self.replay_cache = ReplayProtectionCache()
         self.enabled = True  # Can be toggled via config
-        self.logger = logging.getLogger('IngestServer')
+        self.logger = logging.getLogger("IngestServer")
         self._current_port = config.listen_port
         self.live_telemetry = None  # Set by SentinelCore after initialization
-        
+
         # Helper monitoring callback
         self.heartbeat_callback = None  # Called when Helper heartbeat received
-        
+
         # Request queue for async processing
         self.request_queue = Queue(maxsize=100)
         self.queue_thread = None
-        
+
         # Apply initial config
         self.apply_config(config)
-    
+
     def set_heartbeat_callback(self, callback):
         """Set callback to notify when Helper heartbeat received"""
         self.heartbeat_callback = callback
-    
+
     def _process_queue(self):
         """Background thread to process queued requests"""
         while True:
             try:
                 # Get request from queue with timeout
                 request_data = self.request_queue.get(timeout=1.0)
-                
+
                 # Process the request (this runs in background)
-                if request_data['type'] == 'heartbeat':
+                if request_data["type"] == "heartbeat":
                     # Full processing for heartbeats
                     if self.live_telemetry:
-                        self.live_telemetry.process_heartbeat(request_data['data'])
-                
-                elif request_data['type'] == 'state-change':
+                        self.live_telemetry.process_heartbeat(request_data["data"])
+
+                elif request_data["type"] == "state-change":
                     # Upload state-change immediately
                     if self.live_telemetry:
-                        self.live_telemetry.upload_state_change(request_data['data'])
-                
+                        self.live_telemetry.upload_state_change(request_data["data"])
+
                 self.request_queue.task_done()
-                
+
             except Empty:
                 continue
             except Exception as e:
                 self.logger.error(f"Queue processing error: {e}")
-    
+
     def apply_config(self, config):
         """Apply configuration changes dynamically"""
         core_config = config.config.get("core", {})
         old_enabled = self.enabled
         self.enabled = core_config.get("enable_ingest", True)
         new_port = core_config.get("listen_port", 48123)
-        
+
         # Handle port change (requires restart)
         if self._current_port != new_port:
-            self.logger.info(f"[CONFIG] Ingest port changed: {self._current_port} -> {new_port}")
+            self.logger.info(
+                f"[CONFIG] Ingest port changed: {self._current_port} -> {new_port}"
+            )
             if self.server:
                 self.stop()
                 time.sleep(0.5)
                 if self.enabled:
                     self.start()
-        
+
         self._current_port = new_port
-        
+
         # Handle enable/disable
         if old_enabled != self.enabled:
             if self.enabled and not self.server:
@@ -881,42 +896,48 @@ class IngestServer:
         if not self.enabled:
             self.logger.warning("Cannot start ingest server - disabled in config")
             return
-        
+
         if self.server:
             self.logger.warning("Ingest server already running")
             return
-        
+
         address = (self.config.listen_host, self.config.listen_port)
 
         self.server = HTTPServer(address, HelperRequestHandler)
-        
+
         # mTLS support for local communication (Helper -> Core)
         if self.config.ssl_enabled:
             try:
                 import ssl
+
                 context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
                 if os.path.exists(self.config.local_cert_path):
                     context.load_cert_chain(
                         certfile=self.config.local_cert_path,
-                        keyfile=self.config.local_key_path
+                        keyfile=self.config.local_key_path,
                     )
                     context.load_verify_locations(cafile=self.config.ca_cert_path)
                     context.verify_mode = ssl.CERT_REQUIRED
-                    self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+                    self.server.socket = context.wrap_socket(
+                        self.server.socket, server_side=True
+                    )
                     self.logger.info("[SECURITY] mTLS enabled for local ingest server")
                 else:
-                    self.logger.warning(f"[SECURITY] Local mTLS cert not found: {self.config.local_cert_path}")
+                    self.logger.warning(
+                        f"[SECURITY] Local mTLS cert not found: {self.config.local_cert_path}"
+                    )
             except Exception as e:
                 self.logger.error(f"[SECURITY] Failed to enable mTLS for ingest: {e}")
         self.server.config = self.config
         self.server.buffer = self.buffer
         self.server.replay_cache = self.replay_cache
         self.server.live_telemetry = self.live_telemetry  # Pass to request handler
+        self.server.ingest_server = self  # Enable heartbeat callback chain
 
         # Start queue processor thread
         self.queue_thread = Thread(target=self._process_queue, daemon=True)
         self.queue_thread.start()
-        
+
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 

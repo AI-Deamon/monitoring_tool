@@ -95,6 +95,15 @@ if not exist "nssm\win64\nssm.exe" (
     exit /b 1
 )
 
+if not exist "VERSION.txt" (
+    echo.
+    echo [ERROR] VERSION.txt not found in installer package
+    echo [ERROR] Required to stamp the installed agent version.
+    echo.
+    pause
+    exit /b 1
+)
+
 echo [OK] All installer files verified
 
 :: ============================================================================
@@ -267,6 +276,7 @@ for /d %%D in ("C:\ProgramData\WinDiagSvc;*") do (
 
 mkdir "%INSTALL_DIR%" 2>nul
 mkdir "%INSTALL_DIR%\nssm" 2>nul
+mkdir "%INSTALL_DIR%\tools" 2>nul
 mkdir "%DATA_DIR%" 2>nul
 mkdir "%STATE_DIR%" 2>nul
 mkdir "%BUFFER_DIR%" 2>nul
@@ -299,7 +309,46 @@ if exist "nssm\" (
     xcopy /s /i /y /q "nssm\*" "%INSTALL_DIR%\nssm\" >nul
 )
 
+:: Copy version marker used for version.json stamping
+copy /y "VERSION.txt" "%INSTALL_DIR%\VERSION.txt" >nul
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to copy VERSION.txt
+    pause
+    exit /b 1
+)
+
+:: Copy swapper executable (required for EXE bundle updates)
+if not exist "tools\swapper.exe" (
+    echo [ERROR] tools\swapper.exe not found in installer package
+    pause
+    exit /b 1
+)
+copy /y "tools\swapper.exe" "%INSTALL_DIR%\tools\swapper.exe" >nul
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to copy tools\swapper.exe
+    pause
+    exit /b 1
+)
+
 echo [OK] Files copied
+
+:: Read version from VERSION.txt and write version.json for updater
+set "AGENT_VERSION="
+for /f "tokens=2 delims=: " %%v in ('findstr /b /c:"Version:" "%INSTALL_DIR%\VERSION.txt"') do set "AGENT_VERSION=%%v"
+if "!AGENT_VERSION!"=="" (
+    echo [ERROR] Could not parse version from %INSTALL_DIR%\VERSION.txt
+    pause
+    exit /b 1
+)
+
+(
+echo {
+echo   "version": "!AGENT_VERSION!",
+echo   "installed_at": "%DATE% %TIME%",
+echo   "install_method": "exe"
+echo }
+) > "%INSTALL_DIR%\version.json"
+echo [OK] version.json created (v!AGENT_VERSION!)
 
 :: ============================================================================
 :: STEP 9: Configure Agent Identity (Preserve existing)
@@ -439,6 +488,11 @@ echo   },
 echo   "dynamic_reload": {
 echo     "enabled": true,
 echo     "check_interval": 30
+echo   },
+echo   "updates": {
+echo     "enabled": true,
+echo     "check_interval": 21600,
+echo     "signing_key": ""
 echo   },
 echo   "api_token": ""
 echo }

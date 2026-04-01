@@ -8,116 +8,118 @@
 
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
-<style>
-  * {
-    font-family: "Space Grotesk", sans-serif !important;
-  }
-   /* 🔥 Hide browser default password eye (Edge / Chrome) */
-  input[type="password"]::-ms-reveal,
-  input[type="password"]::-ms-clear {
-    display: none;
-  }
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      font-family: "Space Grotesk", sans-serif !important;
+    }
 
-  input[type="password"]::-webkit-credentials-auto-fill-button {
-    visibility: hidden;
-    display: none !important;
-    pointer-events: none;
-  }
+    /* 🔥 Hide browser default password eye (Edge / Chrome) */
+    input[type="password"]::-ms-reveal,
+    input[type="password"]::-ms-clear {
+      display: none;
+    }
+
+    input[type="password"]::-webkit-credentials-auto-fill-button {
+      visibility: hidden;
+      display: none !important;
+      pointer-events: none;
+    }
   </style>
- 
+
 </head>
 
 <body class="font-inter min-h-screen bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 flex">
-<!-- LEFT BRAND PANEL (PREMIUM VERSION) -->
-<div class="hidden lg:flex lg:w-1/2 relative overflow-hidden items-center justify-center
+  <!-- LEFT BRAND PANEL (PREMIUM VERSION) -->
+  <div class="hidden lg:flex lg:w-1/2 relative overflow-hidden items-center justify-center
  bg-gradient-to-br from-[#0f172a] via-indigo-800 to-blue-700">
 
-  <!-- grid overlay -->
-  <div class="absolute inset-0 opacity-10
+    <!-- grid overlay -->
+    <div class="absolute inset-0 opacity-10
       [background-image:linear-gradient(to_right,#fff_1px,transparent_1px),linear-gradient(to_bottom,#fff_1px,transparent_1px)]
       [background-size:40px_40px]"></div>
 
-  <!-- dark overlay -->
-  <div class="absolute inset-0 bg-black/30"></div>
+    <!-- dark overlay -->
+    <div class="absolute inset-0 bg-black/30"></div>
 
-  <!-- glow blobs -->
-  <div class="absolute -top-32 -left-32 w-[420px] h-[420px] bg-cyan-400/20 rounded-full blur-3xl animate-pulse"></div>
-  <div class="absolute -bottom-32 -right-32 w-[420px] h-[420px] bg-indigo-500/20 rounded-full blur-3xl animate-pulse"></div>
+    <!-- glow blobs -->
+    <div class="absolute -top-32 -left-32 w-[420px] h-[420px] bg-cyan-400/20 rounded-full blur-3xl animate-pulse"></div>
+    <div class="absolute -bottom-32 -right-32 w-[420px] h-[420px] bg-indigo-500/20 rounded-full blur-3xl animate-pulse">
+    </div>
 
-  <!-- CONTENT -->
-  <div class="relative z-10 text-white max-w-lg px-14">
+    <!-- CONTENT -->
+    <div class="relative z-10 text-white max-w-lg px-14">
 
 
-  
-    <div class="flex items-center justify-center gap-4 mb-12">
-      
-<div class="w-36 h-30 bg-gradient-to-br from-blue-50 to-indigo-100
+
+      <div class="flex items-center justify-center gap-4 mb-12">
+
+        <div class="w-36 h-30 bg-gradient-to-br from-blue-50 to-indigo-100
     rounded-[50px] flex items-center justify-center shadow-xl mb-6
     border border-blue-200">
-  <img src="{{ url_for('static', filename='bsol.png') }}" class="h-18 p-5"/>
-</div>
-      <h1 class="text-4xl font-bold tracking-wide
+          <img src="{{ url_for('static', filename='bsol.png') }}" class="h-18 p-5" />
+        </div>
+        <h1 class="text-4xl font-bold tracking-wide
           bg-gradient-to-r from-white to-blue-400 bg-clip-text text-transparent">
-        SentinelEdge
-      </h1>
+          SentinelEdge
+        </h1>
+      </div>
+      <div class="flex flex-col items-center justify-center">
+        <!-- Subtitle -->
+        <p class="text-lg text-blue-100 mb-12 leading-relaxed text-center">
+          Enterprise-grade security platform built for real-time monitoring,
+          intelligent threat detection, and advanced analytics.
+        </p>
+
+        <!-- Features -->
+        <div class="space-y-6 text-blue-100">
+
+          <div class="flex items-center gap-4">
+            <div class="w-3 h-3 bg-cyan-300 rounded-full shadow-lg shadow-cyan-400/50"></div>
+            <span class="tracking-wide">Real-time threat detection</span>
+          </div>
+
+          <div class="flex items-center gap-4">
+            <div class="w-3 h-3 bg-indigo-300 rounded-full shadow-lg shadow-indigo-400/50"></div>
+            <span class="tracking-wide">Comprehensive fleet monitoring</span>
+          </div>
+
+          <div class="flex items-center gap-4">
+            <div class="w-3 h-3 bg-blue-300 rounded-full shadow-lg shadow-blue-400/50"></div>
+            <span class="tracking-wide">Advanced security analytics</span>
+          </div>
+
+        </div>
+      </div>
     </div>
-<div class="flex flex-col items-center justify-center">
-    <!-- Subtitle -->
-    <p class="text-lg text-blue-100 mb-12 leading-relaxed text-center">
-      Enterprise-grade security platform built for real-time monitoring,
-      intelligent threat detection, and advanced analytics.
-    </p>
-
-    <!-- Features -->
-    <div class="space-y-6 text-blue-100">
-
-      <div class="flex items-center gap-4">
-        <div class="w-3 h-3 bg-cyan-300 rounded-full shadow-lg shadow-cyan-400/50"></div>
-        <span class="tracking-wide">Real-time threat detection</span>
-      </div>
-
-      <div class="flex items-center gap-4">
-        <div class="w-3 h-3 bg-indigo-300 rounded-full shadow-lg shadow-indigo-400/50"></div>
-        <span class="tracking-wide">Comprehensive fleet monitoring</span>
-      </div>
-
-      <div class="flex items-center gap-4">
-        <div class="w-3 h-3 bg-blue-300 rounded-full shadow-lg shadow-blue-400/50"></div>
-        <span class="tracking-wide">Advanced security analytics</span>
-      </div>
-
-    </div>
-</div>
   </div>
-</div>
 
 
-<!-- RIGHT LOGIN PANEL -->
-<div class="flex flex-1 flex items-center justify-center px-6 py-12">
-  <div class="w-full max-w-md">
+  <!-- RIGHT LOGIN PANEL -->
+  <div class="flex flex-1 flex items-center justify-center px-6 py-12">
+    <div class="w-full max-w-md">
 
-    <!-- Mobile Logo -->
-    <div class="lg:hidden text-center mb-8">
-      <div class="w-14 h-14 mx-auto bg-indigo-600 rounded-xl flex items-center justify-center mb-4">
-        <img src="{{ url_for('static', filename='bsol.png') }}" class="h-8"/>
-      </div>
-      <h1 class="text-xl font-bold text-gray-900">SentinelEdge</h1>
-    </div>
-
-    <!-- GLASS LOGIN CARD -->
-    <div class="backdrop-blur-xl bg-white/70 border border-white/40 shadow-2xl rounded-3xl p-10">
-
-      <div class="mb-8 text-center">
-        <h2 class="text-2xl font-bold text-gray-900">Welcome back</h2>
-        <p class="text-gray-600 mt-1">Please sign in to your account</p>
+      <!-- Mobile Logo -->
+      <div class="lg:hidden text-center mb-8">
+        <div class="w-14 h-14 mx-auto bg-indigo-600 rounded-xl flex items-center justify-center mb-4">
+          <img src="{{ url_for('static', filename='bsol.png') }}" class="h-8" />
+        </div>
+        <h1 class="text-xl font-bold text-gray-900">SentinelEdge</h1>
       </div>
 
-      <!-- Flash Messages (KEEP SAME JINJA) -->
-      {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
+      <!-- GLASS LOGIN CARD -->
+      <div class="backdrop-blur-xl bg-white/70 border border-white/40 shadow-2xl rounded-3xl p-10">
+
+        <div class="mb-8 text-center">
+          <h2 class="text-2xl font-bold text-gray-900">Welcome back</h2>
+          <p class="text-gray-600 mt-1">Please sign in to your account</p>
+        </div>
+
+        <!-- Flash Messages (KEEP SAME JINJA) -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
         {% for category, message in messages %}
         <div class="mb-6 rounded-xl px-4 py-3 text-sm
           {% if category == 'danger' %}bg-red-50 text-red-700
@@ -126,68 +128,56 @@
           {{ message }}
         </div>
         {% endfor %}
-      {% endif %}
-      {% endwith %}
+        {% endif %}
+        {% endwith %}
 
-      <!-- LOGIN FORM -->
-      <form method="POST" action="{{ url_for('auth.login') }}" class="space-y-6">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <!-- LOGIN FORM -->
+        <form method="POST" action="{{ url_for('auth.login') }}" class="space-y-6">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-        <!-- Username -->
-        <div>
-          <label class="text-sm font-medium text-gray-700">Username</label>
-          <input
-            type="text"
-            name="username"
-            required
-            data-no-emoji
-            placeholder="Enter your username"
-            class="mt-2 w-full px-4 py-3 rounded-xl border border-gray-300
-            focus:ring-2 focus:ring-indigo-500 outline-none transition"/>
-        </div>
-
-        <!-- Password -->
-        <div>
-          <label class="text-sm font-medium text-gray-700">Password</label>
-          <div class="relative mt-2">
-            <input
-              type="password"
-              id="password"
-              name="password"
-              required
-              data-no-emoji
-              placeholder="Enter your password"
-              class="w-full px-4 py-3 pr-12 rounded-xl border border-gray-300
-              focus:ring-2 focus:ring-indigo-500 outline-none transition"/>
-            <button type="button" id="togglePassword"
-              class="absolute inset-y-0 right-4 flex items-center text-gray-400 hover:text-gray-600">
-              👁
-            </button>
+          <!-- Username -->
+          <div>
+            <label class="text-sm font-medium text-gray-700">Username</label>
+            <input type="text" name="username" required data-no-emoji placeholder="Enter your username" class="mt-2 w-full px-4 py-3 rounded-xl border border-gray-300
+            focus:ring-2 focus:ring-indigo-500 outline-none transition" />
           </div>
-        </div>
 
-        <!-- Submit -->
-        <button type="submit"
-          class="w-full py-3 rounded-xl font-semibold text-white
+          <!-- Password -->
+          <div>
+            <label class="text-sm font-medium text-gray-700">Password</label>
+            <div class="relative mt-2">
+              <input type="password" id="password" name="password" required data-no-emoji
+                placeholder="Enter your password" class="w-full px-4 py-3 pr-12 rounded-xl border border-gray-300
+              focus:ring-2 focus:ring-indigo-500 outline-none transition" />
+              <button type="button" id="togglePassword"
+                class="absolute inset-y-0 right-4 flex items-center text-gray-400 hover:text-gray-600">
+                👁
+              </button>
+            </div>
+          </div>
+
+          <!-- Submit -->
+          <button type="submit" class="w-full py-3 rounded-xl font-semibold text-white
           bg-gradient-to-r from-indigo-600 to-blue-600
           hover:from-indigo-700 hover:to-blue-700
           shadow-lg transition-all duration-200">
-          Sign In
-        </button>
-      </form>
+            Sign In
+          </button>
+        </form>
 
-      <div class="mt-8 pt-5 border-t text-center text-sm text-gray-500">
-        Forgot password? <span class="text-indigo-600 font-medium">Contact administrator</span>
+        <div class="mt-8 pt-5 border-t text-center text-sm text-gray-500">
+          Forgot password? <a href="{{ url_for('auth.forgot_password') }}"
+            class="text-indigo-600 font-medium hover:underline">Reset here</a>
+        </div>
+
       </div>
 
+      <p class="text-center text-xs text-gray-400 mt-8">
+        SentinelEdge v2.0 • Enterprise Security Platform
+      </p>
+
     </div>
-
-    <p class="text-center text-xs text-gray-400 mt-8">
-      SentinelEdge v2.0 • Enterprise Security Platform
-    </p>
-
   </div>
-</div>
 
   <!-- Scripts -->
   <script>

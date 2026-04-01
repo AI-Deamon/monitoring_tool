@@ -16,6 +16,7 @@ import platform
 import ssl
 import hashlib
 import os
+from pathlib import Path
 from datetime import datetime, timezone, date
 from typing import Dict, Optional
 import logging
@@ -26,6 +27,30 @@ from .config import CoreConfig
 from .buffer import BufferDB
 
 logger = logging.getLogger(__name__)
+
+
+def get_agent_version() -> str:
+    """
+    Read installed agent version from version.json.
+    Falls back to 0.0.0 if not available.
+    """
+    candidates = [
+        Path(r"C:\Program Files\WinDiagSvc\version.json"),
+        Path(r"C:\Program Files\SentinelEdge\version.json"),
+        Path(__file__).resolve().parent.parent / "version.json",
+    ]
+
+    for version_file in candidates:
+        try:
+            if version_file.exists():
+                data = json.loads(version_file.read_text(encoding="utf-8"))
+                version = str(data.get("version", "")).strip()
+                if version:
+                    return version
+        except Exception as e:
+            logger.debug(f"Version read failed from {version_file}: {e}")
+
+    return "0.0.0"
 
 
 def get_accurate_os_version() -> str:
@@ -420,7 +445,7 @@ class ServerUploader:
                 'os_build': get_os_build(),  # NEW: Build number (e.g., 22631)
                 'windows_edition': get_windows_edition(),  # NEW: Pro/Home/Enterprise
                 'architecture': get_architecture(),  # NEW: AMD64/x86/ARM64
-                'agent_version': '2.0.0'
+                'agent_version': get_agent_version()
             }
             
             logger.info(f"[REGISTER] Sending registration request to {self.config.server_url}/api/v1/register")
