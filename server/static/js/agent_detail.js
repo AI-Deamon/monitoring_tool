@@ -173,8 +173,8 @@ async function loadFullReport(isManual = false) {
                 minute: '2-digit'
             })
             : 'No activity';
-        document.getElementById('last-seen').textContent = data.agent.last_seen
-            ? new Date(data.agent.last_seen).toLocaleString('en-IN', {
+        document.getElementById('last-seen-today').textContent = data.agent.last_seen_today
+            ? new Date(data.agent.last_seen_today).toLocaleString('en-IN', {
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
@@ -188,7 +188,13 @@ async function loadFullReport(isManual = false) {
             document.getElementById('live-status-banner').classList.remove('hidden');
             document.getElementById('live-app-name').textContent = data.live_status.current_app;
             document.getElementById('live-window-title').textContent = data.live_status.window_title || '';
-            document.getElementById('live-duration').textContent = formatTime(data.live_status.duration_seconds);
+            const durationEl = document.getElementById('live-duration');
+            if (data.live_status.duration_seconds > 0) {
+                durationEl.textContent = formatTime(data.live_status.duration_seconds);
+                durationEl.classList.remove('hidden');
+            } else {
+                durationEl.classList.add('hidden');
+            }
             document.getElementById('current-activity').textContent = data.live_status.current_app;
         } else {
             document.getElementById('live-status-banner').classList.add('hidden');
@@ -255,7 +261,13 @@ function renderAppUsage(appData, liveStatus) {
     if (liveStatus?.current_app) {
         document.getElementById('app-ongoing-section').classList.remove('hidden');
         document.getElementById('ongoing-app-name').textContent = liveStatus.current_app;
-        document.getElementById('ongoing-app-duration').textContent = formatTime(liveStatus.duration_seconds || 0);
+        const appDurationEl = document.getElementById('ongoing-app-duration');
+        if (liveStatus.duration_seconds > 0) {
+            appDurationEl.textContent = formatTime(liveStatus.duration_seconds);
+            appDurationEl.classList.remove('hidden');
+        } else {
+            appDurationEl.classList.add('hidden');
+        }
     } else {
         document.getElementById('app-ongoing-section').classList.add('hidden');
     }
@@ -294,7 +306,13 @@ function renderDomainUsage(domainData, liveStatus) {
     if (liveStatus?.current_domain) {
         document.getElementById('domain-ongoing-section').classList.remove('hidden');
         document.getElementById('ongoing-domain-name').textContent = liveStatus.current_domain;
-        document.getElementById('ongoing-domain-duration').textContent = formatTime(liveStatus.domain_duration || 0);
+        const domainDurationEl = document.getElementById('ongoing-domain-duration');
+        if (liveStatus.domain_duration > 0 || liveStatus.domain_duration_seconds > 0) {
+            domainDurationEl.textContent = formatTime(liveStatus.domain_duration || liveStatus.domain_duration_seconds || 0);
+            domainDurationEl.classList.remove('hidden');
+        } else {
+            domainDurationEl.classList.add('hidden');
+        }
     } else {
         document.getElementById('domain-ongoing-section').classList.add('hidden');
     }
@@ -438,7 +456,8 @@ function getSourceBadge(source) {
 }
 
 async function loadScreenTimeHistory() {
-    const data = await fetchJSON(`/dashboard/api/agent/${AGENT_ID}/screentime`);
+    const selectedDate = getSelectedDate();
+    const data = await fetchJSON(`/dashboard/api/agent/${AGENT_ID}/screentime?date=${selectedDate}`);
     if (!data) return;
 
     const ctx = document.getElementById('screentime-history-chart');
@@ -625,6 +644,7 @@ async function loadExtendedInventory() {
                 <td class="px-4 py-2 text-sm font-medium text-gray-900 dark:text-gray-100">${escapeHtml(ext.display_name || ext.extension_id || '-')}</td>
                 <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(ext.publisher || '-')}</td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(ext.version || '-')}</td>
+                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(ext.source || '-')}</td>
             </tr>
         `).join('');
         if (vscodeExtCount) vscodeExtCount.textContent = `${data.vscode_extensions.length} extensions`;

@@ -52,31 +52,8 @@ def telemetry_state_change():
         )
         db.session.add(state_change)
 
-        # AWAY TIME CLASSIFICATION
-        AWAY_THRESHOLD_SECONDS = 7200  # 2 hours
-        if previous_state == 'locked' and duration >= AWAY_THRESHOLD_SECONDS:
-            logger.info(f"[{short_id}] 📍 AWAY detected: locked for {duration/3600:.1f}h (>2h threshold)")
-            today = ts_naive.date()
-            screen_time = server_models.ScreenTime.query.filter_by(
-                agent_id=agent_id, date=today
-            ).first()
-
-            if screen_time:
-                transfer_amount = int(duration)
-                current_locked = screen_time.locked_seconds or 0
-                actual_transfer = min(transfer_amount, current_locked)
-
-                if actual_transfer > 0:
-                    screen_time.locked_seconds = current_locked - actual_transfer
-                    screen_time.away_seconds = (screen_time.away_seconds or 0) + actual_transfer
-                    screen_time.last_updated = datetime.utcnow()
-                    logger.info(
-                        f"[{short_id}] away_seconds updated: "
-                        f"locked={screen_time.locked_seconds}s (-{actual_transfer}s), "
-                        f"away={screen_time.away_seconds}s (+{actual_transfer}s)"
-                    )
-            else:
-                logger.debug(f"[{short_id}] Screen time record not found for {today}, away classification pending")
+        # DONE: Agent now handles Away classification. 
+        # Server simply stores what it receives.
 
         if raw_event:
             raw_event.processed = True
@@ -139,15 +116,15 @@ def process_state_duration_event(payload: dict):
 
     # Away-time classification (Step 367 rule: locked > 7200s -> away_seconds)
     delta_active = delta_idle = delta_locked = delta_away = 0
+    # Agent is the source of truth for state classification.
     if state == "active":
         delta_active = duration
     elif state == "idle":
         delta_idle = duration
     elif state == "locked":
-        if duration >= 7200:
-            delta_away = duration
-        else:
-            delta_locked = duration
+        delta_locked = duration
+    elif state == "away":
+        delta_away = duration
 
     try:
         timestamp = parse_agent_time(ts_str)

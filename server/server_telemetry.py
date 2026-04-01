@@ -1009,49 +1009,8 @@ def telemetry_state_change():
         )
         db.session.add(state_change)
         
-        # ============================================================================
-        # AWAY TIME CLASSIFICATION
-        # When transitioning FROM locked state, check if duration >= 2 hours (7200s)
-        # If so, this is "away" time (user was away from computer)
-        # Otherwise, it's just "locked" time (short lock, e.g., bathroom break)
-        # ============================================================================
-        AWAY_THRESHOLD_SECONDS = 7200  # 2 hours
-        
-        if previous_state == 'locked' and duration >= AWAY_THRESHOLD_SECONDS:
-            # Classify this as AWAY time
-            logger.info(f"[{short_id}] 📍 AWAY detected: locked for {duration/3600:.1f}h (>2h threshold)")
-            
-            # Update screen_time: move this locked duration to away_seconds
-            today = ts_naive.date()
-            screen_time = server_models.ScreenTime.query.filter_by(
-                agent_id=agent_id,
-                date=today
-            ).first()
-            
-            if screen_time:
-                # Transfer time from locked_seconds to away_seconds
-                # The cumulative locked_seconds from agent includes this period,
-                # so we track how much should be "away" separately
-                transfer_amount = int(duration)
-                
-                # Ensure we don't go negative on locked_seconds
-                current_locked = screen_time.locked_seconds or 0
-                actual_transfer = min(transfer_amount, current_locked)
-                
-                if actual_transfer > 0:
-                    screen_time.locked_seconds = current_locked - actual_transfer
-                    screen_time.away_seconds = (screen_time.away_seconds or 0) + actual_transfer
-                    screen_time.last_updated = datetime.now(get_server_tz())
-                    
-                    logger.info(
-                        f"[{short_id}] away_seconds updated: "
-                        f"locked={screen_time.locked_seconds}s (-{actual_transfer}s), "
-                        f"away={screen_time.away_seconds}s (+{actual_transfer}s)"
-                    )
-            else:
-                # Screen time record doesn't exist yet, will be created by screentime endpoint
-                # Just log for now
-                logger.debug(f"[{short_id}] Screen time record not found for {today}, away classification pending")
+        # DONE: Agent now handles Away classification. 
+        # Server simply stores what it receives.
         
         # Mark processed
         if raw_event:
@@ -1124,17 +1083,15 @@ def process_state_duration_event(payload: dict):
         logger.info(f"[{short_id}] Dropping invalid event: {state} {duration}s")
         return
 
-    # Away-time classification (Step 367 rule: locked > 7200s -> away_seconds)
-    delta_active = delta_idle = delta_locked = delta_away = 0
+    # Agent is the source of truth for state classification.
     if state == "active":
         delta_active = duration
     elif state == "idle":
         delta_idle = duration
     elif state == "locked":
-        if duration >= 7200:
-            delta_away = duration
-        else:
-            delta_locked = duration
+        delta_locked = duration
+    elif state == "away":
+        delta_away = duration
 
     try:
         # Step 4.3: IST Normalization

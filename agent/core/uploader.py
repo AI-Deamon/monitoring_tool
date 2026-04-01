@@ -1187,7 +1187,8 @@ class ServerUploader:
             uploaded_ids = []
 
             for snapshot in snapshots:
-                data = snapshot['data']
+                # snapshot['data'] is already a dict (parsed from JSON in buffer)
+                data = snapshot['data'].copy()  # Make a copy to avoid modifying original
                 data['agent_id'] = self.config.agent_id
 
                 response = self._make_request('/system-visibility', data)

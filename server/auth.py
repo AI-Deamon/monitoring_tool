@@ -557,8 +557,14 @@ def add_user():
         role = request.form.get('role', 'user')
         linked_username = request.form.get('linked_username', '').strip()
         
+        email = request.form.get('email', '').strip()
+        
         if not username or not password:
             flash('Username and password are required.', 'danger')
+            return render_template('auth/add_user.html', available_usernames=available_usernames)
+        
+        if not email:
+            flash('Email address is required for password resets.', 'danger')
             return render_template('auth/add_user.html', available_usernames=available_usernames)
         
         if DashboardUser.query.filter_by(username=username).first():
@@ -575,6 +581,7 @@ def add_user():
         
         user = DashboardUser(
             username=username,
+            email=email,
             role=role,
             linked_username=linked_username if linked_username else None
         )
@@ -604,13 +611,19 @@ def edit_user(user_id):
         
         role = request.form.get('role', 'user')
         linked_username = request.form.get('linked_username', '').strip()
+        email = request.form.get('email', '').strip()
         is_active = request.form.get('is_active') == 'on'
         
+        if not email:
+            flash('Email address is required for password resets.', 'danger')
+            return render_template('auth/edit_user.html', user=user)
+            
         if linked_username and not check_linked_username_unique(linked_username, exclude_user_id=user.id):
             flash('This Windows username is already linked to another user.', 'danger')
             return render_template('auth/edit_user.html', user=user)
         
         user.role = role
+        user.email = email
         user.linked_username = linked_username if linked_username else None
         user.is_active = is_active
         

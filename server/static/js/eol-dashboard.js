@@ -46,7 +46,17 @@ async function initEolRiskChart() {
         if (!response.ok) return;
 
         const data = await response.json();
-        const ctx = document.getElementById('eolRiskChart').getContext('2d');
+        const ctx = document.getElementById('eolRiskChart');
+        
+        if (!ctx) {
+            console.warn('[EOL] eolRiskChart canvas element not found');
+            return;
+        }
+        
+        // Destroy existing chart if it exists
+        if (window.eolRiskChartInstance) {
+            window.eolRiskChartInstance.destroy();
+        }
 
         // Match status names to colors
         const colors = {
@@ -56,7 +66,7 @@ async function initEolRiskChart() {
             'Unknown': '#6c757d'    // secondary
         };
 
-        new Chart(ctx, {
+        window.eolRiskChartInstance = new Chart(ctx, {
             type: 'doughnut',
             data: {
                 labels: ['EOL', 'Outdated', 'Supported', 'Unknown'],

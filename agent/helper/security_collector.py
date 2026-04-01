@@ -333,6 +333,10 @@ class SecurityCollector:
         # Count extensions per browser for excessive-count penalty
         browser_counts: Dict[str, int] = {}
         for ext in extensions:
+            if not isinstance(ext, dict):
+                continue
+                
+            ext_id = ext.get('extension_id', 'unknown')
             browser = ext.get('browser', 'Unknown')
             browser_counts[browser] = browser_counts.get(browser, 0) + 1
         
@@ -505,32 +509,30 @@ class SecurityCollector:
     def _run_powershell(self, script: str, timeout: int = 60) -> Optional[str]:
         """Run a PowerShell command and return stdout."""
         try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-
+            # Use CREATE_NO_WINDOW for robust background execution
             result = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive",
-                 "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                 "-Command", script],
+                 "-ExecutionPolicy", "Bypass", "-Command", script],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='ignore',
                 timeout=timeout,
-                startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
             )
 
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
-                logger.debug(f"[SECURITY] PowerShell error: {result.stderr[:200]}")
+                stderr_preview = result.stderr[:200] if result.stderr else "No stderr"
+                logger.debug(f"[SECURITY] PowerShell execution failed (code {result.returncode}): {stderr_preview}")
                 return None
 
         except subprocess.TimeoutExpired:
             logger.warning(f"[SECURITY] PowerShell timeout ({timeout}s)")
             return None
         except Exception as e:
-            logger.error(f"[SECURITY] PowerShell error: {e}")
+            logger.error(f"[SECURITY] PowerShell process creation failed: {e}")
             return None
 
     @staticmethod
@@ -867,10 +869,14 @@ $results | ConvertTo-Json -Compress -Depth 3
         flagged_count = 0
 
         for entry in ports:
+            if not isinstance(entry, dict):
+                continue
+
             port = entry.get('LocalPort', 0)
             addr = entry.get('LocalAddress', '')
             proc_name = entry.get('ProcessName', 'Unknown')
-            proc_path = entry.get('ProcessPath', '')
+            # Fix: Ensure proc_path is a string to avoid NoneType subscriptable error
+            proc_path = str(entry.get('ProcessPath') or '')
             pid = entry.get('ProcessId', 0)
 
             if port in seen_ports:
@@ -997,10 +1003,17 @@ $results | ConvertTo-Json -Compress -Depth 3
         flagged = 0
 
         for entry in conns:
-            proc_name = entry.get('ProcessName', 'Unknown')
-            proc_path = entry.get('ProcessPath', '')
+            if not isinstance(entry, dict):
+                continue
+                
+            local_addr = entry.get('LocalAddress', '')
+            local_port = entry.get('LocalPort', 0)
             remote_addr = entry.get('RemoteAddress', '')
             remote_port = entry.get('RemotePort', 0)
+            state = entry.get('State', 'Established')
+            proc_name = entry.get('ProcessName', 'Unknown')
+            # Fix: Ensure proc_path is a string
+            proc_path = str(entry.get('ProcessPath') or '')
             pid = entry.get('ProcessId', 0)
 
             # Skip safe processes
@@ -1365,9 +1378,30 @@ try {
         $free = [double]$_.FreeSpace
         if ($size -gt 0) {
             $usedPercent = [math]::Round((($size - $free) / $size) * 100, 2)
+            
+            # Get the actual display name from Shell32
+            $volumeName = $_.VolumeName
+            if ([string]::IsNullOrEmpty($volumeName)) {
+                try {
+                    $shell = New-Object -ComObject Shell.Application
+                    $folder = $shell.Namespace($_.DeviceID + "\")
+            if ($folder) {
+                        $displayName = $folder.Self.Name
+                        if ($displayName -match "^(.+)\s*\([A-Z]:\)$") {
+                            $volumeName = $matches[1]
+                        } else {
+                            $volumeName = $displayName -replace "\s*\([A-Z]:\)$", ""
+                        }
+                    }
+                } catch {
+                    # Fallback to drive type description
+                    $volumeName = "Local Disk"
+                }
+            }
+            
             $results += [PSCustomObject]@{
                 Drive       = $_.DeviceID
-                VolumeName  = $_.VolumeName
+                VolumeName  = $volumeName
                 SizeGB      = [math]::Round($size / 1GB, 2)
                 FreeGB      = [math]::Round($free / 1GB, 2)
                 UsedPercent = $usedPercent
@@ -1663,9 +1697,30 @@ try {
         $free = [double]$_.FreeSpace
         $used = 0
         if ($size -gt 0) { $used = [math]::Round((($size - $free) / $size) * 100, 2) }
+        
+        # Get the actual display name from Shell32
+        $volumeName = $_.VolumeName
+        if ([string]::IsNullOrEmpty($volumeName)) {
+            try {
+                $shell = New-Object -ComObject Shell.Application
+                $folder = $shell.Namespace($_.DeviceID + "\")
+                if ($folder) {
+                    $displayName = $folder.Self.Name
+                    if ($displayName -match "^(.+)\s*\([A-Z]:\)$") {
+                        $volumeName = $matches[1]
+                    } else {
+                        $volumeName = $displayName -replace "\s*\([A-Z]:\)$", ""
+                    }
+                }
+            } catch {
+                # Fallback to drive type description
+                $volumeName = "Local Disk"
+            }
+        }
+        
         $results += [PSCustomObject]@{
             Drive = $_.DeviceID
-            VolumeName = $_.VolumeName
+            VolumeName = $volumeName
             FileSystem = $_.FileSystem
             SizeGB = [math]::Round($size / 1GB, 2)
             FreeGB = [math]::Round($free / 1GB, 2)

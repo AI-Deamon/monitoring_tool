@@ -978,6 +978,7 @@ class VSCodeExtension(db.Model):
     install_path      = db.Column(db.String(500), nullable=True)              # Installation directory
     first_detected    = db.Column(db.DateTime, default=datetime.utcnow)
     last_updated      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    source            = db.Column(db.String(50), nullable=True)               # 'vscode', 'antigravity'    
     
     agent = db.relationship('Agent', backref=db.backref('vscode_extensions', lazy='dynamic',
                                                          cascade='all, delete-orphan'))
