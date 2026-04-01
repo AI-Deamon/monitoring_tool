@@ -288,6 +288,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
   const AGENT_ID = "{{ agent_id }}";
   let reportData = null;
@@ -588,7 +589,74 @@
       }
     }
 
-   function exportAllCSV() {
+    // Show insights if any
+    if (insights.length > 0) {
+      const insightsBox = document.getElementById('insights-box');
+      const insightsList = document.getElementById('insights-list');
+      insightsList.innerHTML = insights.map(i => `<li>${i}</li>`).join('');
+      insightsBox.classList.remove('hidden');
+    }
+  }
+
+  // Utility Functions
+  function formatTime(seconds) {
+    if (!seconds || seconds === 0) return '0m';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+  }
+
+  function formatTimeShort(seconds) {
+    if (!seconds || seconds === 0) return '0m';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) {
+      return `${hours}h`;
+    }
+    return `${minutes}m`;
+  }
+
+  function formatDateLong(dateStr) {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  }
+
+  function getCurrentTimeIST() {
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+    const istTime = new Date(now.getTime() + istOffset);
+    return istTime.toLocaleString('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour12: true
+    });
+  }
+
+  async function fetchJSON(url) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Fetch error:', error);
+      return null;
+    }
+  }
+
+  function printReport() {
+    window.print();
+  }
+
+  function exportAllCSV() {
     if (!reportData) return;
 
     let csv = '';
@@ -631,22 +699,6 @@
         reportData.domain_usage.data.forEach(d => {
             csv += `"${d.domain || ''}",${d.duration_seconds || 0},"${formatTime(d.duration_seconds || 0)}",${d.session_count || 0}\n`;
         });
-    }
-
-    downloadCSV(csv, `agent_report_${reportData.agent?.hostname || AGENT_ID}_${reportData.date}.csv`);
-}
-
-
-    function downloadCSV(content, filename) {
-        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', filename);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
     }
 
     downloadCSV(csv, `agent_report_${reportData.agent?.hostname || AGENT_ID}_${reportData.date}.csv`);

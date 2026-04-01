@@ -122,34 +122,32 @@ class EOLCollector:
         self.config = config
 
     def _run_powershell(self, script: str, timeout: int = 120) -> Optional[str]:
-        """Run PowerShell command and return output (same pattern as extended_inventory.py)"""
+        """Run PowerShell command and return output"""
         try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-
+            # Use CREATE_NO_WINDOW for robust background execution
             result = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive",
-                 "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                 "-Command", script],
+                 "-ExecutionPolicy", "Bypass", "-Command", script],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='ignore',
                 timeout=timeout,
-                startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
-
+            
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
-                logger.debug(f"[EOL] PowerShell error: {result.stderr[:200]}")
+                stderr_preview = result.stderr[:100] if result.stderr else "No stderr"
+                logger.debug(f"[EOL] PowerShell execution failed (code {result.returncode}): {stderr_preview}")
                 return None
-
+                
         except subprocess.TimeoutExpired:
             logger.warning(f"[EOL] PowerShell timeout ({timeout}s)")
             return None
         except Exception as e:
-            logger.error(f"[EOL] PowerShell error: {e}")
+            logger.error(f"[EOL] PowerShell process creation failed: {e}")
             return None
 
     # =========================================================================

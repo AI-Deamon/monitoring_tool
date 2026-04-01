@@ -62,7 +62,9 @@ function exportTableToCSV(tableId, filename) {
 // Fetch JSON with error handling
 async function fetchJSON(url) {
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            credentials: 'same-origin'  // Include session cookies
+        });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return await response.json();
     } catch (error) {
@@ -138,7 +140,9 @@ async function fetchJSONCached(url, options = {}) {
     // Make request
     const promise = (async () => {
         try {
-            const response = await fetch(url);
+            const response = await fetch(url, {
+                credentials: 'same-origin'  // Include session cookies
+            });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
 

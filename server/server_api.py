@@ -462,8 +462,10 @@ def inventory():
         # EOL-002: Trigger lifecycle evaluation after inventory update
         try:
             from eol_engine import evaluate_agent_lifecycle
-            evaluate_agent_lifecycle(agent_id=agent_id)
-            logger.debug(f"[EOL] Triggered evaluation for agent {agent_id}")
+            agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+            if agent:
+                evaluate_agent_lifecycle(agent)
+                logger.debug(f"[EOL] Triggered evaluation for agent {agent_id}")
         except Exception as eol_error:
             logger.warning(f"[EOL] Background evaluation trigger failed: {eol_error}")
 
@@ -1515,33 +1517,36 @@ def extended_inventory():
         
         results = {}
         
+        # The agent sends payloads nested in a 'data' envelope
+        payload_data = data.get('data', data)
+        
         # Process CLI Tools
-        cli_tools = data.get('cli_tools', [])
+        cli_tools = payload_data.get('cli_tools', [])
         if cli_tools:
             results['cli_tools'] = _upsert_cli_tools(agent_id, cli_tools)
         
         # Process Hardware Drivers
-        drivers = data.get('drivers', [])
+        drivers = payload_data.get('drivers', [])
         if drivers:
             results['drivers'] = _upsert_hardware_drivers(agent_id, drivers)
         
         # Process VS Code Extensions
-        vscode_extensions = data.get('vscode_extensions', [])
+        vscode_extensions = payload_data.get('vscode_extensions', [])
         if vscode_extensions:
             results['vscode_extensions'] = _upsert_vscode_extensions(agent_id, vscode_extensions)
         
         # Process Browser Extensions
-        browser_extensions = data.get('browser_extensions', [])
+        browser_extensions = payload_data.get('browser_extensions', [])
         if browser_extensions:
             results['browser_extensions'] = _upsert_browser_extensions(agent_id, browser_extensions)
         
         # Process Application Plugins
-        plugins = data.get('plugins', [])
+        plugins = payload_data.get('plugins', [])
         if plugins:
             results['plugins'] = _upsert_application_plugins(agent_id, plugins)
         
         # Process Portable Applications
-        portable_apps = data.get('portable_apps', [])
+        portable_apps = payload_data.get('portable_apps', [])
         if portable_apps:
             results['portable_apps'] = _upsert_portable_applications(agent_id, portable_apps)
         
@@ -1834,7 +1839,8 @@ def _upsert_vscode_extensions(agent_id, extensions):
         
         existing = server_models.VSCodeExtension.query.filter_by(
             agent_id=agent_id,
-            extension_id=ext_id
+            extension_id=ext_id,
+            source=ext.get('source')
         ).first()
         
         if existing:
@@ -1843,6 +1849,7 @@ def _upsert_vscode_extensions(agent_id, extensions):
             existing.publisher = ext.get('publisher')
             existing.install_path = ext.get('install_path')
             existing.last_updated = datetime.utcnow()
+            existing.source = ext.get('source')
         else:
             db.session.add(server_models.VSCodeExtension(
                 agent_id=agent_id,
@@ -1850,7 +1857,8 @@ def _upsert_vscode_extensions(agent_id, extensions):
                 display_name=ext.get('display_name'),
                 version=ext.get('version'),
                 publisher=ext.get('publisher'),
-                install_path=ext.get('install_path')
+                install_path=ext.get('install_path'),
+                source=ext.get('source')
             ))
         count += 1
     

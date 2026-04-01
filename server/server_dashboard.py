@@ -37,6 +37,10 @@ def utc_to_ist(utc_dt):
     ist_dt = utc_dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
     return ist_dt.isoformat()
 
+def get_ist_today():
+    """Get current date in IST (UTC+5:30)"""
+    ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    return ist_now.date()
 
 # ============================================================================
 # AUTHENTICATION IMPORTS
@@ -416,10 +420,10 @@ def api_overview():
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = datetime.utcnow().date()
+                target_date = get_ist_today()
         else:
-            target_date = datetime.utcnow().date()
-
+            target_date = get_ist_today()
+        
         # 1. Agent Counts (Current State - ALWAYS Real-time)
         agent_query = server_models.Agent.query
 
@@ -1022,9 +1026,9 @@ def api_agents():
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = datetime.utcnow().date()
+                target_date = get_ist_today()
         else:
-            target_date = datetime.utcnow().date()
+            target_date = get_ist_today()
 
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
 
@@ -1333,8 +1337,18 @@ def api_agents():
 def api_agent_screentime(agent_id):
     """Get agent screen time data (7-day history)."""
     try:
-        start_date = datetime.utcnow().date() - timedelta(days=6)
+        # Get requested date or default to IST today
+        date_str = request.args.get('date')
+        if date_str:
+            try:
+                target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError:
+                target_date = get_ist_today()
+        else:
+            target_date = get_ist_today()
 
+        start_date = target_date - timedelta(days=6)
+        
         # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         records = (
             server_models.ScreenTime.query.filter(
@@ -1368,7 +1382,8 @@ def api_agent_screentime(agent_id):
         record_map = {r.date: r for r in records}
         for i in range(7):
             d = start_date + timedelta(days=i)
-            data["labels"].append(d.strftime("%a %d"))
+            # Use fixed Sun/Mon label format for chart
+            data['labels'].append(d.strftime('%a %d'))
             rec = record_map.get(d)
             data["active"].append(rec.active_seconds if rec else 0)
             data["idle"].append(rec.idle_seconds if rec else 0)
@@ -1810,16 +1825,15 @@ def api_agent_extended_inventory(agent_id):
             agent_id=agent.agent_id
         ).all()
         for ext in vscode_exts:
-            result["vscode_extensions"].append(
-                {
-                    "extension_id": ext.extension_id,
-                    "display_name": ext.display_name,
-                    "version": ext.version,
-                    "publisher": ext.publisher,
-                    "install_path": ext.install_path,
-                }
-            )
-
+            result['vscode_extensions'].append({
+                'extension_id': ext.extension_id,
+                'display_name': ext.display_name,
+                'version': ext.version,
+                'publisher': ext.publisher,
+                'install_path': ext.install_path,
+                'source': ext.source
+            })
+        
         # Browser Extensions
         browser_exts = server_models.BrowserExtension.query.filter_by(
             agent_id=agent.agent_id
@@ -1972,11 +1986,12 @@ def api_agent_system_visibility(agent_id):
                 }
             ), 200
 
-        # payload may already be a dict (JSONB auto-deserialization) or a JSON string
-        if isinstance(latest.payload, dict):
-            payload = latest.payload
-        elif latest.payload:
-            payload = json.loads(latest.payload)
+        # Handle payload - it might be a dict or JSON string
+        if latest.payload:
+            if isinstance(latest.payload, dict):
+                payload = latest.payload
+            else:
+                payload = json.loads(latest.payload)
         else:
             payload = {}
         response = {
@@ -2005,7 +2020,8 @@ def api_agent_system_visibility(agent_id):
         return jsonify({"error": str(e)}), 500
 
 
-@bp.route("/api/agent/<path:agent_id>/full-report", methods=["GET"])
+@bp.route('/api/agent/<path:agent_id>/full-report', methods=['GET'])
+@login_required
 @api_rate_limit
 def api_agent_full_report(agent_id):
     """
@@ -2029,10 +2045,10 @@ def api_agent_full_report(agent_id):
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = datetime.utcnow().date()
+                target_date = get_ist_today()
         else:
-            target_date = datetime.utcnow().date()
-
+            target_date = get_ist_today()
+        
         # Date range for queries
         start_dt = datetime.combine(target_date, datetime.min.time())
         end_dt = datetime.combine(target_date, datetime.max.time())
@@ -2137,21 +2153,21 @@ def api_agent_full_report(agent_id):
         first_seen = agent.first_activity_at
 
         agent_info = {
-            "agent_id": str(agent.agent_id),
-            "hostname": agent.hostname or "Unknown",
-            "os": agent.os,
-            "version": agent.version,
-            "username": username,
-            "status": "online" if is_online else "offline",
-            "is_online": is_online,
-            "registered_at": utc_to_ist(agent.created_at),
-            "first_seen": utc_to_ist(first_seen) if first_seen else None,
-            "has_activity": bool(first_seen),
-            "first_seen_today": first_seen_today,
-            "last_seen_today": last_seen_today,
-            "total_tracked_seconds": total_tracked_seconds,
-            "last_seen": utc_to_ist(agent.last_seen),
-            "is_viewing_today": target_date == datetime.utcnow().date(),
+            'agent_id': str(agent.agent_id),
+            'hostname': agent.hostname or 'Unknown',
+            'os': agent.os,
+            'version': agent.version,
+            'username': username,
+            'status': 'online' if is_online else 'offline',
+            'is_online': is_online,
+            'registered_at': utc_to_ist(agent.created_at),
+            'first_seen': utc_to_ist(first_seen) if first_seen else None,
+            'has_activity': bool(first_seen),
+            'first_seen_today': first_seen_today,
+            'last_seen_today': last_seen_today,
+            'total_tracked_seconds': total_tracked_seconds,
+            'last_seen': utc_to_ist(agent.last_seen),
+            'is_viewing_today': target_date == get_ist_today()
         }
 
         # ================================================================
@@ -2360,19 +2376,14 @@ def api_agent_full_report(agent_id):
         )
 
         # Filter out internal domains
-        filtered_visits = [
-            v for v in domain_visits if not server_models.is_internal_domain(v.domain)
-        ]
-        domain_visits_data = [
-            {
-                "domain": v.domain,
-                "url": v.url,
-                "browser": v.browser,
-                "visited_at": utc_to_ist(v.visited_at),
-            }
-            for v in filtered_visits
-        ]
-
+        filtered_visits = [v for v in domain_visits if not server_models.is_internal_domain(v.domain)]
+        domain_visits_data = [{
+            'domain': v.domain,
+            'url': v.url,
+            'browser': v.browser,
+            'visited_at': v.visited_at.isoformat() if v.visited_at else None
+        } for v in filtered_visits]
+        
         # ================================================================
         # 8. APP INVENTORY - FILTERED & CONSOLIDATED
         # ================================================================
@@ -2729,8 +2740,8 @@ def api_agent_today(agent_id):
     Includes: agent info, screen time, top apps, domains used, sites opened.
     """
     try:
-        today = datetime.utcnow().date()
-
+        today = get_ist_today()
+        
         # 1. Agent Info
         # Try to find agent by UUID first, then by numeric ID (for backwards compatibility)
         agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
