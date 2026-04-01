@@ -524,8 +524,8 @@
                     </td>
                     <td class="px-6 py-4 text-right">
                         <div class="flex items-center justify-end gap-2">
-                            ${(status === 'failed' || status === 'rolled_back') ? `
-                                <button onclick="retryUpdate('${a.agent_id}')" class="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded transition-colors" title="Retry Update">
+                            ${(status === 'failed' || status === 'rolled_back' || status === 'installing' || status === 'downloading' || status === 'pending') ? `
+                                <button onclick="retryUpdate('${a.agent_id}')" class="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded transition-colors" title="${(status === 'installing' || status === 'downloading' || status === 'pending') ? 'Reset Stuck Update' : 'Retry Update'}">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                                     </svg>
@@ -674,6 +674,7 @@
     }
 
     async function retryUpdate(agentId) {
+        if (!confirm('Reset this agent\'s update status? This will clear the stuck state and target version.')) return;
         const resp = await fetch('/dashboard/api/updates/retry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -681,6 +682,9 @@
         });
         if (resp.ok) {
             initUpdates();
+        } else {
+            const err = await resp.json();
+            alert('Failed: ' + (err.error || 'Unknown error'));
         }
     }
 

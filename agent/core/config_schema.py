@@ -124,7 +124,7 @@ CONFIG_SCHEMA_V2 = {
         "required": False,
         "fields": {
             "enabled": {"type": bool, "required": False, "default": True},
-            "check_interval": {"type": int, "required": False, "default": 21600, "min": 600},
+            "check_interval": {"type": int, "required": False, "default": 21600, "min": 60},
             "signing_key": {"type": str, "required": False, "default": ""}
         }
     }
@@ -180,13 +180,11 @@ class ConfigValidator:
         # Validate each top-level field
         for field_name, field_schema in self.schema.items():
             value = config.get(field_name)
-            
-            # Check required fields
-            if field_schema.get("required", False) and value is None:
-                # Use default if available
-                if "default" in field_schema:
-                    value = field_schema["default"]
-                else:
+
+            if value is None:
+                value = self._resolve_missing_value(field_schema)
+
+                if value is None and field_schema.get("required", False):
                     self.errors.append(f"Missing required field: {field_name}")
                     continue
             
@@ -238,12 +236,11 @@ class ConfigValidator:
             nested_result = {}
             for nested_name, nested_schema in schema["fields"].items():
                 nested_value = value.get(nested_name)
-                
-                # Check required nested fields
-                if nested_schema.get("required", False) and nested_value is None:
-                    if "default" in nested_schema:
-                        nested_value = nested_schema["default"]
-                    else:
+
+                if nested_value is None:
+                    nested_value = self._resolve_missing_value(nested_schema)
+
+                    if nested_value is None and nested_schema.get("required", False):
                         self.errors.append(f"Missing required nested field: {field_name}.{nested_name}")
                         continue
                 
@@ -260,6 +257,17 @@ class ConfigValidator:
             return nested_result
         
         return value
+
+    @staticmethod
+    def _resolve_missing_value(schema: Dict) -> Optional[Any]:
+        """Resolve a missing field to its default shape/value when possible."""
+        if schema.get("type") == dict and "fields" in schema:
+            return {}
+
+        if "default" in schema:
+            return schema["default"]
+
+        return None
     
     def get_default_config(self) -> Dict[str, Any]:
         """Generate a default configuration from schema"""

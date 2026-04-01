@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 # ============================================================================
@@ -20,6 +21,68 @@ BUILD_DIR = AGENT_DIR / "build"
 # Stealth output names
 CORE_EXE_NAME = "windiag"
 HELPER_EXE_NAME = "syshealth"
+SWAPPER_EXE_NAME = "swapper"
+
+
+def _read_default_version() -> str:
+    """Read default version from agent/VERSION.txt if available."""
+    version_file = AGENT_DIR / "VERSION.txt"
+    if not version_file.exists():
+        return "2.0.0"
+
+    try:
+        for line in version_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.lower().startswith("version:"):
+                value = line.split(":", 1)[1].strip()
+                if value:
+                    return value
+    except Exception:
+        pass
+
+    return "2.0.0"
+
+
+def _resolve_build_version() -> str:
+    """
+    Resolve build version from:
+      1) CLI argument (python build_exe.py 2.7.0)
+      2) interactive input prompt
+      3) VERSION.txt default
+    """
+    default_version = _read_default_version()
+
+    if len(sys.argv) > 1 and sys.argv[1].strip():
+        return sys.argv[1].strip()
+
+    if sys.stdin.isatty():
+        entered = input(f"Enter build version [{default_version}]: ").strip()
+        if entered:
+            return entered
+
+    return default_version
+
+
+def _write_version_file(version: str) -> bool:
+    """Write dist/VERSION.txt required by install_exe.bat."""
+    try:
+        DIST_DIR.mkdir(parents=True, exist_ok=True)
+        build_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        content = (
+            "SentinelEdge Agent\n"
+            f"Version: {version}\n"
+            f"Build Date: {build_date}\n"
+            "\n"
+            "Installation:\n"
+            "  1. Run install_exe.bat as Administrator\n"
+            "  2. Enter server URL and registration secret\n"
+        )
+        out_file = DIST_DIR / "VERSION.txt"
+        out_file.write_text(content, encoding="utf-8")
+        print(f"[OK] Version file created: dist/VERSION.txt (Version: {version})")
+        return True
+    except Exception as e:
+        print(f"[FAIL] Could not write dist/VERSION.txt: {e}")
+        return False
 
 
 def clean_build():
@@ -122,7 +185,21 @@ def get_hidden_imports():
     ]
 
 
-def build_exe(script_name, exe_name, admin=False, noconsole=False, icon=None):
+def get_swapper_imports():
+    """Minimal hidden imports for swapper build."""
+    return [
+        "psutil",
+    ]
+
+
+def build_exe(
+    script_name,
+    exe_name,
+    admin=False,
+    noconsole=False,
+    icon=None,
+    hidden_imports=None,
+):
     """Run PyInstaller for a specific entry point"""
     print(f"\n{'='*70}")
     print(f"[BUILD] {script_name} -> {exe_name}.exe (admin={admin}, noconsole={noconsole})")
@@ -134,11 +211,14 @@ def build_exe(script_name, exe_name, admin=False, noconsole=False, icon=None):
         "--onefile",
         "--name", exe_name,
         "--paths", str(AGENT_DIR),
+        "--distpath", str(DIST_DIR),
+        "--workpath", str(BUILD_DIR),
         "--clean",
     ]
 
     # Add all hidden imports
-    for mod in get_hidden_imports():
+    imports_to_use = hidden_imports if hidden_imports is not None else get_hidden_imports()
+    for mod in imports_to_use:
         cmd.extend(["--hidden-import", mod])
 
     if admin:
@@ -191,6 +271,8 @@ def main():
 
     # Clean before build
     clean_build()
+    build_version = _resolve_build_version()
+    print(f"[INFO] Build version: {build_version}")
 
     success = True
 
@@ -203,12 +285,65 @@ def main():
         if not build_exe("sentinel_helper.py", HELPER_EXE_NAME, admin=False, noconsole=True):
             success = False
 
+    # 3. Build Swapper (detached helper for EXE bundle replacement) -> swapper.exe
+    if success:
+        swapper_src = AGENT_DIR / "tools" / "swapper.py"
+        swapper_tmp = AGENT_DIR / "_swapper_build_tmp.py"
+        if not swapper_src.exists():
+            print(f"[FAIL] Missing swapper source: {swapper_src}")
+            success = False
+        else:
+            shutil.copy2(swapper_src, swapper_tmp)
+            try:
+                if not build_exe(
+                    "_swapper_build_tmp.py",
+                    SWAPPER_EXE_NAME,
+                    admin=False,
+                    noconsole=True,
+                    hidden_imports=get_swapper_imports(),
+                ):
+                    success = False
+                else:
+                    tools_dir = DIST_DIR / "tools"
+                    tools_dir.mkdir(parents=True, exist_ok=True)
+
+                    built_candidates = [
+                        DIST_DIR / f"{SWAPPER_EXE_NAME}.exe",
+                        DIST_DIR / "tools" / f"{SWAPPER_EXE_NAME}.exe",
+                    ]
+                    built_swapper = next((p for p in built_candidates if p.exists()), None)
+                    target_swapper = tools_dir / f"{SWAPPER_EXE_NAME}.exe"
+
+                    if built_swapper is None:
+                        print("[FAIL] swapper.exe not found after build")
+                        success = False
+                    elif built_swapper == target_swapper:
+                        print(f"[OK] Swapper staged: dist/tools/{SWAPPER_EXE_NAME}.exe")
+                    else:
+                        if target_swapper.exists():
+                            target_swapper.unlink()
+                        shutil.move(str(built_swapper), str(target_swapper))
+                        print(f"[OK] Swapper staged: dist/tools/{SWAPPER_EXE_NAME}.exe")
+            finally:
+                if swapper_tmp.exists():
+                    swapper_tmp.unlink()
+
+                tmp_spec = AGENT_DIR / "_swapper_build_tmp.spec"
+                if tmp_spec.exists():
+                    tmp_spec.unlink()
+
     print()
     print("=" * 70)
+    if success:
+        if not _write_version_file(build_version):
+            success = False
+
     if success:
         print("  BUILD SUCCESSFUL")
         print(f"  Core:   dist/{CORE_EXE_NAME}.exe")
         print(f"  Helper: dist/{HELPER_EXE_NAME}.exe")
+        print(f"  Swapper: dist/tools/{SWAPPER_EXE_NAME}.exe")
+        print("  Version: dist/VERSION.txt")
     else:
         print("  BUILD FAILED - Check errors above")
     print("=" * 70)

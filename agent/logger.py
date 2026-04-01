@@ -9,15 +9,17 @@ from datetime import datetime, timezone, timedelta
 # IST Timezone for Asia/Kolkata
 IST = timezone(timedelta(hours=5, minutes=30))
 
+
 class ReadableFormatter(logging.Formatter):
     """
     Enhanced human-readable formatter with IST support and redaction.
     """
+
     def __init__(self, fmt=None, datefmt=None, **kwargs):
         if not fmt:
-            fmt = '[%(asctime)s] %(levelname)-8s [%(name)s] [%(module)s:%(funcName)s:%(lineno)d] %(message)s'
+            fmt = "[%(asctime)s] %(levelname)-8s [%(name)s] [%(module)s:%(funcName)s:%(lineno)d] %(message)s"
         if not datefmt:
-            datefmt = '%Y-%m-%d %H:%M:%S'
+            datefmt = "%Y-%m-%d %H:%M:%S"
         super().__init__(fmt, datefmt)
         self.redact_keys = {"REGISTRATION_SECRET", "password", "token", "secret"}
 
@@ -40,18 +42,18 @@ class ReadableFormatter(logging.Formatter):
     def format(self, record):
         # Format the main message
         record.message = record.getMessage()
-        
+
         # Add IST timestamp to asctime
         record.asctime = self.formatTime(record, self.datefmt)
-        
+
         # Handle exceptions
         if record.exc_info:
             if not record.exc_text:
                 record.exc_text = self.formatException(record.exc_info)
-        
+
         # Build the final string
         s = self.formatMessage(record)
-        
+
         # Add stacktrace if present
         if record.exc_text:
             if s[-1:] != "\n":
@@ -61,7 +63,7 @@ class ReadableFormatter(logging.Formatter):
             if s[-1:] != "\n":
                 s = s + "\n"
             s = s + self.formatStack(record.stack_info)
-            
+
         # Add context if present
         if hasattr(record, "context") and record.context:
             try:
@@ -70,12 +72,18 @@ class ReadableFormatter(logging.Formatter):
                 for key in self.redact_keys:
                     if key.lower() in context_str.lower():
                         # Use a more aggressive redaction for JSON-like context
-                        context_str = re.sub(f'"{key}":\s*"[^"]+"', f'"{key}": "***REDACTED***"', context_str, flags=re.I)
+                        context_str = re.sub(
+                            rf'"{key}":\s*"[^"]+"',
+                            f'"{key}": "***REDACTED***"',
+                            context_str,
+                            flags=re.I,
+                        )
                 s += f"\nContext: {context_str}"
             except:
                 s += f"\nContext: {record.context}"
-                
+
         return s
+
 
 def setup_logger(name, log_file, level=logging.INFO):
     """
@@ -96,11 +104,11 @@ def setup_logger(name, log_file, level=logging.INFO):
 
         # Use RotatingFileHandler
         file_handler = RotatingFileHandler(
-            log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8'
+            log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
         )
         file_handler.setFormatter(ReadableFormatter())
         logger.addHandler(file_handler)
-        
+
         # Console handler
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(ReadableFormatter())

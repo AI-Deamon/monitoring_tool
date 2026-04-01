@@ -1,11 +1,13 @@
-"""
+﻿"""
 SentinelEdge Core Service - Enhanced with manifest verification
 Phase-1: Added local development server flags
 SYSTEM-level service that aggregates and uploads telemetry
 Handles system restarts, sleep/wake cycles, and network interruptions
 """
 import sys
+import os
 import time
+import random
 import logging
 import ctypes
 import subprocess
@@ -579,7 +581,7 @@ class SentinelCore:
         self.last_wake_time = datetime.now(timezone.utc)
         self.startup_time = datetime.now(timezone.utc)
         
-        # Auto-updater (runs in Core — Core updates both core/ and helper/)
+        # Auto-updater (runs in Core â€” Core updates both core/ and helper/)
         self.updater = AgentUpdater(self.config)
         
         # Worker threads
@@ -1078,10 +1080,18 @@ class SentinelCore:
         - Force mode: immediately runs update cycle when server signals
         """
         self.logger.info("[UPDATER] Update check worker running")
-        
-        # Initial delay — let agent stabilize before checking
-        self.shutdown_event.wait(300)  # 5 min after startup
-        
+
+        # Initial delay lets service stabilize before first update check.
+        # Override with SENTINELEDGE_UPDATE_START_DELAY_SECONDS in production.
+        try:
+            initial_delay = int(
+                os.environ.get("SENTINELEDGE_UPDATE_START_DELAY_SECONDS", "60")
+            )
+        except Exception:
+            initial_delay = 60
+        initial_delay = max(10, initial_delay)
+        self.shutdown_event.wait(initial_delay)
+
         while not self.shutdown_event.is_set():
             try:
                 if self.is_suspended:
@@ -1109,12 +1119,16 @@ class SentinelCore:
             # Wait for next check cycle
             # Use shorter intervals to detect force_update_check sooner
             # Break interval into smaller chunks so forced checks are picked up faster
-            total_wait = self.config.update_check_interval
+            total_wait = max(60, int(self.config.update_check_interval))
+            # Jitter avoids synchronized polling bursts across many agents.
+            total_wait = max(60, total_wait + random.randint(-180, 180))
             chunk = min(300, total_wait)  # Check every 5 min at most
             waited = 0
             while waited < total_wait and not self.shutdown_event.is_set():
-                self.shutdown_event.wait(chunk)
-                waited += chunk
+                remaining = total_wait - waited
+                sleep_for = min(chunk, remaining)
+                self.shutdown_event.wait(sleep_for)
+                waited += sleep_for
         
         self.logger.info("[UPDATER] Update check worker stopped")
     
@@ -1200,3 +1214,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

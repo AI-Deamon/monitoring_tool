@@ -4,6 +4,8 @@ SentinelEdge Server - Main Entry Point (Phase-1 Redesigned)
 Live telemetry ingestion matching API specification.
 """
 import sys
+import os
+import json
 import logging
 import threading
 import time
@@ -19,6 +21,25 @@ from logging_config import setup_logging, AgentLogger
 from flask import jsonify
 
 logger = logging.getLogger(__name__)
+
+
+def _get_server_app_version() -> str:
+    """Resolve server app version for logs and health endpoint."""
+    env_version = os.getenv("SERVER_APP_VERSION", "").strip()
+    if env_version:
+        return env_version
+
+    latest_file = Path(__file__).resolve().parent / "updates" / "latest.json"
+    try:
+        if latest_file.exists():
+            data = json.loads(latest_file.read_text(encoding="utf-8"))
+            version = str(data.get("version", "")).strip()
+            if version:
+                return version
+    except Exception:
+        pass
+
+    return "unknown"
 
 def init_database(app):
     """Note: Tables are now managed exclusively via Alembic migrations."""
@@ -198,9 +219,10 @@ def create_application():
     """
     config = get_config()
     setup_logging(log_level=config.LOG_LEVEL, log_dir='logs')
+    server_version = _get_server_app_version()
     
     logger.info("=" * 70)
-    logger.info(" SentinelEdge Server v2.0.0 - Production Mode")
+    logger.info(f" SentinelEdge Server v{server_version} - Production Mode")
     logger.info("=" * 70)
     
     app = create_app()
@@ -211,7 +233,7 @@ def create_application():
         return jsonify({
             "status": "ok",
             "service": "SentinelEdge Server",
-            "version": "2.0.0"
+            "version": server_version
         }), 200
     
     init_database(app)
