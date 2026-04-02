@@ -20,6 +20,7 @@ except ImportError:
 
 import ctypes
 from ctypes import Structure, windll, byref, sizeof, c_uint
+from ctypes import wintypes
 from datetime import datetime
 from pathlib import Path
 import threading
@@ -140,8 +141,12 @@ class StateDetector:
         self._monitor_thread = None
         self._suspended = False
         self._suspend_started_at = None
+        self._last_wts_unlock_time = 0  # Grace period after WTS unlock event
+        self._last_unlock_transition_time = 0  # Grace period after any unlock transition
+        self._transition_lock = threading.RLock()  # Serialize transitions across threads
 
         self._foreground_app = None
+        self._foreground_app_sample_time = 0
 
         # Centralized state machine (NEW ARCHITECTURE)
         self.current_state = "active"  # active | idle | locked | away
@@ -203,17 +208,56 @@ class StateDetector:
             logger.info(f"[STATE] Startup gap handling: {gap_info}")
 
     def _is_session_locked(self) -> bool:
-        """Check if workstation is locked OR fast user switched (no lock event)"""
+        """Check if workstation is locked OR fast user switched (no lock event).
+
+        Uses two redundant methods:
+        1. OpenInputDesktop — checks if input desktop is accessible
+        2. Foreground window process — checks for lockapp.exe / logonui.exe
+
+        Either method returning True is enough to declare the session locked.
+        This prevents the race where OpenInputDesktop briefly succeeds during
+        the lock-screen animation while lockapp.exe is already foreground.
+        """
         try:
-            # Method 1: Check if desktop is accessible (locked/switched = inaccessible)
+            # Method 1: Desktop accessibility (classic)
             hdesk = windll.user32.OpenInputDesktop(0, False, 0)
             if hdesk:
                 windll.user32.CloseDesktop(hdesk)
-                return False  # Desktop OK = unlocked/active
+                desktop_accessible = True
+            else:
+                desktop_accessible = False
+        except Exception:
+            desktop_accessible = False
+
+        if not desktop_accessible:
             return True  # No desktop = locked OR user switched
 
+        # Method 2: Foreground window process check (Win11 lock screen)
+        # OpenInputDesktop can briefly succeed during lock animation,
+        # but lockapp.exe/logonui.exe will already be foreground.
+        try:
+            hwnd = windll.user32.GetForegroundWindow()
+            if hwnd:
+                pid = wintypes.DWORD()
+                windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if pid.value:
+                    proc_handle = windll.kernel32.OpenProcess(
+                        0x0410,  # PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
+                        False,
+                        pid.value,
+                    )
+                    if proc_handle:
+                        buf = ctypes.create_unicode_buffer(260)
+                        size = wintypes.DWORD(260)
+                        windll.psapi.GetModuleBaseNameW(proc_handle, None, buf, size)
+                        windll.kernel32.CloseHandle(proc_handle)
+                        exe = buf.value.lower()
+                        if exe in ("lockapp.exe", "logonui.exe"):
+                            return True
         except Exception:
-            return True  # Assume locked on error
+            pass
+
+        return False
 
     def start(self):
         """Start detection"""
@@ -306,104 +350,113 @@ class StateDetector:
         self, new_state: str, source: str = "poll", remote_session_active: bool = False
     ):
         """PHASE 2: Use state machine for ALL time calculations"""
-        prev_state = self.current_state
-        if prev_state == new_state:
-            return
-        try:
-            new_state_enum = SystemState(new_state)
-        except ValueError:
-            logger.warning(f"[STATE] Invalid transition target ignored: {new_state}")
-            return
-        if not self.authority.set_state(
-            new_state_enum, source=source, remote_session_active=remote_session_active
-        ):
-            logger.info(
-                f"[STATE] Transition blocked by authority: "
-                f"{prev_state} -> {new_state} (source={source}, remote={remote_session_active})"
-            )
-            return
-
-        # Calculate duration in previous state (for span generation only)
-        now = time.time()
-        duration_seconds = now - self._last_state_change_time
-
-        # NEW: CREATE SPAN for the exiting state (timeline visualization only)
-        if (
-            prev_state in ("active", "idle", "locked")
-            and self._last_state_change_time > 0
-            and duration_seconds >= 1.0
-        ):
-            span = self._create_span(
-                state=prev_state,
-                start_time=self._last_state_change_time,
-                end_time=now,
-                duration=duration_seconds,
-            )
-            if span:
-                self.pending_spans.append(span)
-
-        # PHASE 2: ONLY place time is calculated - call state machine
-        # Map local state names to ScreenState enum
-        state_map = {
-            "active": ScreenState.ACTIVE,
-            "idle": ScreenState.IDLE,
-            "locked": ScreenState.LOCKED,
-            "away": ScreenState.AWAY,
-        }
-
-        if new_state in state_map:
+        with self._transition_lock:
+            prev_state = self.current_state
+            if prev_state == new_state:
+                return
             try:
-                transition_info = self.screen_time_engine.transition(
-                    state_map[new_state]
-                )
-                logger.debug(f"[STATE] State machine transition: {transition_info}")
-            except Exception as e:
-                logger.error(
-                    f"[STATE] State machine transition error: {e}", exc_info=True
-                )
-
-        self._last_state_change_time = now
-
-        # SOLE AUTHORITY: Close idle and emit event exactly once
-        if prev_state == "idle" and new_state in ("active", "locked"):
-            if self.idle_detector:
-                duration = self.idle_detector.complete_idle(time.time())
-                if duration:
-                    suffix = " (lock boundary)" if new_state == "locked" else ""
-                    logger.info(f"Idle session completed: {duration:.1f}s{suffix}")
-                    if self.collector and hasattr(self.collector, "send_idle_event"):
-                        try:
-                            self.collector.send_idle_event(duration)
-                        except Exception as e:
-                            logger.error(f"[STATE] Error sending idle event: {e}")
-
-        if new_state == "locked":
-            if self.idle_detector:
-                self.idle_detector.set_locked(True)
-
-        if prev_state == "locked" and new_state == "active":
-            if self.idle_detector:
-                self.idle_detector.set_locked(False)
-
-        # Mirror authority state locally
-        self.current_state = new_state
-        # NEW: Persist current state for crash recovery
-        self._persist_current_state()
-
-        # Call callback with duration
-        if self.on_state_change:
-            try:
-                prev_state_enum = (
-                    SystemState(prev_state)
-                    if prev_state != "unknown"
-                    else SystemState.UNKNOWN
-                )
                 new_state_enum = SystemState(new_state)
-                self.on_state_change(prev_state_enum, new_state_enum, duration_seconds)
-            except Exception as e:
-                logger.error(f"[STATE] Callback error: {e}", exc_info=True)
+            except ValueError:
+                logger.warning(f"[STATE] Invalid transition target ignored: {new_state}")
+                return
+            if not self.authority.set_state(
+                new_state_enum, source=source, remote_session_active=remote_session_active
+            ):
+                logger.info(
+                    f"[STATE] Transition blocked by authority: "
+                    f"{prev_state} -> {new_state} (source={source}, remote={remote_session_active})"
+                )
+                return
 
-        logger.info(f"[STATE] {prev_state} -> {new_state}")
+            # Calculate duration in previous state (for span generation only)
+            now = time.time()
+            duration_seconds = now - self._last_state_change_time
+
+            # NEW: CREATE SPAN for the exiting state (timeline visualization only)
+            if (
+                prev_state in ("active", "idle", "locked")
+                and self._last_state_change_time > 0
+                and duration_seconds >= 1.0
+            ):
+                span = self._create_span(
+                    state=prev_state,
+                    start_time=self._last_state_change_time,
+                    end_time=now,
+                    duration=duration_seconds,
+                )
+                if span:
+                    self.pending_spans.append(span)
+
+            # PHASE 2: ONLY place time is calculated - call state machine
+            # Map local state names to ScreenState enum
+            state_map = {
+                "active": ScreenState.ACTIVE,
+                "idle": ScreenState.IDLE,
+                "locked": ScreenState.LOCKED,
+                "away": ScreenState.AWAY,
+            }
+
+            if new_state in state_map:
+                try:
+                    transition_info = self.screen_time_engine.transition(
+                        state_map[new_state]
+                    )
+                    logger.debug(f"[STATE] State machine transition: {transition_info}")
+                except Exception as e:
+                    logger.error(
+                        f"[STATE] State machine transition error: {e}", exc_info=True
+                    )
+
+            self._last_state_change_time = now
+
+            # SOLE AUTHORITY: Close idle and emit event exactly once
+            if prev_state == "idle" and new_state in ("active", "locked"):
+                if self.idle_detector:
+                    duration = self.idle_detector.complete_idle(time.time())
+                    if duration:
+                        suffix = " (lock boundary)" if new_state == "locked" else ""
+                        logger.info(f"Idle session completed: {duration:.1f}s{suffix}")
+                        if self.collector and hasattr(self.collector, "send_idle_event"):
+                            try:
+                                self.collector.send_idle_event(duration)
+                            except Exception as e:
+                                logger.error(f"[STATE] Error sending idle event: {e}")
+
+            if new_state == "locked":
+                if self.idle_detector:
+                    self.idle_detector.set_locked(True)
+
+            if prev_state == "locked" and new_state == "active":
+                # Any successful unlock path gets a short grace window, not only WTS.
+                self._last_unlock_transition_time = now
+                # Foreground app can still be stale lockapp.exe after unlock.
+                self._foreground_app = None
+                self._foreground_app_sample_time = 0
+                if self.idle_detector:
+                    self.idle_detector.set_locked(False)
+
+            # Mirror authority state locally
+            self.current_state = new_state
+            # NEW: Persist current state for crash recovery
+            self._persist_current_state()
+
+            # Call callback with duration
+            if self.on_state_change:
+                try:
+                    prev_state_enum = (
+                        SystemState(prev_state)
+                        if prev_state != "unknown"
+                        else SystemState.UNKNOWN
+                    )
+                    new_state_enum = SystemState(new_state)
+                    self.on_state_change(prev_state_enum, new_state_enum, duration_seconds)
+                except Exception as e:
+                    logger.error(f"[STATE] Callback error: {e}", exc_info=True)
+
+            logger.info(
+                f"[STATE] {prev_state} -> {new_state} "
+                f"(source={source}, remote={remote_session_active})"
+            )
 
     def _handle_enter(self, prev_state, new_state):
         pass
@@ -481,6 +534,7 @@ class StateDetector:
 
             elif wparam == WTS_SESSION_UNLOCK:
                 logger.info("[STATE] Screen UNLOCKED (OS Event)")
+                self._last_wts_unlock_time = time.time()
                 self._transition("active", source="os")
         elif msg == WM_POWERBROADCAST:
             if wparam == PBT_APMSUSPEND:
@@ -614,55 +668,78 @@ class StateDetector:
     def set_foreground_app(self, app_name: str):
         """Update current foreground app (called by collector each tick)"""
         self._foreground_app = app_name
+        self._foreground_app_sample_time = time.time()
 
     def _update_state(self):
         """Drive transitions using single clock with multi-layer lock detection"""
-        self._check_daily_boundary()
+        with self._transition_lock:
+            self._check_daily_boundary()
 
-        if self._suspended:
-            return
+            if self._suspended:
+                return
 
-        # Layer 1: Foreground app lock detection (Win11 fallback)
-        # On Windows 11, lockapp.exe shows as foreground but OpenInputDesktop
-        # still returns a valid handle, so we check the app name first
-        if self._foreground_app and self._foreground_app.lower() in LOCK_APPS:
-            self._transition("locked", source="process")
-            return
-
-        # Layer 2: Desktop accessibility check (classic method)
-        remote_session_active = self._is_remote_session()
-        if self._is_session_locked() and not remote_session_active:
-            self._transition("locked", source="desktop")
-            return
-
-        # If we reach here, neither lock detection triggered.
-        # If currently locked, only OS unlock or remote-session activity may unlock.
-        if self.authority.state == SystemState.LOCKED:
-            if remote_session_active:
-                logger.info("[STATE] Exiting LOCKED due to active remote session")
-                self._transition("active", source="remote", remote_session_active=True)
-            elif not HAS_WIN32:
-                # Fallback mode: no WTS unlock events available, use polling unlock.
-                logger.info("[STATE] Fallback unlock via polling (pywin32 unavailable)")
-                self._transition("active", source="os")
-            else:
-                logger.debug("[STATE] Staying LOCKED until OS unlock event")
-            return  # Skip idle check for this tick
-
-        if self.idle_detector:
-            # Centralized Timing (SOLE Authority)
             now = time.time()
-            idle_for = self._get_idle_seconds()
 
-            # Drive the idle engine exactly once per tick
-            self.idle_detector.update(now - idle_for, now)
+            # Grace period after any unlock path (WTS or fallback unlock transition).
+            UNLOCK_GRACE_SECONDS = 10
+            latest_unlock_hint = max(
+                self._last_wts_unlock_time, self._last_unlock_transition_time
+            )
+            unlock_grace_active = latest_unlock_hint > 0 and (
+                now - latest_unlock_hint
+            ) < UNLOCK_GRACE_SECONDS
 
-            if self.idle_detector.is_idle():
-                self._transition("idle", source="idle")
+            if not unlock_grace_active:
+                # Layer 1: Foreground app lock detection (Win11 fallback).
+                # Only trust collector-fed app data while it is fresh.
+                LOCK_APP_SAMPLE_MAX_AGE_SECONDS = 15
+                foreground_fresh = self._foreground_app_sample_time > 0 and (
+                    now - self._foreground_app_sample_time
+                ) <= LOCK_APP_SAMPLE_MAX_AGE_SECONDS
+
+                if (
+                    foreground_fresh
+                    and self._foreground_app
+                    and self._foreground_app.lower() in LOCK_APPS
+                ):
+                    self._transition("locked", source="process")
+                    return
+
+                # Layer 2: Desktop accessibility check (classic method)
+                remote_session_active = self._is_remote_session()
+                if self._is_session_locked() and not remote_session_active:
+                    self._transition("locked", source="desktop")
+                    return
+            else:
+                remote_session_active = self._is_remote_session()
+
+            # If we reach here, neither lock detection triggered.
+            # If currently locked, only OS unlock or remote-session activity may unlock.
+            if self.authority.state == SystemState.LOCKED:
+                if remote_session_active:
+                    logger.info("[STATE] Exiting LOCKED due to active remote session")
+                    self._transition("active", source="remote", remote_session_active=True)
+                elif not HAS_WIN32:
+                    # Fallback mode: no WTS unlock events available, use polling unlock.
+                    logger.info("[STATE] Fallback unlock via polling (pywin32 unavailable)")
+                    self._transition("active", source="os")
+                else:
+                    logger.debug("[STATE] Staying LOCKED until OS unlock event")
+                return  # Skip idle check for this tick
+
+            if self.idle_detector:
+                # Centralized Timing (SOLE Authority)
+                idle_for = self._get_idle_seconds()
+
+                # Drive the idle engine exactly once per tick
+                self.idle_detector.update(now - idle_for, now)
+
+                if self.idle_detector.is_idle():
+                    self._transition("idle", source="idle")
+                else:
+                    self._transition("active", source="idle")
             else:
                 self._transition("active", source="idle")
-        else:
-            self._transition("active", source="idle")
 
     # ========================================================================
     # SPAN GENERATION
@@ -855,3 +932,4 @@ class StateDetector:
             logger.info("[STATE] Daily counters reset via state machine")
         except Exception as e:
             logger.error(f"[STATE] Error resetting state machine: {e}", exc_info=True)
+

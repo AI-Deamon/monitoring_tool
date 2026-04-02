@@ -390,41 +390,16 @@ class SentinelHelper:
             self.core_connected = True
 
         if self.core_connected:
-            self._send_initial_inventory()
-            self._send_initial_hardware()
-            self._send_initial_extended_inventory()
-            if self.config.enable_security_collection:
-                self._send_initial_security_indicators()
-            else:
-                self.logger.info("[SECURITY] Initial collection disabled by config")
-            if self.config.enable_system_visibility_collection:
-                self._send_initial_system_visibility()
-            else:
-                self.logger.info("[VISIBILITY] Initial collection disabled by config")
-
-            # ============================================================
-            # CRITICAL FIX: Send startup state event
-            # This tells the server "agent just started in X state"
-            # Without this, cross-day sessions get miscalculated
-            # ============================================================
-            try:
-                current_state = self.state_detector.get_state()
-                startup_payload = {
-                    "previous_state": "startup",  # Special marker for agent startup
-                    "current_state": current_state.value,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "duration_seconds": 0,  # No duration for startup event
-                }
-                self.logger.info(
-                    f"[STATE] Sending startup state: startup -> {current_state.value}"
-                )
-                success = self.communicator.send_state_change(startup_payload)
-                if success:
-                    self.logger.info("[STATE] Startup state event sent successfully")
-                else:
-                    self.logger.warning("[STATE] Failed to send startup state event")
-            except Exception as e:
-                self.logger.error(f"[STATE] Error sending startup state: {e}")
+            # Run initial collection in background thread so heartbeats start immediately.
+            # The Core's HelperMonitor expects heartbeats within 2 min, but initial
+            # collection (especially extended inventory) can take 3-10 min.
+            init_thread = Thread(
+                target=self._send_initial_collections,
+                daemon=True,
+                name="InitialCollections",
+            )
+            init_thread.start()
+            self.logger.info("[INIT] Initial collections started in background")
 
         # Main loop
         last_heartbeat = time.time()
@@ -656,6 +631,50 @@ class SentinelHelper:
             self.logger.error(f"Fatal error in main loop: {e}", exc_info=True)
         finally:
             self.stop(crashed=fatal_loop_error)
+
+    def _send_initial_collections(self):
+        """Run all initial collections in a background thread.
+
+        This allows the main monitoring loop (and heartbeats) to start
+        immediately, preventing the Core HelperMonitor from killing us
+        during the 3-10 min initial collection window.
+        """
+        try:
+            self._send_initial_inventory()
+            self._send_initial_hardware()
+            self._send_initial_extended_inventory()
+            if self.config.enable_security_collection:
+                self._send_initial_security_indicators()
+            else:
+                self.logger.info("[SECURITY] Initial collection disabled by config")
+            if self.config.enable_system_visibility_collection:
+                self._send_initial_system_visibility()
+            else:
+                self.logger.info("[VISIBILITY] Initial collection disabled by config")
+
+            # Send startup state event
+            try:
+                current_state = self.state_detector.get_state()
+                startup_payload = {
+                    "previous_state": "startup",
+                    "current_state": current_state.value,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "duration_seconds": 0,
+                }
+                self.logger.info(
+                    f"[STATE] Sending startup state: startup -> {current_state.value}"
+                )
+                success = self.communicator.send_state_change(startup_payload)
+                if success:
+                    self.logger.info("[STATE] Startup state event sent successfully")
+                else:
+                    self.logger.warning("[STATE] Failed to send startup state event")
+            except Exception as e:
+                self.logger.error(f"[STATE] Error sending startup state: {e}")
+
+            self.logger.info("[INIT] All initial collections completed")
+        except Exception as e:
+            self.logger.error(f"[INIT] Initial collection error: {e}", exc_info=True)
 
     def _send_initial_inventory(self):
         """Send initial inventory on startup"""
