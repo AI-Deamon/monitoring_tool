@@ -536,7 +536,6 @@ def list_users():
 def add_user():
     """Add new dashboard user (admin only)"""
     # Get available Windows usernames from agents for dropdown
-    from sqlalchemy import func
     import server_models
     
     available_usernames = db.session.query(
@@ -545,12 +544,21 @@ def add_user():
         server_models.AgentCurrentStatus.username.isnot(None)
     ).distinct().order_by(server_models.AgentCurrentStatus.username).all()
     available_usernames = [u[0] for u in available_usernames if u[0]]
+    available_login_usernames = sorted({
+        username.split('\\')[-1].strip()
+        for username in available_usernames
+        if username and username.split('\\')[-1].strip()
+    }, key=str.lower)
     
     if request.method == 'POST':
         # CSRF validation
         if not validate_csrf_token():
             flash('Invalid request. Please try again.', 'danger')
-            return render_template('auth/add_user.html', available_usernames=available_usernames)
+            return render_template(
+                'auth/add_user.html',
+                available_usernames=available_usernames,
+                available_login_usernames=available_login_usernames
+            )
         
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
@@ -561,23 +569,43 @@ def add_user():
         
         if not username or not password:
             flash('Username and password are required.', 'danger')
-            return render_template('auth/add_user.html', available_usernames=available_usernames)
+            return render_template(
+                'auth/add_user.html',
+                available_usernames=available_usernames,
+                available_login_usernames=available_login_usernames
+            )
         
         if not email:
             flash('Email address is required for password resets.', 'danger')
-            return render_template('auth/add_user.html', available_usernames=available_usernames)
+            return render_template(
+                'auth/add_user.html',
+                available_usernames=available_usernames,
+                available_login_usernames=available_login_usernames
+            )
         
         if DashboardUser.query.filter_by(username=username).first():
             flash('Username already exists.', 'danger')
-            return render_template('auth/add_user.html', available_usernames=available_usernames)
+            return render_template(
+                'auth/add_user.html',
+                available_usernames=available_usernames,
+                available_login_usernames=available_login_usernames
+            )
         
         if len(password) < 8:
             flash('Password must be at least 8 characters.', 'danger')
-            return render_template('auth/add_user.html', available_usernames=available_usernames)
+            return render_template(
+                'auth/add_user.html',
+                available_usernames=available_usernames,
+                available_login_usernames=available_login_usernames
+            )
         
         if linked_username and not check_linked_username_unique(linked_username):
             flash('This Windows username is already linked to another user.', 'danger')
-            return render_template('auth/add_user.html', available_usernames=available_usernames)
+            return render_template(
+                'auth/add_user.html',
+                available_usernames=available_usernames,
+                available_login_usernames=available_login_usernames
+            )
         
         user = DashboardUser(
             username=username,
@@ -594,7 +622,11 @@ def add_user():
         flash(f'User "{username}" created successfully.', 'success')
         return redirect(url_for('auth.list_users'))
     
-    return render_template('auth/add_user.html', available_usernames=available_usernames)
+    return render_template(
+        'auth/add_user.html',
+        available_usernames=available_usernames,
+        available_login_usernames=available_login_usernames
+    )
 
 
 @auth_bp.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])

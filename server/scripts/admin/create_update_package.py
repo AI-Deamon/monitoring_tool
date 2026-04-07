@@ -75,6 +75,7 @@ def create_package(source_dir: Path, version: str, output_dir: Path,
     if exe_mode:
         # EXE bundle mode — validate EXE outputs exist
         required_exes = ['windiag.exe', 'syshealth.exe']
+        required_nested_files = [Path('tools') / 'swapper.exe']
         found = []
         for exe in required_exes:
             if (source_dir / exe).exists():
@@ -87,6 +88,16 @@ def create_package(source_dir: Path, version: str, output_dir: Path,
         if not found:
             print(f"[ERROR] No EXE files found in {source_dir}")
             print(f"  Expected at least: {required_exes}")
+            sys.exit(1)
+
+        missing_nested = [
+            str(rel_path) for rel_path in required_nested_files
+            if not (source_dir / rel_path).exists()
+        ]
+        if missing_nested:
+            print(f"[ERROR] Missing required EXE bundle files in {source_dir}")
+            for rel_path in missing_nested:
+                print(f"  - {rel_path}")
             sys.exit(1)
         
         print(f"[INFO] EXE bundle mode: found {len(found)} executables")
@@ -126,12 +137,24 @@ def create_package(source_dir: Path, version: str, output_dir: Path,
     file_count = 0
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         if exe_mode:
-            # Package EXE, DLL, PYD files
+            # Package EXE, DLL, PYD files recursively so nested tools
+            # like tools/swapper.exe are included in EXE-mode updates.
+            payloads = []
             for ext in ('*.exe', '*.dll', '*.pyd'):
-                for f in source_dir.glob(ext):
-                    zf.write(f, f.name)
-                    file_count += 1
-                    print(f"  + {f.name}")
+                payloads.extend(
+                    f for f in source_dir.rglob(ext) if f.is_file()
+                )
+
+            seen_arc_names = set()
+            for f in sorted(payloads):
+                arcname = f.relative_to(source_dir)
+                arcname_str = str(arcname)
+                if arcname_str in seen_arc_names:
+                    continue
+                seen_arc_names.add(arcname_str)
+                zf.write(f, arcname_str)
+                file_count += 1
+                print(f"  + {arcname_str}")
         else:
             # Package Python source files
             for script in required_files:

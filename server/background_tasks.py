@@ -266,6 +266,8 @@ def audit_data_integrity():
 
         discrepancies = []
         for st in screen_times:
+            agent_id_str = str(st.agent_id)
+
             # Get sum of app sessions for this agent today
             result = db.session.execute(
                 text("""
@@ -288,7 +290,7 @@ def audit_data_integrity():
             if diff > threshold and st.active_seconds > 0:
                 discrepancies.append(
                     {
-                        "agent_id": st.agent_id[:12] + "...",
+                        "agent_id": agent_id_str[:12] + "...",
                         "screen_time_active": st.active_seconds,
                         "session_total": session_total,
                         "difference": diff,

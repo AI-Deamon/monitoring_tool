@@ -198,6 +198,10 @@ set "LEGACY_FOUND=0"
 sc query SentinelEdgeCore >nul 2>&1
 if %errorlevel% equ 0 set "LEGACY_FOUND=1"
 if exist "C:\Program Files\SentinelEdge\" set "LEGACY_FOUND=1"
+if exist "C:\ProgramData\SentinelEdge\" set "LEGACY_FOUND=1"
+for /d %%U in ("C:\Users\*") do (
+    if exist "%%U\AppData\Roaming\SentinelEdge\" set "LEGACY_FOUND=1"
+)
 
 if "%LEGACY_FOUND%"=="1" (
     set /p "REMOVE_LEGACY=Legacy SentinelEdge installation found. Remove it too? (Y/N): "
@@ -206,6 +210,8 @@ if "%LEGACY_FOUND%"=="1" (
         net stop SentinelEdgeCore >nul 2>&1
         schtasks /end /tn "SentinelEdgeUserHelper" >nul 2>&1
         schtasks /delete /tn "SentinelEdgeUserHelper" /f >nul 2>&1
+        taskkill /f /im pythonw.exe >nul 2>&1
+        taskkill /f /im python.exe >nul 2>&1
 
         if exist "C:\Program Files\SentinelEdge\nssm\win64\nssm.exe" (
             "C:\Program Files\SentinelEdge\nssm\win64\nssm.exe" remove SentinelEdgeCore confirm >nul 2>&1
@@ -214,16 +220,23 @@ if "%LEGACY_FOUND%"=="1" (
         )
 
         rmdir /s /q "C:\Program Files\SentinelEdge\" 2>nul
-        rmdir /s /q "C:\ProgramData\SentinelEdge\" 2>nul
-        for /d %%U in ("C:\Users\*") do (
-            if exist "%%U\AppData\Roaming\SentinelEdge\" (
-                rmdir /s /q "%%U\AppData\Roaming\SentinelEdge\" 2>nul
-            )
+        if exist "C:\Program Files\SentinelEdge\" (
+            powershell -Command "Remove-Item -Path 'C:\Program Files\SentinelEdge' -Recurse -Force -ErrorAction SilentlyContinue"
         )
-        
+
+        rmdir /s /q "C:\ProgramData\SentinelEdge\" 2>nul
+        if exist "C:\ProgramData\SentinelEdge\" (
+            powershell -Command "Remove-Item -Path 'C:\ProgramData\SentinelEdge' -Recurse -Force -ErrorAction SilentlyContinue"
+        )
+
         for /d %%U in ("C:\Users\*") do (
             if exist "%%U\AppData\Roaming\SentinelEdge\" (
+                echo   - Cleaning AppData for %%~nU
+                icacls "%%U\AppData\Roaming\SentinelEdge" /reset /t /q >nul 2>&1
                 rmdir /s /q "%%U\AppData\Roaming\SentinelEdge\" 2>nul
+                if exist "%%U\AppData\Roaming\SentinelEdge\" (
+                    powershell -Command "Remove-Item -Path '%%U\AppData\Roaming\SentinelEdge' -Recurse -Force -ErrorAction SilentlyContinue"
+                )
             )
         )
         echo [OK] Legacy installation removed

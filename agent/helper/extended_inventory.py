@@ -862,35 +862,136 @@ class ExtendedInventoryCollector:
     # =========================================================================
     
     def collect_application_plugins(self) -> List[ApplicationPlugin]:
-        """Collect application plugins (Office add-ins, Adobe plugins, etc.)"""
+        """Collect application plugins (Office add-ins, Adobe plugins, IDE plugins, etc.)"""
         plugins = []
         
         script = r'''
         $ProgressPreference = 'SilentlyContinue'
         $plugins = @()
         
-        # Office Add-ins from Registry
-        $officeApps = @('Word', 'Excel', 'Outlook', 'PowerPoint', 'Access')
-        foreach ($app in $officeApps) {
-            $regPath = "HKCU:\Software\Microsoft\Office\$app\Addins"
-            if (Test-Path $regPath) {
-                Get-ChildItem $regPath -ErrorAction SilentlyContinue | ForEach-Object {
-                    $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
-                    $plugins += @{
-                        HostApplication = "Microsoft $app"
-                        PluginName = $_.PSChildName
-                        PluginID = $_.PSChildName
-                        Version = $props.Version
-                        Publisher = 'Unknown'
-                        Path = $props.Path
-                        PluginType = 'OfficeAddin'
-                        Enabled = $props.LoadBehavior -eq 3
+        # 1. Office Add-ins (HKCU + HKLM + ClickToRun)
+        $officeApps = @('Word', 'Excel', 'Outlook', 'PowerPoint', 'Access', 'OneNote', 'Project', 'Visio')
+        $regHives = @('HKCU:\Software\Microsoft\Office', 'HKLM:\Software\Microsoft\Office', 'HKLM:\Software\WOW6432Node\Microsoft\Office')
+        
+        # --- Helper: Deep Search Classes (Standard + ClickToRun) ---
+        function Get-OfficeClassValue {
+            param($SubPath, $ValueName = '')
+            $searchPaths = @(
+                "Registry::HKEY_CLASSES_ROOT\$SubPath",
+                "HKCU:\Software\Classes\$SubPath",
+                "HKLM:\Software\Classes\$SubPath",
+                "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE\Software\Classes\$SubPath"
+            )
+            foreach ($p in $searchPaths) {
+                if (Test-Path $p) {
+                    try {
+                        $val = (Get-ItemProperty $p -ErrorAction SilentlyContinue).$ValueName
+                        if (-not $val -and $ValueName -eq '') {
+                            $val = (Get-Item $p).GetValue("")
+                        }
+                        if ($val) { return $val }
+                    } catch {}
+                }
+            }
+            return $null
+        }
+
+        # --- Helper: Extract Version From .vsto (XML) ---
+        function Get-VstoVersion {
+            param($Path)
+            try {
+                if ($Path -and (Test-Path $Path)) {
+                    [xml]$xml = Get-Content $Path -ErrorAction SilentlyContinue
+                    # VSTO manifests use specific namespaces, but we can search for the assemblyIdentity tag
+                    $identity = $xml.GetElementsByTagName("assemblyIdentity") | Select-Object -First 1
+                    if ($identity -and $identity.version) { return $identity.version }
+                }
+            } catch {}
+            return $null
+        }
+
+        foreach ($hive in $regHives) {
+            foreach ($app in $officeApps) {
+                $regPath = "$hive\$app\Addins"
+                if (Test-Path $regPath) {
+                    Get-ChildItem $regPath -ErrorAction SilentlyContinue | ForEach-Object {
+                        $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+                        $progId = $_.PSChildName
+                        
+                        # --- Name Resolution (FriendlyName > DisplayName > ProgID) ---
+                        $name = if ($props.FriendlyName) { $props.FriendlyName } 
+                                elseif ($props.DisplayName) { $props.DisplayName }
+                                else { Get-OfficeClassValue -SubPath $progId }
+                        if (-not $name) { $name = $progId }
+                        
+                        $path = if ($props.Manifest) { $props.Manifest } else { $props.Path }
+                        $version = if ($props.Version) { $props.Version } else { 'Unknown' }
+                        $publisher = 'Microsoft'
+                        
+                        # --- CLSID -> Path Resolution ---
+                        if (-not $path) {
+                            $clsid = Get-OfficeClassValue -SubPath "$progId\CLSID"
+                            if ($clsid) {
+                                $path = Get-OfficeClassValue -SubPath "CLSID\$clsid\InprocServer32"
+                            }
+                        }
+                        
+                        # --- Direct InprocServer32 Fallback ---
+                        if (-not $path) {
+                            $path = Get-OfficeClassValue -SubPath "$progId\InprocServer32"
+                        }
+                        
+                        # --- Special Fallback: Microsoft Teams Meeting Add-in (New Teams MSIX) ---
+                        if (-not $path -and $progId -match 'TeamsAddin') {
+                            $teamsPkg = Get-AppxPackage -Name "MSTeams" -ErrorAction SilentlyContinue | Select-Object -First 1
+                            if ($teamsPkg) {
+                                $path = $teamsPkg.InstallLocation
+                                $version = $teamsPkg.Version
+                                $publisher = "Microsoft Corporation"
+                            } else {
+                                $teamsBase = "$env:LOCALAPPDATA\Microsoft\TeamsMeetingAddin"
+                                if (Test-Path $teamsBase) {
+                                    $teamsDll = Get-ChildItem $teamsBase -Filter "Microsoft.Teams.AddinLoader.dll" -Recurse -ErrorAction SilentlyContinue | 
+                                                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                                    if ($teamsDll) { $path = $teamsDll.FullName }
+                                }
+                            }
+                        }
+                        
+                        # --- Path Cleaning & VSTO Resolution ---
+                        if ($path -and $path.Contains('|')) { $path = $path.Split('|')[0] }
+                        if ($path -and $path.StartsWith('file:///')) { $path = $path.Replace('file:///', '').Replace('/', '\') }
+                        
+                        # --- Version Resolution ---
+                        if ($path -and (Test-Path $path) -and $version -eq 'Unknown') {
+                            if ($path -like "*.vsto") {
+                                $vVersion = Get-VstoVersion -Path $path
+                                if ($vVersion) { $version = $vVersion }
+                            } else {
+                                try {
+                                    $vi = (Get-Item $path).VersionInfo
+                                    if ($vi.FileVersion) { $version = $vi.FileVersion }
+                                    if ($vi.CompanyName) { $publisher = $vi.CompanyName }
+                                } catch {}
+                            }
+                        }
+                        
+                        $plugins += @{
+                            HostApplication = "Microsoft $app"
+                            PluginName = $name
+                            PluginID = $progId
+                            Version = $version
+                            Publisher = $publisher
+                            Path = $path
+                            PluginType = 'OfficeAddin'
+                            Enabled = $props.LoadBehavior -eq 3
+                        }
                     }
                 }
             }
         }
         
-        # Adobe Plugins
+        # 2. Adobe Plugins
         $adobePaths = @(
             "$env:PROGRAMFILES\Adobe\Acrobat*\Acrobat\plug_ins",
             "$env:PROGRAMFILES(x86)\Adobe\Acrobat*\Acrobat\plug_ins"
@@ -913,29 +1014,48 @@ class ExtendedInventoryCollector:
             }
         }
         
-        # Visual Studio Extensions (VSIX)
-        $vsixPath = "$env:USERPROFILE\.vs\extensions"
-        if (Test-Path $vsixPath) {
-            Get-ChildItem $vsixPath -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue | Where-Object {
-                Test-Path (Join-Path $_.FullName 'extension.vsixmanifest')
-            } | ForEach-Object {
-                $plugins += @{
-                    HostApplication = 'Visual Studio'
-                    PluginName = $_.Name
-                    PluginID = $_.Name
-                    Version = 'Unknown'
-                    Publisher = 'Unknown'
-                    Path = $_.FullName
-                    PluginType = 'VSExtension'
-                    Enabled = $true
+        # 3. JetBrains Plugins
+        $jbPath = "$env:APPDATA\JetBrains"
+        if (Test-Path $jbPath) {
+            Get-ChildItem $jbPath -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $ideName = $_.Name
+                $pluginsDir = Join-Path $_.FullName "plugins"
+                if (Test-Path $pluginsDir) {
+                    Get-ChildItem $pluginsDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                        $pName = $_.Name
+                        $plugins += @{
+                            HostApplication = "JetBrains $ideName"
+                            PluginName = $pName
+                            PluginID = $pName
+                            Version = 'Unknown'
+                            Publisher = 'JetBrains/ThirdParty'
+                            Path = $_.FullName
+                            PluginType = 'IDEPlugin'
+                            Enabled = $true
+                        }
+                    }
                 }
             }
         }
         
-        $plugins | ConvertTo-Json -Depth 3
+        # --- Final Cleanup: Global Deduplication ---
+        $finalPlugins = @()
+        $gPlugins = $plugins | Group-Object {
+            # Logic: Group by Host and a normalized Name
+            $n = $_.PluginName
+            if ($n -match 'UCAddin' -or $n -match 'Skype Meeting') { $n = 'Skype Meeting Add-in' }
+            "$($_.HostApplication)-$n"
+        }
+        foreach ($g in $gPlugins) {
+            # Prefer entries with a Path and a Version
+            $best = $g.Group | Sort-Object { if ($_.Path) { 1 } else { 0 } }, { if ($_.Version -ne 'Unknown') { 1 } else { 0 } } -Descending | Select-Object -First 1
+            $finalPlugins += $best
+        }
+        
+        $finalPlugins | ConvertTo-Json -Depth 3
         '''
         
-        output = self._run_powershell(script, timeout=90)
+        output = self._run_powershell(script, timeout=120)
         if output:
             try:
                 data = json.loads(output)
