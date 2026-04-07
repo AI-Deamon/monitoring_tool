@@ -20,8 +20,8 @@ DEFAULT_DATA_DIR = Path(r"C:\ProgramData\WinDiagSvc")
 FALLBACK_LOG_FILE = Path(r"C:\ProgramData\WinDiagSvc\logs\swapper_fallback.log")
 STALE_MANIFEST_MINUTES = 30
 PARENT_EXIT_TIMEOUT_SECONDS = 60
-REPLACE_RETRIES = 3
-REPLACE_RETRY_DELAY_SECONDS = 2
+REPLACE_RETRIES = 10
+REPLACE_RETRY_DELAY_SECONDS = 3
 SERVICE_START_TIMEOUT_SECONDS = 45
 SERVICE_STATE_POLL_SECONDS = 2
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -397,7 +397,6 @@ def main() -> int:
     service_name = "WinDiagSvc"
     version = "unknown"
     previous_version = "unknown"
-    helper_was_disabled = False
     backup_created = False
 
     try:
@@ -432,7 +431,7 @@ def main() -> int:
             )
 
         # Step 1: Stop helper task
-        helper_was_disabled = _set_helper_task_disabled(helper_task)
+        _set_helper_task_disabled(helper_task)
 
         # Step 2: Stop the core service BEFORE file replacement
         LOGGER.info(f"Stopping core service {service_name} before file swap...")
@@ -497,8 +496,7 @@ def main() -> int:
         )
         LOGGER.info("update_pending.json written")
 
-        if helper_was_disabled:
-            _set_helper_task_enabled_and_run(helper_task)
+        _set_helper_task_enabled_and_run(helper_task)
 
         _cleanup_path(data_dir / "failed_swap.json")
         # Service was already stopped before file swap, so use "start" not "restart"
@@ -531,8 +529,7 @@ def main() -> int:
             except Exception as rollback_exc:
                 LOGGER.error(f"Rollback failed: {rollback_exc}", exc_info=True)
 
-        if helper_was_disabled:
-            _set_helper_task_enabled_and_run(helper_task)
+        _set_helper_task_enabled_and_run(helper_task)
 
         _restart_service(install_dir, service_name, mode="start")
         _cleanup_path(staging_dir)

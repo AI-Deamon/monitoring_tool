@@ -322,7 +322,9 @@ def telemetry_screentime():
     1. Agent's state_machine.py calculates cumulative totals (ONLY place)
     2. Agent sends totals to this endpoint
     3. Server validates (non-negative, sum ≤ 86400)
-    4. Server stores via GREATEST() (monotonic, no regression)
+    4. Server stores the incoming cumulative bucket set when the same-session
+       total is non-regressing, preserving agent-side reclassification
+       such as LOCKED -> AWAY after a continuous 2-hour lock.
     
     FORBIDDEN:
     - Server MUST NOT calculate, infer, recover, or repair screen time
@@ -335,7 +337,8 @@ def telemetry_screentime():
     The agent is the single source of truth.
     
     Process screen time updates from Core's LiveTelemetryTracker.
-    Accepts cumulative daily totals and uses GREATEST() for monotonic values.
+    Accepts cumulative daily totals and persists the latest authoritative
+    same-session bucket set.
     """
     data = request.get_json() or {}
     agent_id = str(g.current_agent.agent_id) if g.current_agent else None

@@ -81,9 +81,10 @@ class StateAuthority:
             # LOCKED can only be exited by:
             # 1. OS unlock event (highest authority)
             # 2. RDP override (user is active remotely)
-            if new_state == SystemState.ACTIVE and (
-                source == "os" or remote_session_active
-            ):
+            # if new_state == SystemState.ACTIVE and (
+            #     source == "os" or remote_session_active
+            # ):
+            if new_state == SystemState.ACTIVE and (source == "os"):
                 return True
             return False
 
@@ -142,8 +143,12 @@ class StateDetector:
         self._suspended = False
         self._suspend_started_at = None
         self._last_wts_unlock_time = 0  # Grace period after WTS unlock event
-        self._last_unlock_transition_time = 0  # Grace period after any unlock transition
-        self._transition_lock = threading.RLock()  # Serialize transitions across threads
+        self._last_unlock_transition_time = (
+            0  # Grace period after any unlock transition
+        )
+        self._transition_lock = (
+            threading.RLock()
+        )  # Serialize transitions across threads
 
         self._foreground_app = None
         self._foreground_app_sample_time = 0
@@ -154,6 +159,9 @@ class StateDetector:
 
         # NEW: Duration tracking
         self._last_state_change_time = time.time()  # Track time of last transition
+
+        # NEW: Final totals for midnight boundary upload
+        self._final_totals_for_upload = None  # Set at midnight, sent via next heartbeat
 
         # NEW: Span generation
         self.pending_spans = []  # List of completed spans awaiting collection
@@ -357,10 +365,14 @@ class StateDetector:
             try:
                 new_state_enum = SystemState(new_state)
             except ValueError:
-                logger.warning(f"[STATE] Invalid transition target ignored: {new_state}")
+                logger.warning(
+                    f"[STATE] Invalid transition target ignored: {new_state}"
+                )
                 return
             if not self.authority.set_state(
-                new_state_enum, source=source, remote_session_active=remote_session_active
+                new_state_enum,
+                source=source,
+                remote_session_active=remote_session_active,
             ):
                 logger.info(
                     f"[STATE] Transition blocked by authority: "
@@ -416,7 +428,9 @@ class StateDetector:
                     if duration:
                         suffix = " (lock boundary)" if new_state == "locked" else ""
                         logger.info(f"Idle session completed: {duration:.1f}s{suffix}")
-                        if self.collector and hasattr(self.collector, "send_idle_event"):
+                        if self.collector and hasattr(
+                            self.collector, "send_idle_event"
+                        ):
                             try:
                                 self.collector.send_idle_event(duration)
                             except Exception as e:
@@ -449,7 +463,9 @@ class StateDetector:
                         else SystemState.UNKNOWN
                     )
                     new_state_enum = SystemState(new_state)
-                    self.on_state_change(prev_state_enum, new_state_enum, duration_seconds)
+                    self.on_state_change(
+                        prev_state_enum, new_state_enum, duration_seconds
+                    )
                 except Exception as e:
                     logger.error(f"[STATE] Callback error: {e}", exc_info=True)
 
@@ -613,14 +629,18 @@ class StateDetector:
             self._suspended = False
             logger.info("[STATE] System RESUME detected (OS Event)")
 
+            # ✅ CRITICAL FIX: Reconcile the sleep gap BEFORE performing any state transition.
+            # This ensures the gap is attributed to the gap counters (AWAY/LOCKED)
+            # rather than the old state (which would happen if we transitioned first).
+            self.screen_time_engine.mark_resume()
+
             # Reconcile final state based on lock status right after resume.
-            if self._is_session_locked() and not self._is_remote_session():
+            # RDP Logic Disabled: ignoring _is_remote_session()
+            # if self._is_session_locked() and not self._is_remote_session():
+            if self._is_session_locked():
                 self._transition("locked", source="os")
             else:
                 self._transition("active", source="os")
-
-            # End sleep gap handling window AFTER reconciliation so sleep gap is counted.
-            self.screen_time_engine.mark_resume()
 
             self._persist_current_state()
         except Exception as e:
@@ -637,33 +657,33 @@ class StateDetector:
                 logger.error(f"[STATE] Monitor error: {e}")
             time.sleep(5)
 
-    def _is_remote_session(self) -> bool:
-        """FIX #6: Check if current session is a remote desktop session"""
-        try:
-            # Method 1: Check GetSystemMetrics for remote session
-            SM_REMOTESESSION = 0x1000
-            is_remote = windll.user32.GetSystemMetrics(SM_REMOTESESSION) != 0
-            if is_remote:
-                logger.debug("[STATE] Remote session detected via GetSystemMetrics")
-                return True
+    # def _is_remote_session(self) -> bool:
+    #     """FIX #6: Check if current session is a remote desktop session"""
+    #     try:
+    #         # Method 1: Check GetSystemMetrics for remote session
+    #         SM_REMOTESESSION = 0x1000
+    #         is_remote = windll.user32.GetSystemMetrics(SM_REMOTESESSION) != 0
+    #         if is_remote:
+    #             logger.debug("[STATE] Remote session detected via GetSystemMetrics")
+    #             return True
 
-            # Method 2: Check session ID (0xFFFFFFFF = no console = remote)
-            try:
-                import win32ts
+    #         # Method 2: Check session ID (0xFFFFFFFF = no console = remote)
+    #         try:
+    #             import win32ts
 
-                session_id = win32ts.WTSGetActiveConsoleSessionId()
-                if session_id == 0xFFFFFFFF:
-                    logger.debug("[STATE] Remote session detected via WTS")
-                    return True
-            except ImportError:
-                pass  # win32ts not available
-            except Exception:
-                pass
+    #             session_id = win32ts.WTSGetActiveConsoleSessionId()
+    #             if session_id == 0xFFFFFFFF:
+    #                 logger.debug("[STATE] Remote session detected via WTS")
+    #                 return True
+    #         except ImportError:
+    #             pass  # win32ts not available
+    #         except Exception:
+    #             pass
 
-            return False
-        except Exception as e:
-            logger.debug(f"[STATE] Could not detect remote session: {e}")
-            return False  # Assume console session
+    #         return False
+    #     except Exception as e:
+    #         logger.debug(f"[STATE] Could not detect remote session: {e}")
+    #         return False  # Assume console session
 
     def set_foreground_app(self, app_name: str):
         """Update current foreground app (called by collector each tick)"""
@@ -685,17 +705,20 @@ class StateDetector:
             latest_unlock_hint = max(
                 self._last_wts_unlock_time, self._last_unlock_transition_time
             )
-            unlock_grace_active = latest_unlock_hint > 0 and (
-                now - latest_unlock_hint
-            ) < UNLOCK_GRACE_SECONDS
+            unlock_grace_active = (
+                latest_unlock_hint > 0
+                and (now - latest_unlock_hint) < UNLOCK_GRACE_SECONDS
+            )
 
             if not unlock_grace_active:
                 # Layer 1: Foreground app lock detection (Win11 fallback).
                 # Only trust collector-fed app data while it is fresh.
                 LOCK_APP_SAMPLE_MAX_AGE_SECONDS = 15
-                foreground_fresh = self._foreground_app_sample_time > 0 and (
-                    now - self._foreground_app_sample_time
-                ) <= LOCK_APP_SAMPLE_MAX_AGE_SECONDS
+                foreground_fresh = (
+                    self._foreground_app_sample_time > 0
+                    and (now - self._foreground_app_sample_time)
+                    <= LOCK_APP_SAMPLE_MAX_AGE_SECONDS
+                )
 
                 if (
                     foreground_fresh
@@ -706,22 +729,29 @@ class StateDetector:
                     return
 
                 # Layer 2: Desktop accessibility check (classic method)
-                remote_session_active = self._is_remote_session()
+                # RDP Logic Disabled: remote_session_active forced to False
+                # remote_session_active = self._is_remote_session()
+                remote_session_active = False
                 if self._is_session_locked() and not remote_session_active:
                     self._transition("locked", source="desktop")
                     return
             else:
-                remote_session_active = self._is_remote_session()
+                # remote_session_active = self._is_remote_session()
+                remote_session_active = False
 
             # If we reach here, neither lock detection triggered.
             # If currently locked, only OS unlock or remote-session activity may unlock.
             if self.authority.state == SystemState.LOCKED:
                 if remote_session_active:
-                    logger.info("[STATE] Exiting LOCKED due to active remote session")
-                    self._transition("active", source="remote", remote_session_active=True)
+                    # Logic commented out - RDP will not wake up the session
+                    # logger.info("[STATE] Exiting LOCKED due to active remote session")
+                    # self._transition("active", source="remote", remote_session_active=True)
+                    pass
                 elif not HAS_WIN32:
                     # Fallback mode: no WTS unlock events available, use polling unlock.
-                    logger.info("[STATE] Fallback unlock via polling (pywin32 unavailable)")
+                    logger.info(
+                        "[STATE] Fallback unlock via polling (pywin32 unavailable)"
+                    )
                     self._transition("active", source="os")
                 else:
                     logger.debug("[STATE] Staying LOCKED until OS unlock event")
@@ -881,10 +911,20 @@ class StateDetector:
     def _check_daily_boundary(self):
         """Trigger state-machine midnight rollover while preserving current state continuity."""
         try:
-            if self.screen_time_engine.check_daily_boundary():
+            crossed, final_totals = self.screen_time_engine.check_daily_boundary()
+            if crossed and final_totals:
                 logger.info(
                     f"[STATE] Daily boundary handled by state machine "
                     f"(state preserved: {self.current_state})"
+                )
+                # Store final totals to send via next heartbeat (for yesterday's final data)
+                self._final_totals_for_upload = final_totals
+                logger.info(
+                    f"[STATE] Final totals ready for upload: "
+                    f"A={final_totals.get('active_seconds', 0)}s, "
+                    f"I={final_totals.get('idle_seconds', 0)}s, "
+                    f"L={final_totals.get('locked_seconds', 0)}s, "
+                    f"W={final_totals.get('away_seconds', 0)}s"
                 )
         except Exception as e:
             logger.error(f"[STATE] Daily boundary check error: {e}", exc_info=True)
@@ -932,4 +972,3 @@ class StateDetector:
             logger.info("[STATE] Daily counters reset via state machine")
         except Exception as e:
             logger.error(f"[STATE] Error resetting state machine: {e}", exc_info=True)
-
