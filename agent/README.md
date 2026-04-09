@@ -1,4 +1,4 @@
-# 🛡️ SentinelEdge Agent v2.1.0
+# 🛡️ SentinelEdge Agent v2.4.0
 
 **Enterprise-grade endpoint monitoring agent for Windows**
 
@@ -364,6 +364,13 @@ rmdir /s /q "C:\ProgramData\SentinelEdge"
 ---
 
 ## 📜 Version History
+
+### v2.4.0 (2026-04-09)
+- ✅ Offline-first midnight span handling - spans persist to SQLite buffer
+- ✅ Server-side midnight span splitting for accurate daily totals
+- ✅ Cached BufferDB instance to prevent connection leaks
+- ✅ Comprehensive test suite for span handling (11 tests)
+- ✅ Idempotent span upload via `/api/v1/telemetry/screentime-spans`
 
 ### v2.1.0 (2026-01-01)
 - ⚡ Performance optimizations (SQLite WAL, adaptive polling)

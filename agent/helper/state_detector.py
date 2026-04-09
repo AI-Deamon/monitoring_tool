@@ -193,6 +193,10 @@ class StateDetector:
             agent_id=self.agent_id,
         )
 
+        # ✅ OFFLINE-FIRST: Cached BufferDB instance (avoids connection leaks)
+        self._buffer_db = None
+        self._buffer_db_lock = threading.Lock()
+
         # Check if pywin32 is available
         if not HAS_WIN32:
             logger.warning(
@@ -398,6 +402,9 @@ class StateDetector:
                 )
                 if span:
                     self.pending_spans.append(span)
+                    # ✅ OFFLINE-FIRST: Persist span to SQLite buffer immediately
+                    # This ensures spans survive midnight resets and offline periods
+                    self.persist_span_to_buffer(span)
 
             # PHASE 2: ONLY place time is calculated - call state machine
             # Map local state names to ScreenState enum
@@ -835,6 +842,125 @@ class StateDetector:
             spans = self.pending_spans.copy()
             self.pending_spans.clear()
             return spans
+
+    # ========================================================================
+    # SPAN PERSISTENCE TO SQLITE BUFFER (OFFLINE RESILIENCE)
+    # ========================================================================
+
+    def _get_buffer_db(self):
+        """
+        Lazy-init cached BufferDB instance.
+        Prevents connection leaks from creating new instances per span.
+        """
+        if self._buffer_db is not None:
+            return self._buffer_db
+        
+        with self._buffer_db_lock:
+            # Double-check after acquiring lock
+            if self._buffer_db is not None:
+                return self._buffer_db
+            
+            try:
+                from pathlib import Path
+                from core.buffer import BufferDB
+                
+                # Determine buffer path (typically ProgramData/SentinelEdge/buffer.db)
+                possible_paths = [
+                    Path("C:\\ProgramData\\SentinelEdge\\buffer.db"),
+                    Path("C:\\ProgramData\\SentinelEdge\\data\\buffer.db"),
+                ]
+                
+                # Add data_dir path if available
+                if hasattr(self, 'state_file') and self.state_file:
+                    possible_paths.insert(0, self.state_file.parent / "buffer.db")
+                
+                for path in possible_paths:
+                    if path.exists():
+                        self._buffer_db = BufferDB(path)
+                        logger.info(f"[SPAN] BufferDB initialized: {path}")
+                        return self._buffer_db
+                
+                logger.warning("[SPAN] Buffer database not found in any known location")
+                return None
+                
+            except Exception as e:
+                logger.error(f"[SPAN] Failed to initialize BufferDB: {e}", exc_info=True)
+                return None
+
+    def persist_span_to_buffer(self, span: dict) -> bool:
+        """
+        Persist a single span to SQLite buffer for offline resilience.
+        Ensures spans survive midnight resets and offline periods.
+        
+        Returns:
+            True if successfully persisted, False otherwise
+        """
+        try:
+            # Validate timestamps before persisting
+            start_time = span.get('start_time')
+            end_time = span.get('end_time')
+            if not start_time or not end_time:
+                logger.warning(f"[SPAN] Missing timestamps in span, skipping persist")
+                return False
+            
+            # Get cached buffer instance (no connection leaks)
+            buffer = self._get_buffer_db()
+            if not buffer:
+                logger.warning("[SPAN] Buffer database not available, skipping persist")
+                return False
+            
+            # Prepare span data with agent_id
+            span_data = {
+                'span_id': span.get('span_id'),
+                'agent_id': self.agent_id,
+                'state': span.get('state'),
+                'start_time': start_time,
+                'end_time': end_time,
+                'duration_seconds': span.get('duration_seconds'),
+                'created_at': span.get('created_at')
+            }
+            
+            success = buffer.store_state_span(span_data)
+            
+            if success:
+                logger.debug(
+                    f"[SPAN] Persisted to buffer: {span['state']} "
+                    f"{span['duration_seconds']}s (id={span['span_id'][:32]})"
+                )
+            else:
+                logger.error(f"[SPAN] Failed to store span in buffer (duplicate or error)")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"[SPAN] Failed to persist span to buffer: {e}", exc_info=True)
+            return False
+
+    def persist_all_pending_spans(self) -> int:
+        """
+        Persist all pending spans to SQLite buffer.
+        Called before midnight reset to ensure spans survive.
+        
+        Returns:
+            Number of spans successfully persisted
+        """
+        with self._state_lock:
+            if not self.pending_spans:
+                logger.debug("[SPAN] No pending spans to persist")
+                return 0
+            
+            persisted_count = 0
+            
+            for span in self.pending_spans:
+                if self.persist_span_to_buffer(span):
+                    persisted_count += 1
+            
+            logger.info(
+                f"[SPAN] Persisted {persisted_count}/{len(self.pending_spans)} "
+                f"spans to buffer"
+            )
+            
+            return persisted_count
 
     # ========================================================================
     # CRASH RECOVERY

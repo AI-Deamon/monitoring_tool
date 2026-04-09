@@ -3,7 +3,7 @@ Telemetry: State Spans (state-change, event, state_duration, screentime-spans, r
 """
 import logging
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from flask import request, jsonify, g
 from sqlalchemy import text
@@ -52,7 +52,7 @@ def telemetry_state_change():
         )
         db.session.add(state_change)
 
-        # DONE: Agent now handles Away classification. 
+        # DONE: Agent now handles Away classification.
         # Server simply stores what it receives.
 
         if raw_event:
@@ -103,6 +103,9 @@ def process_state_duration_event(payload: dict):
     """
     AUTHORITATIVE Event Handler (Step 367).
     Processes state_duration events as the SINGLE SOURCE OF TRUTH.
+    
+    ✅ OFFLINE-FIRST: Handles spans that cross midnight by splitting them.
+    This ensures accurate daily totals even when agents are offline for days.
     """
     agent_id = payload["agent_id"]
     short_id = short_agent_id(agent_id)
@@ -114,7 +117,32 @@ def process_state_duration_event(payload: dict):
         logger.info(f"[{short_id}] Dropping invalid event: {state} {duration}s")
         return jsonify({'status': 'ignored'}), 200
 
-    # Away-time classification (Step 367 rule: locked > 7200s -> away_seconds)
+    # ✅ OFFLINE-FIRST: Check if this is a span with explicit start/end times
+    # that may cross midnight boundary
+    start_time_str = payload.get("start_time")
+    end_time_str = payload.get("end_time")
+    
+    if start_time_str and end_time_str:
+        try:
+            start_time = parse_agent_time(start_time_str)
+            end_time = parse_agent_time(end_time_str)
+            
+            # Detect if span crosses midnight
+            if end_time.date() > start_time.date():
+                logger.info(
+                    f"[{short_id}] Detected midnight-crossing span: "
+                    f"{state} {start_time.strftime('%H:%M')} → {end_time.strftime('%H:%M')} "
+                    f"({duration:.0f}s)"
+                )
+                return _process_split_span(
+                    agent_id, short_id, state,
+                    start_time, end_time, duration
+                )
+        except Exception as e:
+            logger.warning(f"[{short_id}] Failed to parse span times: {e}")
+            # Fall through to normal processing if parsing fails
+    
+    # Normal case: span within single day (or legacy format without explicit times)
     delta_active = delta_idle = delta_locked = delta_away = 0
     # Agent is the source of truth for state classification.
     if state == "active":
@@ -127,7 +155,7 @@ def process_state_duration_event(payload: dict):
         delta_away = duration
 
     try:
-        timestamp = parse_agent_time(ts_str)
+        timestamp = parse_agent_time(ts_str) if ts_str else datetime.utcnow()
         db.session.execute(
             text("""
                 SELECT * FROM process_screentime_delta(
@@ -148,6 +176,126 @@ def process_state_duration_event(payload: dict):
     except Exception as e:
         db.session.rollback()
         logger.error(f"[{short_id}] process_state_duration ERROR: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+def _process_split_span(agent_id: str, short_id: str, state: str,
+                        start_time: datetime, end_time: datetime,
+                        total_duration: float):
+    """
+    Split a span that crosses midnight into two separate daily spans.
+    
+    Example:
+        Input: 7 PM (Day 1) → 10 AM (Day 2) = 15 hours Away
+        Output:
+            Day 1: 7 PM - 12 AM = 5 hours Away
+            Day 2: 12 AM - 10 AM = 10 hours Away
+    
+    This is critical for offline-first agents that buffer spans while
+    disconnected from the server.
+    
+    Returns:
+        Flask response with split results
+    """
+    try:
+        # Calculate midnight between start and end (in span's timezone)
+        midnight = datetime(
+            start_time.year, start_time.month, start_time.day,
+            tzinfo=start_time.tzinfo
+        ) + timedelta(days=1)
+        
+        # Calculate durations for each day
+        day1_duration = (midnight - start_time).total_seconds()
+        day2_duration = (end_time - midnight).total_seconds()
+        
+        # Sanity check: ensure split durations sum to total
+        assert abs((day1_duration + day2_duration) - total_duration) < 1.0, \
+            f"Split duration mismatch: {day1_duration} + {day2_duration} != {total_duration}"
+        
+        logger.info(
+            f"[{short_id}] Splitting midnight-crossing span: "
+            f"{state} {total_duration:.0f}s → "
+            f"Day1: {day1_duration:.0f}s ({start_time.strftime('%H:%M')}-{midnight.strftime('%H:%M')}), "
+            f"Day2: {day2_duration:.0f}s ({midnight.strftime('%H:%M')}-{end_time.strftime('%H:%M')})"
+        )
+        
+        # Classify state for Day 1
+        day1_active = day1_idle = day1_locked = day1_away = 0
+        if state == "active":
+            day1_active = day1_duration
+        elif state == "idle":
+            day1_idle = day1_duration
+        elif state == "locked":
+            day1_locked = day1_duration
+        elif state == "away":
+            day1_away = day1_duration
+        
+        # Classify state for Day 2
+        day2_active = day2_idle = day2_locked = day2_away = 0
+        if state == "active":
+            day2_active = day2_duration
+        elif state == "idle":
+            day2_idle = day2_duration
+        elif state == "locked":
+            day2_locked = day2_duration
+        elif state == "away":
+            day2_away = day2_duration
+        
+        # Insert Day 1 span
+        db.session.execute(
+            text("""
+                SELECT * FROM process_screentime_delta(
+                    :agent_id, :timestamp, :active, :idle, :locked, :state, :away
+                )
+            """),
+            {
+                "agent_id": agent_id,
+                "timestamp": start_time,
+                "active": int(day1_active),
+                "idle": int(day1_idle),
+                "locked": int(day1_locked),
+                "state": state,
+                "away": int(day1_away),
+            }
+        )
+        
+        # Insert Day 2 span
+        db.session.execute(
+            text("""
+                SELECT * FROM process_screentime_delta(
+                    :agent_id, :timestamp, :active, :idle, :locked, :state, :away
+                )
+            """),
+            {
+                "agent_id": agent_id,
+                "timestamp": midnight,
+                "active": int(day2_active),
+                "idle": int(day2_idle),
+                "locked": int(day2_locked),
+                "state": state,
+                "away": int(day2_away),
+            }
+        )
+        
+        db.session.commit()
+        
+        logger.info(
+            f"[{short_id}] Successfully split and processed midnight-crossing span: "
+            f"{state} ({day1_duration/3600:.1f}h + {day2_duration/3600:.1f}h)"
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'split': True,
+            'day1_seconds': int(day1_duration),
+            'day2_seconds': int(day2_duration),
+            'day1_date': start_time.date().isoformat(),
+            'day2_date': midnight.date().isoformat()
+        }), 200
+    
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[{short_id}] Failed to split midnight-crossing span: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

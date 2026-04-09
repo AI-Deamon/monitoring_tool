@@ -78,5 +78,6 @@ Desktop.ini
 .coverage
 htmlcov/
 
-agent/helper/__pycache__/collector.cpython-314.pyc
-agent/core/__pycache__/buffer.cpython-314.pyc
+graphify-out/cache
+server/graphify-out/cache
+server/graphify-out
