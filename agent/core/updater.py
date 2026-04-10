@@ -747,6 +747,15 @@ class AgentUpdater:
         if success:
             logger.info(f"[UPDATER] [OK] Self-test passed: {details}")
 
+            # Write version to config.json for redundant tracking
+            from datetime import datetime, timezone
+            self.config.current_version = version
+            self.config.last_update_time = datetime.now(timezone.utc).isoformat()
+            self.config.save_config()
+            logger.info(
+                f"[UPDATER] [OK] Version {version} written to config.json"
+            )
+
             # Report healthy to server
             self.report_health('healthy', version, previous, details)
 
