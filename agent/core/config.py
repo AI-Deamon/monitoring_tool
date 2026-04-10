@@ -468,6 +468,12 @@ class CoreConfig:
                 self.config["agent"]["agent_id"] = self.agent_id
                 self.config["agent"]["local_agent_key"] = self.local_agent_key
 
+                # Write version fields if available
+                if hasattr(self, 'current_version') and self.current_version:
+                    self.config["agent"]["current_version"] = self.current_version
+                if hasattr(self, 'last_update_time') and self.last_update_time:
+                    self.config["agent"]["last_update_time"] = self.last_update_time
+
                 if "authentication" not in self.config or not isinstance(self.config["authentication"], dict):
                     self.config["authentication"] = {}
 
