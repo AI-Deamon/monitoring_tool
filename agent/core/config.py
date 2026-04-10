@@ -174,7 +174,9 @@ class CoreConfig:
         self.agent_id = agent.get("agent_id", "") or self._load_authoritative_agent_id()
         self.local_agent_key = agent.get("local_agent_key", "") or self._load_authoritative_agent_key()
         self.agent_name = agent.get("agent_name", "") or platform.node()  # Custom name, defaults to hostname
-        
+        self.current_version = agent.get("current_version", "")
+        self.last_update_time = agent.get("last_update_time", "")
+
         # Update config if agent_id was loaded from file
         if not agent.get("agent_id"):
             config["agent"]["agent_id"] = self.agent_id
@@ -245,7 +247,7 @@ class CoreConfig:
         # Auto-update settings
         updates = config.get("updates", {})
         self.auto_update_enabled = updates.get("enabled", True)
-        self.update_check_interval = updates.get("check_interval", 21600)  # 6 hours
+        self.update_check_interval = updates.get("check_interval", 1800)  # 30 minutes
         self.update_signing_key = updates.get("signing_key", "")
         
         # Paths - use writable directory (handles admin/non-admin)
