@@ -123,8 +123,8 @@ def telemetry_domain_switch():
         total_seconds = safe_float(data.get('total_seconds', 0))
 
         ts_str = data.get('timestamp', datetime.now(timezone.utc).isoformat())
-        start_str = data.get('session_start', datetime.utcnow().isoformat())
-        end_str = data.get('session_end', datetime.utcnow().isoformat())
+        start_str = data.get('session_start', datetime.now(timezone.utc).isoformat())
+        end_str = data.get('session_end', datetime.now(timezone.utc).isoformat())
 
         timestamp_naive = parse_agent_timestamp(ts_str, agent_id)
         start_naive = parse_agent_timestamp(start_str, agent_id)
@@ -173,7 +173,7 @@ def telemetry_domain_switch():
                 failed_raw = server_models.RawEvent(
                     agent_id=agent_id, event_type='domain-switch',
                     sequence=data.get('sequence'), payload=json.dumps(data),
-                    received_at=datetime.utcnow(), processed=False, error=str(e)
+                    received_at=datetime.now(timezone.utc), processed=False, error=str(e)
                 )
                 db.session.add(failed_raw)
                 db.session.commit()

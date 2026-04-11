@@ -5,7 +5,7 @@ Runs sync functions to ensure data integrity.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from threading import Thread, Event
 import time
 from sqlalchemy import text
@@ -74,7 +74,7 @@ class BackgroundScheduler:
         """Main scheduler loop"""
         while self.running and not self.shutdown_event.is_set():
             try:
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 now_ts = time.time()
 
                 for task in self.tasks:
@@ -111,7 +111,7 @@ def sync_yesterday_data():
     """Sync yesterday's data to ensure aggregations are correct"""
     from extensions import db
 
-    yesterday = (datetime.utcnow() - timedelta(days=1)).date()
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
 
     try:
         logger.info(f"[SYNC] Running daily sync for {yesterday}")
@@ -166,9 +166,9 @@ def reprocess_failed_events():
 
     try:
         # Get failed events from last 24 hours (avoid retrying ancient failures)
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        cutoff = datetime.utcnow() - timedelta(hours=24)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
 
         failed_events = (
             server_models.RawEvent.query.filter(
@@ -259,7 +259,7 @@ def audit_data_integrity():
     import server_models
 
     try:
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
 
         # Get screen_time totals
         screen_times = server_models.ScreenTime.query.filter_by(date=today).all()
@@ -380,8 +380,8 @@ def check_stale_updates():
     import server_models
 
     try:
-        warn_cutoff = datetime.utcnow() - timedelta(minutes=30)
-        reset_cutoff = datetime.utcnow() - timedelta(minutes=60)
+        warn_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        reset_cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
 
         # Phase 1: Warn about agents stuck >30 min
         warn_agents = server_models.Agent.query.filter(
@@ -398,7 +398,7 @@ def check_stale_updates():
             )
             for agent in warn_agents[:10]:
                 minutes_stuck = int(
-                    (datetime.utcnow() - agent.last_update_check).total_seconds() / 60
+                    (datetime.now(timezone.utc) - agent.last_update_check).total_seconds() / 60
                 )
                 logger.warning(
                     f"[STALE-WATCHDOG]   {str(agent.agent_id)[:12]}... "
@@ -422,7 +422,7 @@ def check_stale_updates():
                 old_status = agent.update_status
                 old_target = agent.target_version
                 minutes_stuck = int(
-                    (datetime.utcnow() - agent.last_update_check).total_seconds() / 60
+                    (datetime.now(timezone.utc) - agent.last_update_check).total_seconds() / 60
                 )
                 agent.update_status = "up_to_date"
                 agent.target_version = None

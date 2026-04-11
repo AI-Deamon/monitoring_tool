@@ -253,19 +253,6 @@ class HelperMonitor:
 
         return True
 
-        elapsed = (
-            datetime.now(timezone.utc) - self.last_heartbeat_time
-        ).total_seconds()
-
-        if elapsed > self.heartbeat_timeout_seconds:
-            self.logger.warning(
-                f"[HelperMonitor] No heartbeat for {elapsed:.0f}s "
-                f"(timeout: {self.heartbeat_timeout_seconds}s)"
-            )
-            return False
-
-        return True
-
     def _attempt_restart(self, reason: str):
         """Attempt to restart Helper process"""
         # Check cooldown after max attempts
@@ -319,6 +306,22 @@ class HelperMonitor:
                 ["schtasks", *args], capture_output=True, text=True, timeout=30
             )
 
+        def _run_powershell(command: str):
+            return subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+
         try:
             # 1) End helper scheduled tasks first (stuck task instances are common after sleep/wake).
             for task_name in self.helper_task_names:
@@ -353,6 +356,82 @@ class HelperMonitor:
                     return True
                 self.logger.warning(
                     f"[HelperMonitor] schtasks /run failed for {task_name}: {result.stderr.strip()}"
+                )
+
+            # 4) PowerShell fallback for systems where schtasks /run is unreliable.
+            for task_name in self.helper_task_names:
+                ps_result = _run_powershell(f"Start-ScheduledTask -TaskName '{task_name}'")
+                if ps_result.returncode == 0:
+                    self.logger.info(
+                        f"[HelperMonitor] Helper restarted via Start-ScheduledTask: {task_name}"
+                    )
+                    return True
+                ps_error = (ps_result.stderr or ps_result.stdout).strip()
+                self.logger.warning(
+                    f"[HelperMonitor] Start-ScheduledTask failed for {task_name}: {ps_error}"
+                )
+
+            # 5) Fallback: create a transient INTERACTIVE on-demand task and run it.
+            helper_path = None
+            for exe_name in ("syshealth.exe", "sentinel_helper.exe"):
+                candidate = self.install_dir / exe_name
+                if candidate.exists():
+                    helper_path = candidate
+                    break
+
+            if helper_path:
+                transient_task = "SysHealthMon_OnDemand"
+                create_result = _run_schtasks(
+                    [
+                        "/create",
+                        "/tn",
+                        transient_task,
+                        "/tr",
+                        f"\"{helper_path}\"",
+                        "/sc",
+                        "once",
+                        "/st",
+                        "00:00",
+                        "/ru",
+                        "INTERACTIVE",
+                        "/it",
+                        "/rl",
+                        "limited",
+                        "/f",
+                    ]
+                )
+                if create_result.returncode == 0:
+                    run_result = _run_schtasks(["/run", "/tn", transient_task])
+                    # Cleanup task regardless of run result.
+                    _run_schtasks(["/delete", "/tn", transient_task, "/f"])
+                    if run_result.returncode == 0:
+                        self.logger.info(
+                            "[HelperMonitor] Helper restarted via transient on-demand task"
+                        )
+                        return True
+                    self.logger.warning(
+                        f"[HelperMonitor] Transient task run failed: {run_result.stderr.strip()}"
+                    )
+                else:
+                    self.logger.warning(
+                        "[HelperMonitor] Could not create transient helper task: "
+                        f"{create_result.stderr.strip()}"
+                    )
+
+            # 6) Last resort: direct launch. May run in service context on some systems.
+            if helper_path:
+                ps_result = _run_powershell(
+                    f"Start-Process '{helper_path}' "
+                    f"-WorkingDirectory '{self.install_dir}' -WindowStyle Hidden"
+                )
+                if ps_result.returncode == 0:
+                    self.logger.warning(
+                        "[HelperMonitor] Helper launched directly as last-resort fallback"
+                    )
+                    return True
+                ps_error = (ps_result.stderr or ps_result.stdout).strip()
+                self.logger.warning(
+                    f"[HelperMonitor] Direct Start-Process fallback failed: {ps_error}"
                 )
 
         except subprocess.TimeoutExpired:

@@ -14,7 +14,7 @@ import hashlib
 import logging
 import os
 from functools import wraps
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import request, jsonify, current_app, g
 import server_models
 from extensions import db
@@ -100,8 +100,8 @@ def generate_api_token(agent_id: str) -> str:
     """Generate JWT token for agent (legacy method)."""
     payload = {
         'agent_id': agent_id,
-        'iat': datetime.utcnow(),
-        'exp': datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS)
+        'iat': datetime.now(timezone.utc),
+        'exp': datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     logger.debug(f"[JWT] Generated token for agent {agent_id} with secret length: {len(JWT_SECRET)}")
@@ -211,7 +211,7 @@ def require_auth(fn):
             if not agent:
                 logger.warning(f"[AUTH] Invalid API key for agent: {agent_id}")
                 return jsonify({'error': 'Invalid API key'}), 401
-            
+
             # Update last_seen
             try:
                 agent.last_seen = datetime.utcnow()

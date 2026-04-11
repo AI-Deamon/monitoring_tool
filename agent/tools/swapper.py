@@ -243,6 +243,98 @@ def _set_helper_task_enabled_and_run(task_name: str) -> None:
     else:
         LOGGER.warning(f"Could not run helper task {task_name}: {err_run}")
 
+        # Fallback 1: PowerShell start path (works on some builds where schtasks /run fails).
+        ok_ps, out_ps, err_ps = _run_command(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                f"Start-ScheduledTask -TaskName '{task_name}'",
+            ],
+            timeout=25,
+        )
+        if ok_ps:
+            LOGGER.info(f"Helper task started via Start-ScheduledTask: {task_name}")
+            return
+        LOGGER.warning(
+            "Could not start helper task via Start-ScheduledTask "
+            f"{task_name}: {(err_ps or out_ps)}"
+        )
+
+        # Fallback 2: transient INTERACTIVE on-demand task.
+        install_dir = Path(__file__).resolve().parent.parent
+        helper_path = None
+        for exe_name in ("syshealth.exe", "sentinel_helper.exe"):
+            candidate = install_dir / exe_name
+            if candidate.exists():
+                helper_path = candidate
+                break
+
+        if helper_path:
+            transient_task = "SysHealthMon_OnDemand"
+            ok_create, _, err_create = _run_command(
+                [
+                    "schtasks",
+                    "/create",
+                    "/tn",
+                    transient_task,
+                    "/tr",
+                    f"\"{helper_path}\"",
+                    "/sc",
+                    "once",
+                    "/st",
+                    "00:00",
+                    "/ru",
+                    "INTERACTIVE",
+                    "/it",
+                    "/rl",
+                    "limited",
+                    "/f",
+                ],
+                timeout=25,
+            )
+            if ok_create:
+                ok_transient_run, _, err_transient_run = _run_command(
+                    ["schtasks", "/run", "/tn", transient_task], timeout=25
+                )
+                _run_command(
+                    ["schtasks", "/delete", "/tn", transient_task, "/f"], timeout=20
+                )
+                if ok_transient_run:
+                    LOGGER.info("Helper started via transient on-demand task")
+                    return
+                LOGGER.warning(
+                    "Transient helper task run failed: "
+                    f"{err_transient_run}"
+                )
+            else:
+                LOGGER.warning(f"Could not create transient helper task: {err_create}")
+
+            # Fallback 3: direct process launch.
+            ok_direct, out_direct, err_direct = _run_command(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    (
+                        f"Start-Process '{helper_path}' -WorkingDirectory "
+                        f"'{install_dir}' -WindowStyle Hidden"
+                    ),
+                ],
+                timeout=20,
+            )
+            if ok_direct:
+                LOGGER.warning("Helper started via direct Start-Process fallback")
+                return
+            LOGGER.warning(
+                "Direct helper launch failed: "
+                f"{(err_direct or out_direct)}"
+            )
+
 
 def _restart_service(install_dir: Path, service_name: str, mode: str) -> bool:
     """

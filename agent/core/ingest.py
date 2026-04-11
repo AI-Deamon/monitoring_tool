@@ -36,7 +36,7 @@ class ReplayProtectionCache:
 
     def is_valid(self, agent_id: str, timestamp: str, payload_hash: str) -> bool:
         """Check if request is valid (not replayed) and within time window"""
-        current_time = time.time()
+        current_time = datetime.now(timezone.utc).timestamp()
 
         # Clean up old entries periodically
         if current_time - self.last_cleanup > self.cleanup_interval:
@@ -53,6 +53,10 @@ class ReplayProtectionCache:
                 logger.warning(
                     f"Timestamp out of window: {time_diff}s > {self.window_seconds}s"
                 )
+                if time_diff > 30:
+                    logger.warning(
+                        f"Significant clock drift detected: {time_diff:.1f}s for agent {agent_id}"
+                    )
                 return False
 
             # Create cache key
@@ -79,7 +83,7 @@ class ReplayProtectionCache:
 
     def _cleanup(self):
         """Remove old entries from cache"""
-        current_time = time.time()
+        current_time = datetime.now(timezone.utc).timestamp()
         cutoff_time = current_time - self.window_seconds
 
         # Remove entries older than window
@@ -102,11 +106,57 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
     # ============================
     #   AUTH / SECURITY
     # ============================
-    def _verify_auth(self, request_data: dict) -> bool:
+    def _verify_auth(self, request_data: dict, raw_body: Optional[bytes] = None) -> bool:
         """
-        Verify request authorization.
-        Security Disabled: Always returns True to simplify communication.
+        Verify request authorization using HMAC-SHA256 signature.
+
+        The helper sends requests with an X-HMAC-Signature header containing
+        HMAC-SHA256(raw_body, shared_secret) as hex.
+
+        If no shared secret is configured, falls back to allowing the request
+        with a warning log for backward compatibility with older agents.
         """
+        # Read shared secret from config or environment
+        shared_secret = os.environ.get("HELPER_SHARED_SECRET", "")
+
+        if not shared_secret:
+            logger.warning(
+                "[_verify_auth] HELPER_SHARED_SECRET not configured, "
+                "allowing request for backward compatibility"
+            )
+            return True
+
+        # Get the HMAC signature from the request header
+        signature_header = self.headers.get("X-HMAC-Signature")
+        if not signature_header:
+            logger.error("[_verify_auth] Missing X-HMAC-Signature header")
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Missing signature"}).encode())
+            return False
+
+        if raw_body is None:
+            logger.error("[_verify_auth] No raw body provided for verification")
+            return False
+
+        # Compute expected HMAC-SHA256 of the raw request body
+        expected = hmac.new(
+            shared_secret.encode(), raw_body, hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature_header.lower(), expected.lower()):
+            logger.error(
+                f"[_verify_auth] Invalid HMAC signature: "
+                f"received={signature_header[:16]}..., expected={expected[:16]}..."
+            )
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Invalid signature"}).encode())
+            return False
+
+        logger.debug("[_verify_auth] HMAC signature verified successfully")
         return True
 
     def _check_basic_auth(self) -> bool:
@@ -541,7 +591,7 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
             logger.debug(f"Request data: {data}")
 
             # Authentication for POST only
-            if not self._verify_auth(data):
+            if not self._verify_auth(data, raw_body=body):
                 return self._send_error("Authentication failed", 401)
 
             # Routing

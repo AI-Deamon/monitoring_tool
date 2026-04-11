@@ -16,7 +16,7 @@ Usage:
 
 import logging
 import re
-from datetime import datetime, date, timedelta
+from datetime import datetime, timezone, date, timedelta
 
 import requests
 from extensions import db
@@ -304,7 +304,7 @@ def sync_lifecycle_data(products=None):
                     existing.is_lts = cycle_data.get('lts', False)
                     existing.latest_version = cycle_data.get('latest', '')
                     existing.reference_url = cycle_data.get('link', '')
-                    existing.synced_at = datetime.utcnow()
+                    existing.synced_at = datetime.now(timezone.utc)
                 else:
                     record = server_models.SoftwareLifecycle(
                         product_name=product_key,
@@ -317,7 +317,7 @@ def sync_lifecycle_data(products=None):
                         latest_version=cycle_data.get('latest', ''),
                         reference_url=cycle_data.get('link', ''),
                         source='endoflife.date',
-                        synced_at=datetime.utcnow()
+                        synced_at=datetime.now(timezone.utc)
                     )
                     db.session.add(record)
                 synced += 1
@@ -968,7 +968,7 @@ def _upsert_status(agent_id, product_name, installed_version, result):
         existing.eol_date = result.get('eol_date')
         existing.risk_score = result.get('risk_score', 0)
         existing.severity = result.get('severity', 'info')
-        existing.evaluated_at = datetime.utcnow()
+        existing.evaluated_at = datetime.now(timezone.utc)
     else:
         record = server_models.AssetLifecycleStatus(
             agent_id=agent_id,
@@ -979,7 +979,7 @@ def _upsert_status(agent_id, product_name, installed_version, result):
             eol_date=result.get('eol_date'),
             risk_score=result.get('risk_score', 0),
             severity=result.get('severity', 'info'),
-            evaluated_at=datetime.utcnow()
+            evaluated_at=datetime.now(timezone.utc)
         )
         db.session.add(record)
 

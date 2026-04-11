@@ -219,7 +219,7 @@ def store_raw_event(agent_id, event_type, payload, processed=False, error=None):
             event_type=event_type,
             sequence=payload.get('sequence'),
             payload=json.dumps(payload),
-            received_at=datetime.utcnow(),
+            received_at=datetime.now(timezone.utc),
             processed=processed,
             error=error
         )

@@ -376,8 +376,19 @@ class DataCollector:
                 totals = final_totals
                 # Clear the flag after use
                 self.state_detector._final_totals_for_upload = None
+                final_day = getattr(
+                    self.state_detector, "_final_totals_day_for_upload", None
+                )
+                self.state_detector._final_totals_day_for_upload = None
                 # Mark as final data so server stores in yesterday's date
                 heartbeat["screentime"]["is_final_day"] = True
+                if final_day:
+                    heartbeat["screentime"]["final_day_date"] = str(final_day)
+                # Persist cleared flags so restart cannot re-send stale final-day data.
+                try:
+                    self.state_detector._persist_current_state()
+                except Exception:
+                    pass
             else:
                 totals = self.state_detector.get_cumulative_totals()
 

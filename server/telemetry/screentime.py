@@ -111,25 +111,35 @@ def telemetry_screentime():
     raw_event = store_raw_event(agent_id, "screentime", data, processed=False)
 
     try:
-        ts_str = data.get("timestamp", datetime.utcnow().isoformat())
+        ts_str = data.get("timestamp", datetime.now(timezone.utc).isoformat())
         is_final_day = data.get("is_final_day", False)
+        final_day_date = data.get("final_day_date")
         logger.info(
             f"[{short_id}] [DIAG] screentime raw ts_str={ts_str!r}, "
             f"type={type(ts_str).__name__}, "
             f"active={data.get('active_seconds')}, idle={data.get('idle_seconds')}, "
             f"locked={data.get('locked_seconds')}, away={data.get('away_seconds')}, "
-            f"is_final_day={is_final_day}"
+            f"is_final_day={is_final_day}, final_day_date={final_day_date!r}"
         )
         ts_naive = parse_agent_timestamp(ts_str, agent_id)
 
-        # If this is final day data (from midnight boundary), use YESTERDAY's date
+        # If this is final-day data, prefer explicit day from agent.
         if is_final_day:
-            from datetime import timedelta
-
-            day = (ts_naive - timedelta(days=1)).date()
-            logger.info(
-                f"[{short_id}] [DIAG] Final day data → storing in yesterday: {day}"
-            )
+            resolved_day = None
+            if final_day_date:
+                try:
+                    resolved_day = datetime.fromisoformat(str(final_day_date)).date()
+                except Exception:
+                    logger.warning(
+                        f"[{short_id}] Invalid final_day_date={final_day_date!r}; "
+                        "falling back to timestamp-1day"
+                    )
+            if resolved_day is None:
+                from datetime import timedelta
+                resolved_day = (ts_naive - timedelta(days=1)).date()
+            day = resolved_day
+            ts_naive = datetime.combine(day, ts_naive.time())
+            logger.info(f"[{short_id}] [DIAG] Final day data -> storing in date={day}")
         else:
             day = ts_naive.date()
 
@@ -217,7 +227,7 @@ def telemetry_screentime():
                     event_type="screentime",
                     sequence=data.get("sequence"),
                     payload=json.dumps(data),
-                    received_at=datetime.utcnow(),
+                    received_at=datetime.now(timezone.utc),
                     processed=False,
                     error=str(e),
                 )
@@ -226,3 +236,4 @@ def telemetry_screentime():
             except:
                 pass
         return jsonify({"error": str(e)}), 500
+

@@ -60,7 +60,13 @@ def create_app():
     # SESSION CONFIGURATION (for dashboard auth)
     # ================================================================
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
-    app.config['SESSION_COOKIE_SECURE'] = False  # Set to True when using HTTPS
+    is_production = os.getenv('FLASK_ENV') == 'production'
+    app.config['SESSION_COOKIE_SECURE'] = is_production
+    if not is_production:
+        logging.getLogger(__name__).warning(
+            "Session cookies not secure (SESSION_COOKIE_SECURE=False). "
+            "Set FLASK_ENV=production for HTTPS."
+        )
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
@@ -127,7 +133,7 @@ def create_app():
         # Register Blueprints
         app.register_blueprint(api_bp, url_prefix='/api/v1')
         app.register_blueprint(telemetry_bp_v1, url_prefix='/api/v1/telemetry')
-        app.register_blueprint(telemetry_bp)  # 🔴 REQUIRED: No prefix for /telemetry/event
+        app.register_blueprint(telemetry_bp, url_prefix='/api/v1/telemetry')  # /api/v1/telemetry/event
         app.register_blueprint(dash_bp, url_prefix='/dashboard')
         app.register_blueprint(admin_classification_bp)  # Admin classification UI
         app.register_blueprint(auth_bp)  # Auth routes at /auth/*

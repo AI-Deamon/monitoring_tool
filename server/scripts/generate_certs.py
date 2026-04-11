@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import datetime
+from datetime import timezone
 import ipaddress
 from pathlib import Path
 from cryptography import x509
@@ -54,9 +55,9 @@ def generate_certs(output_dir="certs", hostname="localhost"):
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(timezone.utc)
     ).not_valid_after(
-        datetime.datetime.utcnow() + datetime.timedelta(days=3650)
+        datetime.datetime.now(timezone.utc) + datetime.timedelta(days=3650)
     ).add_extension(
         x509.BasicConstraints(ca=True, path_length=None), critical=True,
     ).sign(ca_key, hashes.SHA256())
@@ -83,9 +84,9 @@ def generate_certs(output_dir="certs", hostname="localhost"):
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(timezone.utc)
     ).not_valid_after(
-        datetime.datetime.utcnow() + datetime.timedelta(days=365)
+        datetime.datetime.now(timezone.utc) + datetime.timedelta(days=365)
     ).add_extension(
         x509.SubjectAlternativeName([x509.DNSName(hostname), x509.DNSName("localhost"), x509.IPAddress(ipaddress.IPv4Address("127.0.0.1"))]),
         critical=False,
@@ -113,9 +114,9 @@ def generate_certs(output_dir="certs", hostname="localhost"):
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(timezone.utc)
     ).not_valid_after(
-        datetime.datetime.utcnow() + datetime.timedelta(days=365)
+        datetime.datetime.now(timezone.utc) + datetime.timedelta(days=365)
     ).sign(ca_key, hashes.SHA256())
     
     save_cert(agent_cert, out_path / "agent.crt")

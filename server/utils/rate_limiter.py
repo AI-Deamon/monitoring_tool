@@ -3,7 +3,7 @@ Rate limiting for API endpoints to prevent abuse and ensure fair resource usage.
 """
 from functools import wraps
 from flask import request, jsonify, g
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import logging
 from collections import defaultdict
 import threading
@@ -58,7 +58,7 @@ class RateLimiter:
             (allowed: bool, remaining_requests: int, reset_time: datetime)
         """
         with self.lock:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             cutoff_time = now - timedelta(seconds=self.period_seconds)
             
             # Clean old requests
@@ -86,7 +86,7 @@ class RateLimiter:
         """Remove old entries to prevent unbounded memory growth."""
         with self.lock:
             if len(self.request_history) > max_keys:
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 cutoff_time = now - timedelta(seconds=self.period_seconds * 2)
                 
                 keys_to_delete = []
@@ -139,9 +139,9 @@ def rate_limit(limiter=None, key_func=None):
                     return jsonify({
                         'status': 'error',
                         'message': 'Rate limit exceeded',
-                        'retry_after': int((reset_time - datetime.utcnow()).total_seconds())
+                        'retry_after': int((reset_time - datetime.now(timezone.utc)).total_seconds())
                     }), 429
-                
+
                 # Store rate limit info in g for logging
                 g.rate_limit_remaining = remaining
                 
@@ -184,9 +184,9 @@ def rate_limit_by_agent(limiter=None):
                     return jsonify({
                         'status': 'error',
                         'message': 'Agent rate limit exceeded',
-                        'retry_after': int((reset_time - datetime.utcnow()).total_seconds())
+                        'retry_after': int((reset_time - datetime.now(timezone.utc)).total_seconds())
                     }), 429
-                
+
                 g.rate_limit_remaining = remaining
                 
             except Exception as e:
