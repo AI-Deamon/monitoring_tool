@@ -615,13 +615,16 @@ class ScreenTimeEngine:
             self.locked_seconds += final_locked
             self.away_seconds += final_away
 
-            # Now reset ONLY active and idle (fresh for new day)
-            # Keep locked/away data intact to be sent via heartbeat
+            # Now reset ALL counters for the new day.
+            # The accumulated locked/away values have been incorporated into
+            # final_totals_to_send (returned from check_daily_boundary) and will
+            # be flushed to the server via the next heartbeat. Resetting them
+            # here prevents cross-day contamination if the agent goes offline
+            # and cannot upload for multiple days.
             self.active_seconds = 0.0
             self.idle_seconds = 0.0
-            # DO NOT reset locked_seconds/away_seconds here -
-            # they contain yesterday's data that will be sent via next heartbeat
-            # The server will store them in yesterday's date
+            self.locked_seconds = 0.0
+            self.away_seconds = 0.0
 
             self.last_timestamp = time.time()
 

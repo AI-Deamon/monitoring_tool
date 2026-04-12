@@ -39,7 +39,7 @@ def telemetry_state_change():
     raw_event = store_raw_event(agent_id, 'state-change', data, processed=False)
 
     try:
-        ts_str = data.get('timestamp', datetime.utcnow().isoformat())
+        ts_str = data.get('timestamp', datetime.now(timezone.utc).isoformat())
         ts_naive = parse_agent_timestamp(ts_str, agent_id)
 
         previous_state = data.get('previous_state', 'unknown')
@@ -70,7 +70,7 @@ def telemetry_state_change():
                 failed_raw = server_models.RawEvent(
                     agent_id=agent_id, event_type='state-change',
                     sequence=data.get('sequence'), payload=json.dumps(data),
-                    received_at=datetime.utcnow(), processed=False, error=str(e)
+                    received_at=datetime.now(timezone.utc), processed=False, error=str(e)
                 )
                 db.session.add(failed_raw)
                 db.session.commit()
@@ -93,7 +93,9 @@ def telemetry_event():
     short_id = short_agent_id(agent_id)
 
     if event_type == 'state_duration_event' or event_type == 'state_duration':
-        return process_state_duration_event(data)
+        payload = dict(data or {})
+        payload["agent_id"] = str(agent_id)
+        return process_state_duration_event(payload)
 
     logger.info(f"[{short_id}] Received unknown event type: {event_type}")
     return jsonify({'status': 'ignored', 'message': f'Unknown event type: {event_type}'}), 200
@@ -107,7 +109,9 @@ def process_state_duration_event(payload: dict):
     ✅ OFFLINE-FIRST: Handles spans that cross midnight by splitting them.
     This ensures accurate daily totals even when agents are offline for days.
     """
-    agent_id = payload["agent_id"]
+    agent_id = payload.get("agent_id")
+    if not agent_id:
+        return jsonify({'error': 'Missing agent_id'}), 400
     short_id = short_agent_id(agent_id)
     state = payload.get("state")
     duration = safe_float(payload.get("duration_seconds", 0))
@@ -153,9 +157,12 @@ def process_state_duration_event(payload: dict):
         delta_locked = duration
     elif state == "away":
         delta_away = duration
+    else:
+        logger.info(f"[{short_id}] Dropping unknown state_duration state: {state}")
+        return jsonify({'status': 'ignored', 'reason': 'unknown_state'}), 200
 
     try:
-        timestamp = parse_agent_time(ts_str) if ts_str else datetime.utcnow()
+        timestamp = parse_agent_time(ts_str) if ts_str else datetime.now(timezone.utc)
         db.session.execute(
             text("""
                 SELECT * FROM process_screentime_delta(
@@ -322,6 +329,7 @@ def telemetry_screentime_spans():
     store_raw_event(agent_id, 'screentime-spans', data)
 
     stored_count = 0
+    duplicate_count = 0
     batch_earliest: Optional[datetime] = None
     errors = []
 
@@ -337,7 +345,7 @@ def telemetry_screentime_spans():
             end = parse_agent_timestamp(span['end_time'], agent_id)
             batch_earliest = pick_earliest_timestamp(batch_earliest, start, end)
 
-            db.session.execute(text("""
+            insert_result = db.session.execute(text("""
                 INSERT INTO screen_time_spans (
                     span_id, agent_id, state, start_time, end_time, duration_seconds
                 ) VALUES (
@@ -348,13 +356,22 @@ def telemetry_screentime_spans():
                 'state': span['state'], 'start': start, 'end': end,
                 'duration': int(span['duration_seconds'])
             })
-            stored_count += 1
+            if insert_result.rowcount and insert_result.rowcount > 0:
+                stored_count += 1
+            else:
+                duplicate_count += 1
 
         update_telemetry_time(agent_id, batch_earliest)
         db.session.commit()
 
+        failed_count = len(errors)
         return jsonify({
-            'status': 'success', 'count': stored_count,
+            'status': 'success',
+            'count': stored_count,
+            'stored': stored_count,
+            'duplicates': duplicate_count,
+            'rejected': failed_count,
+            'total': len(spans),
             'errors': errors if errors else None
         }), 200
 

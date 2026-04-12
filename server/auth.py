@@ -9,7 +9,7 @@ Roles:
 """
 
 from functools import wraps
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, g, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from extensions import db
@@ -389,8 +389,8 @@ def login():
         if user:
             # Check if account is locked
             if user.is_locked:
-                if user.locked_until and user.locked_until > datetime.utcnow():
-                    remaining = (user.locked_until - datetime.utcnow()).seconds // 60
+                if user.locked_until and user.locked_until > datetime.now(timezone.utc):
+                    remaining = (user.locked_until - datetime.now(timezone.utc)).seconds // 60
                     flash(f'Account is locked. Try again in {remaining} minutes.', 'danger')
                     logger.warning(f"[AUTH] Login attempt on locked account: {username}")
                     return render_template('auth/login.html')
@@ -417,7 +417,7 @@ def login():
                 
                 # Update user record
                 user.failed_login_count = 0
-                user.last_login = datetime.utcnow()
+                user.last_login = datetime.now(timezone.utc)
                 db.session.commit()
                 
                 logger.info(f"[AUTH] Login successful: {username} (role: {user.role})")
@@ -444,7 +444,7 @@ def login():
                 user.failed_login_count += 1
                 if user.failed_login_count >= MAX_FAILED_ATTEMPTS:
                     user.is_locked = True
-                    user.locked_until = datetime.utcnow() + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+                    user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
                     logger.warning(f"[AUTH] Account locked after {MAX_FAILED_ATTEMPTS} failed attempts: {username}")
                     flash(f'Account locked due to too many failed attempts. Try again in {LOCKOUT_DURATION_MINUTES} minutes.', 'danger')
                 else:

@@ -688,16 +688,18 @@ $results | ConvertTo-Json -Compress -Depth 3
         """
         Collect non-Microsoft scheduled tasks and flag risky ones.
         Filters out standard OS/vendor tasks by path prefix.
+        NOTE: Get-ScheduledTask requires Administrator privileges.
+        If the helper runs as a standard user, this will return empty results.
         """
         # DEBUG LOG - MAY BE REMOVED
         logger.info("[SECURITY] START Scheduled tasks collection")
-        
+
         indicators = []
 
         ps_script = r'''
 $results = @()
 try {
-    Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' } | ForEach-Object {
+    Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.State -ne 'Disabled' } | ForEach-Object {
         $task = $_
         $actions = @()
         foreach ($action in $task.Actions) {
@@ -723,23 +725,78 @@ try {
             }
         }
     }
-} catch {}
+} catch {
+    Write-Error "Get-ScheduledTask failed: $_"
+    exit 1
+}
+if ($results.Count -eq 0) {
+    Write-Output "NO_TASKS_FOUND"
+    exit 0
+}
 $results | ConvertTo-Json -Compress -Depth 4
 '''
 
         output = self._run_powershell(ps_script, timeout=45)
-        if not output:
-            logger.debug("[SECURITY] No scheduled task data returned")
-            return indicators
+        if not output or output.strip() == "NO_TASKS_FOUND":
+            # Fallback: try schtasks.exe which works without admin
+            logger.info("[SECURITY] PowerShell failed or empty, trying schtasks.exe fallback")
+            return self._collect_tasks_schtasks()
 
         try:
             tasks = json.loads(output)
             if isinstance(tasks, dict):
                 tasks = [tasks]
         except json.JSONDecodeError:
-            logger.warning("[SECURITY] Failed to parse scheduled task JSON")
+            logger.warning(f"[SECURITY] Failed to parse scheduled task JSON. Output: {output[:200]}")
             return indicators
 
+        return self._analyze_tasks(tasks)
+
+    def _collect_tasks_schtasks(self) -> List[SecurityIndicator]:
+        """Fallback: collect tasks via schtasks.exe (works without admin)"""
+        try:
+            result = subprocess.run(
+                ['schtasks', '/query', '/fo', 'CSV', '/v'],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode != 0:
+                logger.warning(f"[SECURITY] schtasks.exe failed: {result.stderr[:200]}")
+                return []
+
+            lines = result.stdout.strip().split('\n')
+            if len(lines) < 2:
+                logger.info("[SECURITY] No tasks found via schtasks.exe")
+                return []
+
+            import csv
+            import io
+            reader = csv.DictReader(io.StringIO(result.stdout))
+            tasks = []
+            for row in reader:
+                state = row.get('Status', '').strip().lower()
+                if state == 'disabled':
+                    continue
+                tasks.append({
+                    'TaskPath': row.get('TaskName', ''),
+                    'TaskName': row.get('TaskName', '').split('\\')[-1],
+                    'State': row.get('Status', ''),
+                    'Execute': row.get('Task To Run', ''),
+                    'Arguments': '',
+                    'Principal': row.get('Run As User', ''),
+                })
+
+            if tasks:
+                logger.info(f"[SECURITY] schtasks.exe found {len(tasks)} tasks")
+                return self._analyze_tasks(tasks)
+
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logger.warning(f"[SECURITY] schtasks.exe failed: {e}")
+
+        return []
+
+    def _analyze_tasks(self, tasks: List[Dict]) -> List[SecurityIndicator]:
+        """Analyze task list for security risks"""
+        indicators = []
         suspicious_count = 0
 
         for task in tasks:
@@ -751,13 +808,19 @@ $results | ConvertTo-Json -Compress -Depth 4
             if any(task_path.startswith(prefix) for prefix in MS_TASK_PREFIXES):
                 continue
 
-            actions = task.get('Actions', [])
-            if isinstance(actions, dict):
-                actions = [actions]
+            # Handle both PowerShell (Actions list) and schtasks (Execute string) formats
+            if 'Actions' in task:
+                actions = task.get('Actions', [])
+                if isinstance(actions, dict):
+                    actions = [actions]
+                action_items = [(a.get('Execute', ''), a.get('Arguments', '') or '') for a in actions]
+            else:
+                # schtasks format: single Execute + Arguments
+                exe = task.get('Execute', '')
+                args = task.get('Arguments', '') or ''
+                action_items = [(exe, args)]
 
-            for action in actions:
-                exe = action.get('Execute', '')
-                args = action.get('Arguments', '') or ''
+            for exe, args in action_items:
                 full_cmd = f"{exe} {args}".strip()
 
                 risk_score = 0

@@ -4,7 +4,7 @@ Password Reset Module
 Handles generation, validation, and usage of password reset tokens, as well as sending emails.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from flask import current_app, url_for
 import secrets
@@ -32,15 +32,15 @@ class PasswordResetToken(db.Model):
     @classmethod
     def cleanup_expired(cls):
         """Remove expired tokens"""
-        expired_tokens = cls.query.filter(cls.expires_at < datetime.utcnow()).all()
+        expired_tokens = cls.query.filter(cls.expires_at < datetime.now(timezone.utc)).all()
         for token in expired_tokens:
             db.session.delete(token)
         db.session.commit()
-    
+
     def is_valid(self):
         """Check if token is valid and not used"""
         return (
-            self.expires_at > datetime.utcnow() and 
+            self.expires_at > datetime.now(timezone.utc) and
             self.used_at is None
         )
 
@@ -56,7 +56,7 @@ class PasswordResetService:
         token = secrets.token_hex(cls.TOKEN_LENGTH)
         token_hash = cls._hash_token(token)
         
-        expires_at = datetime.utcnow() + timedelta(hours=cls.TOKEN_EXPIRY_HOURS)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=cls.TOKEN_EXPIRY_HOURS)
         
         reset_token = PasswordResetToken(
             user_id=user_id,
@@ -104,7 +104,7 @@ class PasswordResetService:
             db.update(PasswordResetToken)
             .where(PasswordResetToken.token_hash == token_hash_val)
             .where(PasswordResetToken.used_at.is_(None))
-            .values(used_at=datetime.utcnow())
+            .values(used_at=datetime.now(timezone.utc))
         )
         
         if result.rowcount == 0:

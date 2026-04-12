@@ -37,10 +37,12 @@ def utc_to_ist(utc_dt):
     ist_dt = utc_dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
     return ist_dt.isoformat()
 
+
 def get_ist_today():
     """Get current date in IST (UTC+5:30)"""
     ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     return ist_now.date()
+
 
 # ============================================================================
 # AUTHENTICATION IMPORTS
@@ -423,7 +425,7 @@ def api_overview():
                 target_date = get_ist_today()
         else:
             target_date = get_ist_today()
-        
+
         # 1. Agent Counts (Current State - ALWAYS Real-time)
         agent_query = server_models.Agent.query
 
@@ -1227,7 +1229,13 @@ def api_agents():
         result = []
         for agent in agents:
             # Status check
-            is_online = agent.last_seen and agent.last_seen >= five_min_ago
+            # Handle naive datetime if stored as naive vs aware
+            agent_last_seen = agent.last_seen
+            if agent_last_seen and agent_last_seen.tzinfo is None:
+                agent_last_seen = agent_last_seen.replace(tzinfo=timezone.utc)
+            # Also make five_min_ago timezone-aware for consistent comparison
+            five_min_ago_aware = five_min_ago.replace(tzinfo=timezone.utc)
+            is_online = agent_last_seen and agent_last_seen >= five_min_ago_aware
 
             # Screen time - From screen_time table (AGENT'S DAILY TOTALS - SOURCE OF TRUTH)
             screen_data = screen_time_map.get(
@@ -1258,9 +1266,14 @@ def api_agents():
                 # Agent is online - use live data
                 current_app = live.current_app
                 # Double-check: if live.last_seen is stale, override to offline
+                # Handle naive datetime from database (default=datetime.utcnow)
+                live_last_seen = live.last_seen
+                if live_last_seen and live_last_seen.tzinfo is None:
+                    live_last_seen = live_last_seen.replace(tzinfo=timezone.utc)
                 live_is_stale = (
-                    live.last_seen
-                    and (datetime.utcnow() - live.last_seen).total_seconds() > 300
+                    live_last_seen
+                    and (datetime.now(timezone.utc) - live_last_seen).total_seconds()
+                    > 300
                 )
                 current_state = (
                     "offline" if live_is_stale else (live.current_state or "active")
@@ -1271,6 +1284,16 @@ def api_agents():
                 current_app = None
                 current_state = "offline"
                 username = live.username if live else None
+
+            # Flag agents that are "online" but haven't sent telemetry in 10+ minutes
+            # Handle naive datetime if stored as naive
+            telemetry_time = agent.last_telemetry_time
+            if telemetry_time and telemetry_time.tzinfo is None:
+                telemetry_time = telemetry_time.replace(tzinfo=timezone.utc)
+            telemetry_stale = is_online and (
+                not telemetry_time
+                or (datetime.now(timezone.utc) - telemetry_time).total_seconds() > 600
+            )
 
             result.append(
                 {
@@ -1293,15 +1316,7 @@ def api_agents():
                     else None,
                     "operational_status": agent.operational_status or "NORMAL",
                     "status_reason": agent.status_reason,
-                    # Flag agents that are "online" but haven't sent telemetry in 10+ minutes
-                    "telemetry_stale": is_online
-                    and (
-                        not agent.last_telemetry_time
-                        or (
-                            datetime.utcnow() - agent.last_telemetry_time
-                        ).total_seconds()
-                        > 600
-                    ),
+                    "telemetry_stale": telemetry_stale,
                     # Agent Version & Update Control
                     "version": agent.version,
                     "target_version": agent.target_version,
@@ -1338,17 +1353,17 @@ def api_agent_screentime(agent_id):
     """Get agent screen time data (7-day history)."""
     try:
         # Get requested date or default to IST today
-        date_str = request.args.get('date')
+        date_str = request.args.get("date")
         if date_str:
             try:
-                target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
                 target_date = get_ist_today()
         else:
             target_date = get_ist_today()
 
         start_date = target_date - timedelta(days=6)
-        
+
         # Try to find by UUID first, then by numeric ID (for backwards compatibility)
         records = (
             server_models.ScreenTime.query.filter(
@@ -1383,7 +1398,7 @@ def api_agent_screentime(agent_id):
         for i in range(7):
             d = start_date + timedelta(days=i)
             # Use fixed Sun/Mon label format for chart
-            data['labels'].append(d.strftime('%a %d'))
+            data["labels"].append(d.strftime("%a %d"))
             rec = record_map.get(d)
             data["active"].append(rec.active_seconds if rec else 0)
             data["idle"].append(rec.idle_seconds if rec else 0)
@@ -1410,7 +1425,7 @@ def api_agent_apps(agent_id):
     try:
         date_str = request.args.get("date")
         if not date_str:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
         else:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
@@ -1474,9 +1489,14 @@ def api_agent_apps(agent_id):
 
         if live_status and live_status.current_app:
             # Only count as ongoing if last_seen is recent (within 2 minutes)
+            # Handle naive datetime if stored as naive
+            live_last_seen = live_status.last_seen
+            if live_last_seen and live_last_seen.tzinfo is None:
+                live_last_seen = live_last_seen.replace(tzinfo=timezone.utc)
             is_recent = (
-                live_status.last_seen
-                and (datetime.utcnow() - live_status.last_seen).total_seconds() < 120
+                live_last_seen
+                and (datetime.now(timezone.utc) - live_last_seen).total_seconds()
+                < 120
             )
 
             if is_recent:
@@ -1545,7 +1565,7 @@ def api_agent_domains(agent_id):
     try:
         date_str = request.args.get("date")
         if not date_str:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
         else:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
@@ -1610,9 +1630,14 @@ def api_agent_domains(agent_id):
 
         if live_status and live_status.current_domain:
             # Only count as ongoing if last_seen is recent (within 2 minutes)
+            # Handle naive datetime if stored as naive
+            live_last_seen = live_status.last_seen
+            if live_last_seen and live_last_seen.tzinfo is None:
+                live_last_seen = live_last_seen.replace(tzinfo=timezone.utc)
             is_recent = (
-                live_status.last_seen
-                and (datetime.utcnow() - live_status.last_seen).total_seconds() < 120
+                live_last_seen
+                and (datetime.now(timezone.utc) - live_last_seen).total_seconds()
+                < 120
             )
 
             if is_recent:
@@ -1825,15 +1850,17 @@ def api_agent_extended_inventory(agent_id):
             agent_id=agent.agent_id
         ).all()
         for ext in vscode_exts:
-            result['vscode_extensions'].append({
-                'extension_id': ext.extension_id,
-                'display_name': ext.display_name,
-                'version': ext.version,
-                'publisher': ext.publisher,
-                'install_path': ext.install_path,
-                'source': ext.source
-            })
-        
+            result["vscode_extensions"].append(
+                {
+                    "extension_id": ext.extension_id,
+                    "display_name": ext.display_name,
+                    "version": ext.version,
+                    "publisher": ext.publisher,
+                    "install_path": ext.install_path,
+                    "source": ext.source,
+                }
+            )
+
         # Browser Extensions
         browser_exts = server_models.BrowserExtension.query.filter_by(
             agent_id=agent.agent_id
@@ -2020,7 +2047,7 @@ def api_agent_system_visibility(agent_id):
         return jsonify({"error": str(e)}), 500
 
 
-@bp.route('/api/agent/<path:agent_id>/full-report', methods=['GET'])
+@bp.route("/api/agent/<path:agent_id>/full-report", methods=["GET"])
 @login_required
 @api_rate_limit
 def api_agent_full_report(agent_id):
@@ -2048,7 +2075,7 @@ def api_agent_full_report(agent_id):
                 target_date = get_ist_today()
         else:
             target_date = get_ist_today()
-        
+
         # Date range for queries
         start_dt = datetime.combine(target_date, datetime.min.time())
         end_dt = datetime.combine(target_date, datetime.max.time())
@@ -2153,21 +2180,21 @@ def api_agent_full_report(agent_id):
         first_seen = agent.first_activity_at
 
         agent_info = {
-            'agent_id': str(agent.agent_id),
-            'hostname': agent.hostname or 'Unknown',
-            'os': agent.os,
-            'version': agent.version,
-            'username': username,
-            'status': 'online' if is_online else 'offline',
-            'is_online': is_online,
-            'registered_at': utc_to_ist(agent.created_at),
-            'first_seen': utc_to_ist(first_seen) if first_seen else None,
-            'has_activity': bool(first_seen),
-            'first_seen_today': first_seen_today,
-            'last_seen_today': last_seen_today,
-            'total_tracked_seconds': total_tracked_seconds,
-            'last_seen': utc_to_ist(agent.last_seen),
-            'is_viewing_today': target_date == get_ist_today()
+            "agent_id": str(agent.agent_id),
+            "hostname": agent.hostname or "Unknown",
+            "os": agent.os,
+            "version": agent.version,
+            "username": username,
+            "status": "online" if is_online else "offline",
+            "is_online": is_online,
+            "registered_at": utc_to_ist(agent.created_at),
+            "first_seen": utc_to_ist(first_seen) if first_seen else None,
+            "has_activity": bool(first_seen),
+            "first_seen_today": first_seen_today,
+            "last_seen_today": last_seen_today,
+            "total_tracked_seconds": total_tracked_seconds,
+            "last_seen": utc_to_ist(agent.last_seen),
+            "is_viewing_today": target_date == get_ist_today(),
         }
 
         # ================================================================
@@ -2177,9 +2204,14 @@ def api_agent_full_report(agent_id):
         live_data = None
         if live_status and is_online:
             # Check if live data is stale (last_seen > 5 min ago)
+            # Handle naive datetime if stored as naive
+            live_last_seen = live_status.last_seen
+            if live_last_seen and live_last_seen.tzinfo is None:
+                live_last_seen = live_last_seen.replace(tzinfo=timezone.utc)
             live_is_stale = (
-                live_status.last_seen
-                and (datetime.utcnow() - live_status.last_seen).total_seconds() > 300
+                live_last_seen
+                and (datetime.now(timezone.utc) - live_last_seen).total_seconds()
+                > 300
             )
 
             friendly = server_models.get_friendly_app_name(live_status.current_app)
@@ -2376,14 +2408,19 @@ def api_agent_full_report(agent_id):
         )
 
         # Filter out internal domains
-        filtered_visits = [v for v in domain_visits if not server_models.is_internal_domain(v.domain)]
-        domain_visits_data = [{
-            'domain': v.domain,
-            'url': v.url,
-            'browser': v.browser,
-            'visited_at': v.visited_at.isoformat() if v.visited_at else None
-        } for v in filtered_visits]
-        
+        filtered_visits = [
+            v for v in domain_visits if not server_models.is_internal_domain(v.domain)
+        ]
+        domain_visits_data = [
+            {
+                "domain": v.domain,
+                "url": v.url,
+                "browser": v.browser,
+                "visited_at": v.visited_at.isoformat() if v.visited_at else None,
+            }
+            for v in filtered_visits
+        ]
+
         # ================================================================
         # 8. APP INVENTORY - FILTERED & CONSOLIDATED
         # ================================================================
@@ -2490,9 +2527,9 @@ def api_agent_activity_timeline(agent_id):
     try:
         date_str = request.args.get("date")
         if not date_str:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
             start_dt = datetime.combine(target_date, datetime.min.time())
-            end_dt = datetime.utcnow()
+            end_dt = datetime.now(timezone.utc)
         else:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             start_dt = datetime.combine(target_date, datetime.min.time())
@@ -2575,7 +2612,7 @@ def api_agent_domain_visits(agent_id):
     try:
         date_str = request.args.get("date")
         if not date_str:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
         else:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
@@ -2657,7 +2694,7 @@ def api_agent_app_sessions(agent_id):
     try:
         date_str = request.args.get("date")
         if not date_str:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
         else:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
 
@@ -2741,7 +2778,7 @@ def api_agent_today(agent_id):
     """
     try:
         today = get_ist_today()
-        
+
         # 1. Agent Info
         # Try to find agent by UUID first, then by numeric ID (for backwards compatibility)
         agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
@@ -2766,6 +2803,7 @@ def api_agent_today(agent_id):
         active_s = screen_time.active_seconds if screen_time else 0
         idle_s = screen_time.idle_seconds if screen_time else 0
         locked_s = screen_time.locked_seconds if screen_time else 0
+        away_s = (screen_time.away_seconds or 0) if screen_time else 0
 
         # 3. App Usage (with friendly names)
         apps = (
@@ -2840,8 +2878,12 @@ def api_agent_today(agent_id):
         ongoing = None
 
         if live_status and live_status.last_seen:
+            # Handle naive datetime if stored as naive
+            live_last_seen = live_status.last_seen
+            if live_last_seen and live_last_seen.tzinfo is None:
+                live_last_seen = live_last_seen.replace(tzinfo=timezone.utc)
             is_recent = (
-                datetime.utcnow() - live_status.last_seen
+                datetime.now(timezone.utc) - live_last_seen
             ).total_seconds() < 120
 
             if is_recent:
@@ -2897,7 +2939,8 @@ def api_agent_today(agent_id):
                     "active": active_s,
                     "idle": idle_s,
                     "locked": locked_s,
-                    "total": active_s + idle_s + locked_s,
+                    "away": away_s,
+                    "total": active_s + idle_s + locked_s + away_s,
                 },
                 "apps": app_data,
                 "domains_used": domains_used_data,
@@ -2962,7 +3005,13 @@ def get_agent_current_activity(agent_id):
             )
 
         # Check if recent (within 2 minutes)
-        is_recent = (datetime.utcnow() - live_status.last_seen).total_seconds() < 120
+        # Handle naive datetime from database (default=datetime.utcnow)
+        _live_ls = live_status.last_seen
+        if _live_ls and _live_ls.tzinfo is None:
+            _live_ls = _live_ls.replace(tzinfo=timezone.utc)
+        is_recent = (
+            datetime.now(timezone.utc) - _live_ls
+        ).total_seconds() < 120
 
         if not is_recent:
             return jsonify(
@@ -3008,7 +3057,9 @@ def get_agent_recent_activities(agent_id):
     Used by the activity timeline in the dashboard.
     """
     try:
-        date_str = request.args.get("date", datetime.utcnow().strftime("%Y-%m-%d"))
+        date_str = request.args.get(
+            "date", datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        )
         limit = int(request.args.get("limit", 10))
 
         # Parse date
@@ -3099,7 +3150,7 @@ def api_productivity_score():
         if date_str:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         else:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
 
         # Get total screen time for the date
         totals = (
@@ -3145,7 +3196,7 @@ def api_category_breakdown():
         if date_str:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         else:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
 
         # Initialize categories
         breakdown = {
@@ -3221,7 +3272,7 @@ def api_idle_analysis():
         if date_str:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         else:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
 
         # Initialize hourly data
         labels = [f"{h:02d}:00" for h in range(24)]
@@ -3276,7 +3327,7 @@ def api_activity_heatmap():
         days = int(request.args.get("days", 7))
         days = min(days, 30)  # Cap at 30 days
 
-        end_date = datetime.utcnow().date()
+        end_date = datetime.now(timezone.utc).date()
         start_date = end_date - timedelta(days=days - 1)
 
         # Initialize 7x24 grid (rows = days starting from start_date)
@@ -3372,7 +3423,7 @@ def api_app_categories():
         if date_str:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         else:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
 
         categories = {
             "productivity": 0,
@@ -3464,7 +3515,7 @@ def api_browser_usage():
         if date_str:
             target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         else:
-            target_date = datetime.utcnow().date()
+            target_date = datetime.now(timezone.utc).date()
 
         results = (
             db.session.query(
@@ -3593,8 +3644,11 @@ def api_stale_agents():
         stale_agents = []
         for agent_id, hostname, last_seen in stale:
             if last_seen:
+                _ls = last_seen
+                if _ls and _ls.tzinfo is None:
+                    _ls = _ls.replace(tzinfo=timezone.utc)
                 minutes_since = int(
-                    (datetime.utcnow() - last_seen).total_seconds() / 60
+                    (datetime.now(timezone.utc) - _ls).total_seconds() / 60
                 )
             else:
                 minutes_since = 999

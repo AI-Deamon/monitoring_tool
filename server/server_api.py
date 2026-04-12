@@ -122,7 +122,7 @@ def store_raw_event(agent_id, event_type, payload, processed=False, error=None):
             event_type=event_type,
             sequence=payload.get('sequence'),
             payload=json.dumps(payload),
-            received_at=datetime.utcnow(),
+            received_at=datetime.now(timezone.utc),
             processed=processed,
             error=error
         )
@@ -266,9 +266,9 @@ def register():
         # Always update local_agent_key if provided (supports re-installs)
         if payload.local_agent_key:
             existing.local_agent_key = payload.local_agent_key
-        
+
         existing.status = 'active'
-        existing.last_seen = datetime.now(timezone.utc)
+        existing.last_seen = datetime.utcnow()
         agent = existing
     else:
         # New registration
@@ -287,7 +287,7 @@ def register():
             # SEC-007: Store HASHED key in database
             api_key=api_key_hashed,
             status='active',
-            last_seen=datetime.now(timezone.utc)
+            last_seen=datetime.utcnow()
         )
         db.session.add(agent)
 
@@ -353,9 +353,9 @@ def inventory():
         try:
             timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
         except:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(timezone.utc)
     else:
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
     
     apps = data.get('apps', [])
     changes = data.get('changes', {})
@@ -489,7 +489,7 @@ def inventory():
                     event_type='inventory',
                     sequence=data.get('sequence'),
                     payload=json.dumps(data),
-                    received_at=datetime.utcnow(),
+                    received_at=datetime.now(timezone.utc),
                     processed=False,
                     error=str(e)
                 )
@@ -620,7 +620,7 @@ def heartbeat():
                         event_type='heartbeat',
                         sequence=payload.sequence if hasattr(payload, 'sequence') else None,
                         payload=json.dumps(payload.dict()),
-                        received_at=datetime.utcnow(),
+                        received_at=datetime.now(timezone.utc),
                         processed=False,
                         error=str(e)
                     )
@@ -629,7 +629,7 @@ def heartbeat():
                 except:
                     pass
 
-    server_time = datetime.utcnow().isoformat() + 'Z'
+    server_time = datetime.now(timezone.utc).isoformat() + 'Z'
     return jsonify({
         'status': 'ok',
         'server_time': server_time
@@ -816,7 +816,7 @@ def app_active():
         
         if status:
             if status.current_app != current_app:
-                status.session_start = datetime.utcnow()
+                status.session_start = datetime.now(timezone.utc)
             status.current_app = current_app
             status.window_title = window_title
             status.duration_seconds = duration
@@ -831,22 +831,22 @@ def app_active():
                 current_app=current_app,
                 window_title=window_title,
                 current_state=state,
-                session_start=datetime.utcnow(),
+                session_start=datetime.now(timezone.utc),
                 duration_seconds=duration,
-                last_seen=datetime.utcnow()
+                last_seen=datetime.now(timezone.utc)
             )
             db.session.add(status)
         
         db.session.commit()
         return jsonify({'status': 'ok'}), 200
-    
+
     except Exception as e:
         db.session.rollback()
         logger.error(f"App active error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@telemetry_bp.route("/telemetry/event", methods=["POST"])
+@telemetry_bp.route("/event", methods=["POST"])
 @require_auth
 def telemetry_event():
     """
@@ -863,8 +863,7 @@ def telemetry_event():
     if payload.get("event") == "state_duration":
         # Inject agent_id for the processor
         payload["agent_id"] = agent_id
-        process_state_duration_event(payload)
-        return jsonify({"status": "ok"}), 200
+        return process_state_duration_event(payload)
 
     return jsonify({"status": "ignored"}), 200
 
@@ -888,14 +887,14 @@ def app_switch():
     end_str = data.get('end_time')
     
     try:
-        start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00')) if start_str else datetime.utcnow()
+        start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00')) if start_str else datetime.now(timezone.utc)
     except:
-        start_time = datetime.utcnow()
-    
+        start_time = datetime.now(timezone.utc)
+
     try:
-        end_time = datetime.fromisoformat(end_str.replace('Z', '+00:00')) if end_str else datetime.utcnow()
+        end_time = datetime.fromisoformat(end_str.replace('Z', '+00:00')) if end_str else datetime.now(timezone.utc)
     except:
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
     
     duration = data.get('duration_seconds', 0)
     if not duration and start_time and end_time:
@@ -923,7 +922,7 @@ def app_switch():
         if app_usage_rec:
             app_usage_rec.duration_seconds += int(duration)
             app_usage_rec.session_count += 1
-            app_usage_rec.last_updated = datetime.utcnow()
+            app_usage_rec.last_updated = datetime.now(timezone.utc)
         else:
             app_usage_rec = server_models.AppUsage(
                 agent_id=agent_id,
@@ -994,7 +993,7 @@ def domain_active_batch():
             try:
                 start_ts = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
             except:
-                start_ts = datetime.utcnow()
+                start_ts = datetime.now(timezone.utc)
             
             # Convert to naive datetime for database
             start_naive = start_ts.replace(tzinfo=None) if start_ts.tzinfo else start_ts
@@ -1045,7 +1044,7 @@ def domain_active_batch():
                 # Update existing daily aggregate
                 usage_rec.duration_seconds += int(duration)
                 usage_rec.session_count += 1
-                usage_rec.last_updated = datetime.utcnow()
+                usage_rec.last_updated = datetime.now(timezone.utc)
                 if browser and not usage_rec.browser:
                     usage_rec.browser = browser
                 logger.debug(f"Updated DomainUsage: {domain} -> {usage_rec.duration_seconds}s total")
@@ -1102,7 +1101,7 @@ def merged_events():
                 try:
                     start_str = event.get('start')
                     end_str = event.get('end')
-                    start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00')) if start_str else datetime.utcnow()
+                    start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00')) if start_str else datetime.now(timezone.utc)
                     end_time = datetime.fromisoformat(end_str.replace('Z', '+00:00')) if end_str else None
                     
                     app_session = server_models.AppSession(
@@ -1121,7 +1120,7 @@ def merged_events():
             elif event_type == 'idle':
                 try:
                     start_str = event.get('start')
-                    timestamp = datetime.fromisoformat(start_str.replace('Z', '+00:00')) if start_str else datetime.utcnow()
+                    timestamp = datetime.fromisoformat(start_str.replace('Z', '+00:00')) if start_str else datetime.now(timezone.utc)
                     
                     state_change = server_models.StateChange(
                         agent_id=agent_id,
@@ -1153,7 +1152,7 @@ def merged_events():
                     event_type='merged-events',
                     sequence=data.get('sequence'),
                     payload=json.dumps(data),
-                    received_at=datetime.utcnow(),
+                    received_at=datetime.now(timezone.utc),
                     processed=False,
                     error=str(e)
                 )
@@ -1203,7 +1202,7 @@ def domains():
                 domain = domain_data
                 url = None
                 browser = None
-                visited_at = datetime.utcnow()
+                visited_at = datetime.now(timezone.utc)
             else:
                 domain = domain_data.get('domain')
                 url = domain_data.get('url')
@@ -1215,9 +1214,9 @@ def domains():
                         # Convert to naive datetime for DB comparison
                         visited_at = visited_at.replace(tzinfo=None) if visited_at.tzinfo else visited_at
                     except:
-                        visited_at = datetime.utcnow()
+                        visited_at = datetime.now(timezone.utc)
                 else:
-                    visited_at = datetime.utcnow()
+                    visited_at = datetime.now(timezone.utc)
             
             if not domain:
                 continue
@@ -1297,10 +1296,10 @@ def asset_hardware():
         if not agent:
             logger.warning(f"[ASSET {sid}] Unknown agent")
             return jsonify({'error': 'Unknown agent'}), 404
-        
+
         # Update last_seen
-        agent.last_seen = datetime.now(timezone.utc)
-        
+        agent.last_seen = datetime.utcnow()
+
         # Extract nested data structures
         identity = data.get('identity', {})
         hardware = data.get('hardware', {})
@@ -1764,7 +1763,7 @@ def _upsert_cli_tools(agent_id, tools):
             existing.version = tool.get('version')
             existing.source = tool.get('source')
             existing.publisher = tool.get('publisher')
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
         else:
             db.session.add(server_models.CLITool(
                 agent_id=agent_id,
@@ -1809,7 +1808,7 @@ def _upsert_hardware_drivers(agent_id, drivers):
             existing.device_class = driver.get('device_class')
             existing.is_signed = driver.get('is_signed', False)
             existing.signer = driver.get('signer')
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
         else:
             db.session.add(server_models.HardwareDriver(
                 agent_id=agent_id,
@@ -1848,7 +1847,7 @@ def _upsert_vscode_extensions(agent_id, extensions):
             existing.version = ext.get('version')
             existing.publisher = ext.get('publisher')
             existing.install_path = ext.get('install_path')
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
             existing.source = ext.get('source')
         else:
             db.session.add(server_models.VSCodeExtension(
@@ -1895,7 +1894,7 @@ def _upsert_browser_extensions(agent_id, extensions):
             existing.enabled = ext.get('enabled', True)
             existing.install_date = install_date
             existing.profile_path = ext.get('profile_path')
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
         else:
             db.session.add(server_models.BrowserExtension(
                 agent_id=agent_id,
@@ -1936,7 +1935,7 @@ def _upsert_application_plugins(agent_id, plugins):
             existing.publisher = plugin.get('publisher')
             existing.host_application = plugin.get('host_application')
             existing.enabled = plugin.get('enabled', True)
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
         else:
             db.session.add(server_models.ApplicationPlugin(
                 agent_id=agent_id,
@@ -1974,7 +1973,7 @@ def _upsert_portable_applications(agent_id, apps):
             existing.publisher = app.get('publisher')
             existing.detection_method = app.get('detection_method')
             existing.file_size_bytes = app.get('file_size_bytes')
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
         else:
             db.session.add(server_models.PortableApplication(
                 agent_id=agent_id,
@@ -2087,7 +2086,7 @@ def _upsert_windows_updates(agent_id, updates):
             existing.install_date = install_date or existing.install_date
             existing.result_code = update.get('result_code', existing.result_code)
             existing.is_pending = update.get('is_pending', existing.is_pending)
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
         else:
             db.session.add(server_models.WindowsUpdateRecord(
                 agent_id=agent_id,
@@ -2128,7 +2127,7 @@ def _upsert_software_metering(agent_id, entries):
             if last_used:
                 existing.last_used = last_used
             existing.source = entry.get('source', existing.source)
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
         else:
             db.session.add(server_models.SoftwareMeteringRecord(
                 agent_id=agent_id,
@@ -2164,7 +2163,7 @@ def _upsert_product_keys(agent_id, keys):
             existing.partial_key = partial
             existing.key_source = key.get('key_source', existing.key_source)
             existing.license_status = key.get('license_status', existing.license_status)
-            existing.last_updated = datetime.utcnow()
+            existing.last_updated = datetime.now(timezone.utc)
         else:
             db.session.add(server_models.ProductKeyRecord(
                 agent_id=agent_id,

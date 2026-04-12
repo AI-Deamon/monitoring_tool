@@ -106,13 +106,22 @@ class AgentUpdater:
         return Path(r'C:\Program Files\WinDiagSvc')
 
     def _read_current_version(self) -> str:
-        """Read current agent version from version.json."""
+        """Read current agent version from version.json, fallback to config.json."""
         try:
             if self.version_file.exists():
                 data = json.loads(self.version_file.read_text())
-                return data.get('version', '0.0.0')
+                version = data.get('version', '')
+                if version:
+                    return version
         except Exception as e:
             logger.warning(f"[UPDATER] Cannot read version.json: {e}")
+
+        # Fallback to config.json current_version field
+        config_version = getattr(self.config, 'current_version', '')
+        if config_version:
+            logger.info(f"[UPDATER] Using version from config.json: {config_version}")
+            return config_version
+
         return '0.0.0'
 
     @property
@@ -737,6 +746,15 @@ class AgentUpdater:
 
         if success:
             logger.info(f"[UPDATER] [OK] Self-test passed: {details}")
+
+            # Write version to config.json for redundant tracking
+            from datetime import datetime, timezone
+            self.config.current_version = version
+            self.config.last_update_time = datetime.now(timezone.utc).isoformat()
+            self.config.save_config()
+            logger.info(
+                f"[UPDATER] [OK] Version {version} written to config.json"
+            )
 
             # Report healthy to server
             self.report_health('healthy', version, previous, details)

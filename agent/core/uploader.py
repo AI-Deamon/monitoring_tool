@@ -945,7 +945,9 @@ class ServerUploader:
                     'idle_seconds': event.get('idle_seconds', 0),
                     'locked_seconds': event.get('locked_seconds', 0),
                     'away_seconds': event.get('away_seconds', 0),
-                    'current_state': event.get('current_state', 'active')
+                    'current_state': event.get('current_state', 'active'),
+                    'is_final_day': bool(event.get('is_final_day', False)),
+                    'final_day_date': event.get('final_day_date'),
                 }
                 
                 logger.info(

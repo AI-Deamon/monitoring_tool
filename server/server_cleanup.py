@@ -10,7 +10,7 @@ Run daily via cron or scheduler.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask
 from extensions import db
 from server_config import get_config
@@ -37,7 +37,7 @@ def cleanup_old_data():
     db.init_app(app)
     
     with app.app_context():
-        cutoff_date = datetime.utcnow().date() - timedelta(days=SESSION_RETENTION_DAYS)
+        cutoff_date = datetime.now(timezone.utc).date() - timedelta(days=SESSION_RETENTION_DAYS)
         cutoff_datetime = datetime.combine(cutoff_date, datetime.min.time())
         
         print(f"=== Data Cleanup ===")

@@ -402,14 +402,36 @@ def telemetry_screentime():
         if not ts_str:
             logger.error(f'[{short_id}] screentime REJECTED: missing timestamp')
             return jsonify({'error': 'Missing timestamp'}), 400
+
+        is_final_day = data.get('is_final_day', False)
+        final_day_date = data.get('final_day_date')
         logger.info(
             f"[{short_id}] [DIAG] screentime raw ts_str={ts_str!r}, "
             f"type={type(ts_str).__name__}, "
             f"active={data.get('active_seconds')}, idle={data.get('idle_seconds')}, "
-            f"locked={data.get('locked_seconds')}, away={data.get('away_seconds')}"
+            f"locked={data.get('locked_seconds')}, away={data.get('away_seconds')}, "
+            f"is_final_day={is_final_day}, final_day_date={final_day_date!r}"
         )
         ts_naive = parse_agent_timestamp(ts_str, agent_id)
-        day = ts_naive.date()
+
+        if is_final_day:
+            resolved_day = None
+            if final_day_date:
+                try:
+                    resolved_day = datetime.fromisoformat(str(final_day_date)).date()
+                except Exception:
+                    logger.warning(
+                        f"[{short_id}] Invalid final_day_date={final_day_date!r}; "
+                        "falling back to timestamp-1day"
+                    )
+            if resolved_day is None:
+                from datetime import timedelta
+                resolved_day = (ts_naive - timedelta(days=1)).date()
+            day = resolved_day
+            ts_naive = datetime.combine(day, ts_naive.time())
+            logger.info(f"[{short_id}] [DIAG] Final day data -> storing in date={day}")
+        else:
+            day = ts_naive.date()
 
         # Anomaly diagnostics only: detect strong regressions and overshoots from incoming totals.
         existing = server_models.ScreenTime.query.filter_by(agent_id=agent_id, date=day).first()
@@ -1070,13 +1092,32 @@ def telemetry_event():
     logger.info(f"[{short_id}] Received unknown event type: {event_type}")
     return jsonify({'status': 'ignored', 'message': f'Unknown event type: {event_type}'}), 200
 
+def handle_state_duration_event(agent_id, data):
+    """
+    HTTP wrapper for state-duration payloads.
+    Injects authenticated agent_id and returns a Flask response.
+    """
+    payload = dict(data or {})
+    payload["agent_id"] = str(agent_id)
+    return process_state_duration_event(payload)
+
+
+def handle_state_duration(agent_id, data):
+    """
+    Backward-compatible alias used by background reprocessing.
+    """
+    return handle_state_duration_event(agent_id, data)
+
+
 def process_state_duration_event(payload: dict):
     """
     AUTHORITATIVE Event Handler (Step 367).
     Processes state_duration events as the SINGLE SOURCE OF TRUTH.
     """
     from sqlalchemy import text
-    agent_id = payload["agent_id"]
+    agent_id = payload.get("agent_id")
+    if not agent_id:
+        return jsonify({"error": "Missing agent_id"}), 400
     short_id = short_agent_id(agent_id)
     state = payload.get("state")
     duration = safe_float(payload.get("duration_seconds", 0))
@@ -1084,8 +1125,9 @@ def process_state_duration_event(payload: dict):
     
     if not state or duration <= 0:
         logger.info(f"[{short_id}] Dropping invalid event: {state} {duration}s")
-        return
+        return jsonify({"status": "ignored"}), 200
 
+    delta_active = delta_idle = delta_locked = delta_away = 0
     # Agent is the source of truth for state classification.
     if state == "active":
         delta_active = duration
@@ -1095,10 +1137,13 @@ def process_state_duration_event(payload: dict):
         delta_locked = duration
     elif state == "away":
         delta_away = duration
+    else:
+        logger.info(f"[{short_id}] Dropping unknown state_duration state: {state}")
+        return jsonify({"status": "ignored", "reason": "unknown_state"}), 200
 
     try:
         # Step 4.3: IST Normalization
-        timestamp = parse_agent_time(ts_str)
+        timestamp = parse_agent_time(ts_str) if ts_str else datetime.now(get_server_tz())
         
         # Step 4.2: Call the additive procedure
         db.session.execute(
@@ -1126,10 +1171,12 @@ def process_state_duration_event(payload: dict):
         
         db.session.commit()
         logger.info(f"[{short_id}] Processed state_duration: {state} +{duration:.1f}s (IST: {timestamp.strftime('%H:%M')})")
+        return jsonify({"status": "success"}), 200
 
     except Exception as e:
         db.session.rollback()
         logger.error(f"[{short_id}] process_state_duration ERROR: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 # ============================================================================
@@ -1159,6 +1206,7 @@ def telemetry_screentime_spans():
     store_raw_event(agent_id, 'screentime-spans', data)
     
     stored_count = 0
+    duplicate_count = 0
     batch_earliest: Optional[datetime] = None
     errors = []
     
@@ -1178,7 +1226,7 @@ def telemetry_screentime_spans():
             
             # 3. Idempotent Insert
             # We use text() with ON CONFLICT for performance and correctness
-            db.session.execute(text("""
+            insert_result = db.session.execute(text("""
                 INSERT INTO screen_time_spans (
                     span_id, agent_id, state, start_time, end_time, duration_seconds
                 ) VALUES (
@@ -1192,7 +1240,10 @@ def telemetry_screentime_spans():
                 'end': end,
                 'duration': int(span['duration_seconds'])
             })
-            stored_count += 1
+            if insert_result.rowcount and insert_result.rowcount > 0:
+                stored_count += 1
+            else:
+                duplicate_count += 1
             
         update_telemetry_time(agent_id, batch_earliest)
         db.session.commit()
@@ -1200,6 +1251,10 @@ def telemetry_screentime_spans():
         return jsonify({
             'status': 'success',
             'count': stored_count,
+            'stored': stored_count,
+            'duplicates': duplicate_count,
+            'rejected': len(errors),
+            'total': len(spans),
             'errors': errors if errors else None
         }), 200
         
@@ -1250,8 +1305,8 @@ def register_root_telemetry_endpoints(app):
     def root_telemetry_screentime_spans():
         return telemetry_screentime_spans()
 
-    # @app.route('/telemetry/event', methods=['POST'])
-    # @require_auth
-    # def root_telemetry_event():
-    #     """Handled by telemetry_api blueprint in server_api.py (Step 5)"""
-    #     return telemetry_event()
+    @app.route('/telemetry/event', methods=['POST'])
+    @require_auth
+    def root_telemetry_event():
+        """Backward-compat alias: proxies to /api/v1/telemetry/event"""
+        return telemetry_event()

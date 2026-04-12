@@ -896,6 +896,7 @@ class BufferDB:
                     "is_final_day": event.get(
                         "is_final_day", False
                     ),  # For midnight boundary data
+                    "final_day_date": event.get("final_day_date"),
                 }
             else:
                 # Regular session-based events (app, idle, etc.)
@@ -986,6 +987,7 @@ class BufferDB:
                     event["is_final_day"] = state_data.get(
                         "is_final_day", False
                     )  # For midnight boundary
+                    event["final_day_date"] = state_data.get("final_day_date")
                     event["timestamp"] = start_time  # Use start_time as timestamp
 
                 results.append(event)

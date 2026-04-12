@@ -21,7 +21,7 @@ except ImportError:
 import ctypes
 from ctypes import Structure, windll, byref, sizeof, c_uint
 from ctypes import wintypes
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import threading
 import logging
@@ -162,6 +162,7 @@ class StateDetector:
 
         # NEW: Final totals for midnight boundary upload
         self._final_totals_for_upload = None  # Set at midnight, sent via next heartbeat
+        self._final_totals_day_for_upload = None  # YYYY-MM-DD (IST day being finalized)
 
         # NEW: Span generation
         self.pending_spans = []  # List of completed spans awaiting collection
@@ -218,6 +219,9 @@ class StateDetector:
         if persisted:
             gap_info = self.screen_time_engine.handle_startup(persisted)
             logger.info(f"[STATE] Startup gap handling: {gap_info}")
+
+        # Recover crash-safe helper state (pending final-day payload + interrupted span).
+        self._load_persisted_state()
 
     def _is_session_locked(self) -> bool:
         """Check if workstation is locked OR fast user switched (no lock event).
@@ -636,10 +640,13 @@ class StateDetector:
             self._suspended = False
             logger.info("[STATE] System RESUME detected (OS Event)")
 
-            # ✅ CRITICAL FIX: Reconcile the sleep gap BEFORE performing any state transition.
-            # This ensures the gap is attributed to the gap counters (AWAY/LOCKED)
-            # rather than the old state (which would happen if we transitioned first).
-            self.screen_time_engine.mark_resume()
+            # Reconcile elapsed suspend gap into screen-time counters BEFORE any
+            # transition/last-timestamp reset. This keeps cumulative totals aligned
+            # with state-change durations (especially long locked intervals).
+            try:
+                self.screen_time_engine.tick()
+            except Exception as e:
+                logger.error(f"[STATE] Resume gap reconciliation failed: {e}", exc_info=True)
 
             # Reconcile final state based on lock status right after resume.
             # RDP Logic Disabled: ignoring _is_remote_session()
@@ -648,6 +655,9 @@ class StateDetector:
                 self._transition("locked", source="os")
             else:
                 self._transition("active", source="os")
+
+            # Reset sleep marker after reconciliation + transition.
+            self.screen_time_engine.mark_resume()
 
             self._persist_current_state()
         except Exception as e:
@@ -977,6 +987,20 @@ class StateDetector:
             with open(self.state_file, "r") as f:
                 data = json.load(f)
 
+            # Recover pending final-day totals (midnight rollover) if present.
+            pending_final = data.get("final_totals_for_upload")
+            pending_day = data.get("final_totals_day_for_upload")
+            if isinstance(pending_final, dict) and pending_day:
+                self._final_totals_for_upload = pending_final
+                self._final_totals_day_for_upload = str(pending_day)
+                logger.info(
+                    f"[RECOVERY] Restored pending final-day totals for {self._final_totals_day_for_upload}: "
+                    f"A={pending_final.get('active_seconds', 0)} "
+                    f"I={pending_final.get('idle_seconds', 0)} "
+                    f"L={pending_final.get('locked_seconds', 0)} "
+                    f"W={pending_final.get('away_seconds', 0)}"
+                )
+
             # 1. Recover Current Session Span
             if "current_state" in data and "session_start" in data:
                 prev_state = data["current_state"]
@@ -1024,6 +1048,8 @@ class StateDetector:
                 "session_start": self._last_state_change_time,
                 "date": datetime.now().date().isoformat(),
                 "timestamp": time.time(),
+                "final_totals_for_upload": self._final_totals_for_upload,
+                "final_totals_day_for_upload": self._final_totals_day_for_upload,
             }
             with open(self.state_file, "w") as f:
                 json.dump(data, f)
@@ -1045,6 +1071,12 @@ class StateDetector:
                 )
                 # Store final totals to send via next heartbeat (for yesterday's final data)
                 self._final_totals_for_upload = final_totals
+                self._final_totals_day_for_upload = (
+                    datetime.now(timezone.utc).astimezone(
+                        timezone(timedelta(hours=5, minutes=30))
+                    ).date()
+                    - timedelta(days=1)
+                ).isoformat()
                 logger.info(
                     f"[STATE] Final totals ready for upload: "
                     f"A={final_totals.get('active_seconds', 0)}s, "
@@ -1052,6 +1084,7 @@ class StateDetector:
                     f"L={final_totals.get('locked_seconds', 0)}s, "
                     f"W={final_totals.get('away_seconds', 0)}s"
                 )
+                self._persist_current_state()
         except Exception as e:
             logger.error(f"[STATE] Daily boundary check error: {e}", exc_info=True)
 

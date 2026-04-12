@@ -158,7 +158,7 @@ def _write_update_history(agent_id: str, event: str, version: str, details: str 
         if not agent:
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         history = server_models.UpdateHistory(
             agent_id=agent_id,
             from_version=agent.version,
@@ -218,7 +218,7 @@ def _is_within_update_window(policy) -> bool:
         tz = pytz.timezone(policy.update_window_tz or 'UTC')
         now_local = datetime.now(tz).time()
     except Exception:
-        now_local = datetime.utcnow().time()
+        now_local = datetime.now(timezone.utc).time()
 
     start = policy.update_window_start
     end = policy.update_window_end
@@ -266,6 +266,17 @@ def get_latest_version():
                     agent.last_update_error == CLEAR_FAILED_SWAP_SENTINEL
                 )
                 agent.last_update_check = datetime.utcnow()
+
+                # FIX 3: Update agent's current version on every poll
+                # This keeps the dashboard accurate between updates
+                if current_ver and current_ver != 'unknown':
+                    if agent.version != current_ver:
+                        agent.version = current_ver
+                        logger.debug(
+                            f"[UPDATES] Updated agent.version = {current_ver} "
+                            f"for agent={agent_id}"
+                        )
+
                 # Clear force flag after capturing
                 if agent.force_update_check:
                     agent.force_update_check = False
@@ -779,7 +790,7 @@ def update_policy():
         if 'update_window_tz' in data:
             policy.update_window_tz = data['update_window_tz']
 
-        policy.updated_at = datetime.utcnow()
+        policy.updated_at = datetime.now(timezone.utc)
 
         db.session.commit()
         logger.info(f"[UPDATES] Policy updated: {data}")
@@ -866,8 +877,11 @@ def get_stale_updates():
         for agent in stale_agents:
             minutes_stuck = 0
             if agent.last_update_check:
+                _luc = agent.last_update_check
+                if _luc.tzinfo is None:
+                    _luc = _luc.replace(tzinfo=timezone.utc)
                 minutes_stuck = int(
-                    (datetime.utcnow() - agent.last_update_check).total_seconds() / 60
+                    (datetime.now(timezone.utc) - _luc).total_seconds() / 60
                 )
             result.append({
                 'agent_id': str(agent.agent_id),

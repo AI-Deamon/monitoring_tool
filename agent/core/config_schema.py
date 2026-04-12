@@ -22,7 +22,9 @@ CONFIG_SCHEMA_V2 = {
         "fields": {
             "agent_id": {"type": str, "required": True, "default": ""},
             "agent_name": {"type": str, "required": False, "default": ""},  # Custom display name
-            "local_agent_key": {"type": str, "required": True, "default": ""}
+            "local_agent_key": {"type": str, "required": True, "default": ""},
+            "current_version": {"type": str, "required": False, "default": ""},
+            "last_update_time": {"type": str, "required": False, "default": ""}
         }
     },
     # Authentication section - populated after registration
@@ -124,7 +126,7 @@ CONFIG_SCHEMA_V2 = {
         "required": False,
         "fields": {
             "enabled": {"type": bool, "required": False, "default": True},
-            "check_interval": {"type": int, "required": False, "default": 21600, "min": 60},
+            "check_interval": {"type": int, "required": False, "default": 1800, "min": 60},  # 30 minutes
             "signing_key": {"type": str, "required": False, "default": ""}
         }
     }
@@ -382,7 +384,24 @@ class ConfigMigrator:
         # Keep legacy fields at root for backward compatibility
         new_config["api_key"] = api_key
         new_config["api_token"] = api_key
-        
+
+        # Preserve any top-level dict sections from old config that the
+        # migration doesn't explicitly handle (e.g., updates, performance).
+        # For sections present in both old and new, merge old values on top
+        # of defaults so user overrides survive migration.
+        known_top_level_keys = {
+            "version", "agent", "authentication", "server", "core", "helper",
+            "thresholds", "retry", "dynamic_reload", "updates", "performance",
+        }
+        for key, value in old_config.items():
+            if key in known_top_level_keys and isinstance(value, dict):
+                # Merge this section: defaults first, then user values on top
+                if key in new_config and isinstance(new_config[key], dict):
+                    new_config[key] = {**new_config[key], **value}
+            elif key not in known_top_level_keys and isinstance(value, dict):
+                # Unknown section — just carry it through
+                new_config[key] = value
+
         logger.info("Migration complete")
         return new_config
     

@@ -99,15 +99,15 @@ class HeartbeatAggregator:
     
     def _process_screentime(self, agent_id: str, heartbeats: List[Dict]):
         """
-        ✅ PHASE 3: Router only - reads cumulative totals from state machine
-        
+        PHASE 3: Router only - reads cumulative totals from state machine.
+
         Process cumulative screentime from heartbeats.
-        
+
         CRITICAL: Helper sends CUMULATIVE totals (10, 20, 30, 40, 50, 60).
         We must take the LATEST value (60), NOT sum them (210).
-        
+
         The server uses GREATEST() to handle cumulative daily totals.
-        
+
         DATA FLOW:
         1. state_machine.py calculates time (ONLY place)
         2. state_detector.get_cumulative_totals() reads from state_machine
@@ -118,66 +118,80 @@ class HeartbeatAggregator:
         """
         if not heartbeats:
             return
-        
-        # Take LATEST cumulative values from the batch
-        # (Helper sends cumulative totals, not incremental deltas)
-        latest_hb = heartbeats[-1]
-        hb = latest_hb['data']
-        screentime = hb.get('screentime', {})
-        
-        # DIAGNOSTIC: Log exactly what we read from the heartbeat
-        logger.info(
-            f"[DIAG] Aggregator screentime from heartbeat: "
-            f"keys={list(screentime.keys())}, "
-            f"active={screentime.get('active_seconds', 'MISSING')}, "
-            f"idle={screentime.get('idle_seconds', 'MISSING')}, "
-            f"locked={screentime.get('locked_seconds', 'MISSING')}, "
-            f"ts={hb.get('timestamp', 'MISSING')}"
-        )
-        
-        # Extract session_start for reset detection
-        # When agent restarts, session_start changes → server resets GREATEST() logic
-        session_start = screentime.get('session_start')
-        
-        # Extract cumulative totals (already calculated by state_machine.py)
-        # NO MATH HERE - just reading and routing
-        cumulative_active = screentime.get('active_seconds', 0)
-        cumulative_idle = screentime.get('idle_seconds', 0)
-        cumulative_locked = screentime.get('locked_seconds', 0)
-        cumulative_away = screentime.get('away_seconds', 0)
-        
-        # Get metadata from latest heartbeat (strict - no fallback to now())
-        latest_timestamp = hb.get('timestamp')
-        if not latest_timestamp:
-             logger.warning(f"[AGGREGATOR] Heartbeat {latest_hb['id']} missing timestamp, skipping screentime")
-             return
-        username = hb.get('username', 'unknown')
-        
-        # Read system_state directly (single authority — no fallback)
-        current_state = hb.get('system_state', 'active')
-        
-        # Only store if there's actual time to report
-        if cumulative_active == 0 and cumulative_idle == 0 and cumulative_locked == 0 and cumulative_away == 0:
-            logger.info(f"[DIAG] Aggregator: all screentime values are 0, SKIPPING event")
+
+        def _build_screentime_event(hb_record: Dict) -> Dict:
+            hb = hb_record.get("data", {})
+            screentime = hb.get("screentime", {})
+
+            return {
+                "agent_id": agent_id,
+                "username": hb.get("username", "unknown"),
+                "type": "screentime",
+                "timestamp": hb.get("timestamp"),
+                "session_start": screentime.get("session_start"),
+                "active_seconds": screentime.get("active_seconds", 0),
+                "idle_seconds": screentime.get("idle_seconds", 0),
+                "locked_seconds": screentime.get("locked_seconds", 0),
+                "away_seconds": screentime.get("away_seconds", 0),
+                "current_state": hb.get("system_state", "active"),
+                "is_final_day": bool(screentime.get("is_final_day", False)),
+                "final_day_date": screentime.get("final_day_date"),
+            }
+
+        latest_non_final = None
+        final_day_events: List[Dict] = []
+
+        # Preserve every final-day rollover payload and the latest non-final payload.
+        for hb_record in heartbeats:
+            hb = hb_record.get("data", {})
+            screentime = hb.get("screentime", {})
+            if not screentime:
+                continue
+
+            event = _build_screentime_event(hb_record)
+            if event["is_final_day"]:
+                final_day_events.append(event)
+            else:
+                latest_non_final = event
+
+        if not final_day_events and latest_non_final is None:
             return
-        
-        # Create event for uploader with CUMULATIVE values (router only)
-        # Server uses GREATEST() for same session, REPLACE for new session
-        event = {
-            'agent_id': agent_id,
-            'username': username,
-            'type': 'screentime',
-            'timestamp': latest_timestamp,
-            'session_start': session_start,
-            'active_seconds': cumulative_active,
-            'idle_seconds': cumulative_idle,
-            'locked_seconds': cumulative_locked,
-            'away_seconds': cumulative_away,
-            'current_state': current_state
-        }
-        
-        self.buffer.store_merged_event(event)
-    
+
+        events_to_store = final_day_events.copy()
+        if latest_non_final is not None:
+            events_to_store.append(latest_non_final)
+
+        for event in events_to_store:
+            if not event.get("timestamp"):
+                logger.warning(
+                    "[AGGREGATOR] Heartbeat missing timestamp, skipping screentime event"
+                )
+                continue
+
+            # Skip empty non-final payloads to reduce noise.
+            if (
+                not event.get("is_final_day")
+                and event.get("active_seconds", 0) == 0
+                and event.get("idle_seconds", 0) == 0
+                and event.get("locked_seconds", 0) == 0
+                and event.get("away_seconds", 0) == 0
+            ):
+                logger.info(
+                    "[DIAG] Aggregator: non-final screentime values are all 0, skipping"
+                )
+                continue
+
+            logger.info(
+                f"[DIAG] Aggregator screentime: "
+                f"A={event.get('active_seconds', 0)} "
+                f"I={event.get('idle_seconds', 0)} "
+                f"L={event.get('locked_seconds', 0)} "
+                f"W={event.get('away_seconds', 0)} "
+                f"is_final_day={event.get('is_final_day', False)} "
+                f"final_day_date={event.get('final_day_date')}"
+            )
+            self.buffer.store_merged_event(event)
+
     def _merge_app_sessions(self, agent_id: str, heartbeats: List[Dict]):
         """Merge app foreground sessions into events"""
         if not heartbeats:
@@ -294,3 +308,4 @@ class HeartbeatAggregator:
                     'heartbeat_count': 1
                 }
                 self.buffer.store_merged_event(event)
+

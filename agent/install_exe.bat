@@ -617,20 +617,17 @@ if %errorlevel% equ 0 (
 )
 
 :: ============================================================================
-:: STEP 14: Create Helper Task (Stealth Name, Per-User Logon Trigger)
+:: STEP 14: Create Helper Task (Stealth Name, Interactive User Logon Trigger)
 :: ============================================================================
 echo.
-echo [INFO] Creating helper task for current user...
-
-:: Get current logged-in user for task principal
-for /f "tokens=*" %%U in ('powershell -Command "$env:USERNAME"') do set "CURRENT_USER=%%U"
-echo [INFO] Task will run as user: %CURRENT_USER%
+echo [INFO] Creating helper task for interactive users...
 
 :: Use PowerShell for reliable task creation
 set "PS_SCRIPT=%TEMP%\create_helper.ps1"
+set "PS_LOG=%TEMP%\create_helper.log"
 
 (
-echo # Create Helper task that runs when current user logs in
+echo # Create Helper task that runs when any interactive user logs in
 echo.
 echo $helper = "%INSTALL_DIR%\%HELPER_EXE%"
 echo $workdir = "%INSTALL_DIR%"
@@ -638,11 +635,12 @@ echo.
 echo # Action: Run helper EXE directly
 echo $action = New-ScheduledTaskAction -Execute $helper -WorkingDirectory $workdir
 echo.
-echo # Trigger: On current user logon
-echo $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+echo # Trigger: On any user logon
+echo $trigger = New-ScheduledTaskTrigger -AtLogOn
 echo.
-echo # Principal: Run as current user ^(Interactive logon^)
-echo $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+echo # Principal: Built-in Users group ^(S-1-5-32-545^)
+echo # This avoids account name/SID resolution issues on newer Windows builds.
+echo $principal = New-ScheduledTaskPrincipal -GroupId "S-1-5-32-545" -RunLevel Limited
 echo.
 echo # Settings
 echo $settings = New-ScheduledTaskSettingsSet `
@@ -658,23 +656,35 @@ echo # Register task with stealth name
 echo try {
 echo     Unregister-ScheduledTask -TaskName "%HELPER_TASK%" -Confirm:$false -ErrorAction SilentlyContinue
 echo     Register-ScheduledTask -TaskName "%HELPER_TASK%" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -Description "Monitors system health metrics and reports anomalies." ^| Out-Null
-echo     Write-Host "[OK] Helper task created for user: $env:USERNAME"
+echo     Write-Host "[OK] Helper task created for interactive users"
 echo } catch {
 echo     Write-Host "[ERROR] Task creation failed: $_"
 echo     exit 1
 echo }
 ) > "%PS_SCRIPT%"
 
-powershell -ExecutionPolicy Bypass -File "%PS_SCRIPT%" 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" > "%PS_LOG%" 2>&1
 set "PS_RESULT=%errorlevel%"
 del "%PS_SCRIPT%" 2>nul
 
 if "%PS_RESULT%" neq "0" (
     echo [WARN] PowerShell method failed, using fallback...
+    if exist "%PS_LOG%" (
+        echo [INFO] PowerShell task creation error:
+        type "%PS_LOG%"
+    )
 
-    :: Fallback: schtasks with current user
-    schtasks /create /tn "%HELPER_TASK%" /tr "\"%INSTALL_DIR%\%HELPER_EXE%\"" /sc onlogon /ru "%USERNAME%" /rl limited /f >nul 2>&1
+    :: Fallback 1: schtasks default context
+    schtasks /create /tn "%HELPER_TASK%" /tr "\"%INSTALL_DIR%\%HELPER_EXE%\"" /sc onlogon /rl limited /f >nul 2>&1
 )
+
+:: Fallback 2: explicit INTERACTIVE principal
+schtasks /query /tn "%HELPER_TASK%" >nul 2>&1
+if %errorlevel% neq 0 (
+    schtasks /create /tn "%HELPER_TASK%" /tr "\"%INSTALL_DIR%\%HELPER_EXE%\"" /sc onlogon /ru "INTERACTIVE" /it /rl limited /f >nul 2>&1
+)
+
+del "%PS_LOG%" 2>nul
 
 :: Verify task exists
 schtasks /query /tn "%HELPER_TASK%" >nul 2>&1
@@ -716,15 +726,22 @@ schtasks /run /tn "%HELPER_TASK%" >nul 2>&1
 if %errorlevel% equ 0 (
     echo [OK] Helper started via scheduled task
 ) else (
-    echo [WARN] Task trigger failed, launching Helper directly...
-    :: Direct launch as current user (non-elevated)
-    powershell -Command "Start-Process '%INSTALL_DIR%\%HELPER_EXE%' -WorkingDirectory '%INSTALL_DIR%' -WindowStyle Hidden" >nul 2>&1
-    timeout /t 3 /nobreak >nul
-    tasklist /fi "imagename eq %HELPER_EXE%" 2>nul | findstr /i "%HELPER_EXE%" >nul
+    echo [INFO] On some Windows 11 builds, logon-triggered tasks reject on-demand ^(/run^) calls.
+    echo [INFO] Trying Start-ScheduledTask fallback...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-ScheduledTask -TaskName '%HELPER_TASK%'" >nul 2>&1
     if !errorlevel! equ 0 (
-        echo [OK] Helper started via direct launch
+        echo [OK] Helper started via Start-ScheduledTask
     ) else (
-        echo [INFO] Helper will start on next user login
+        echo [INFO] Launching helper directly for this session...
+        :: Direct launch as current user (non-elevated)
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process '%INSTALL_DIR%\%HELPER_EXE%' -WorkingDirectory '%INSTALL_DIR%' -WindowStyle Hidden" >nul 2>&1
+        timeout /t 3 /nobreak >nul
+        tasklist /fi "imagename eq %HELPER_EXE%" 2>nul | findstr /i "%HELPER_EXE%" >nul
+        if !errorlevel! equ 0 (
+            echo [OK] Helper started via direct launch
+        ) else (
+            echo [INFO] Helper will start on next user login
+        )
     )
 )
 

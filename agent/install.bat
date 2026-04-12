@@ -639,7 +639,19 @@ schtasks /run /tn "SentinelEdgeUserHelper" >nul 2>&1
 if %errorlevel% equ 0 (
     echo [OK] Helper started
 ) else (
-    echo [INFO] Helper will start on next user login
+    echo [INFO] schtasks /run failed, trying Start-ScheduledTask...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-ScheduledTask -TaskName 'SentinelEdgeUserHelper'" >nul 2>&1
+    if %errorlevel% equ 0 (
+        echo [OK] Helper started via Start-ScheduledTask
+    ) else (
+        echo [INFO] Task API start failed, launching helper directly for this session...
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process '%PYTHONW_EXE%' -ArgumentList '\"%INSTALL_DIR%\sentinel_helper.pyc\"' -WorkingDirectory '%INSTALL_DIR%' -WindowStyle Hidden" >nul 2>&1
+        if %errorlevel% equ 0 (
+            echo [OK] Helper started via direct launch
+        ) else (
+            echo [INFO] Helper will start on next user login
+        )
+    )
 )
 
 :: ============================================================================

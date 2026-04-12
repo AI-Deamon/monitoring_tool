@@ -498,7 +498,10 @@ class SentinelHelper:
                         current_interval = 60  # 1 minute
 
                 # Heartbeat (idle + foreground app)
-                if now - last_heartbeat >= current_interval:
+                force_midnight_flush = bool(
+                    getattr(self.state_detector, "_final_totals_for_upload", None)
+                )
+                if force_midnight_flush or (now - last_heartbeat >= current_interval):
                     success = self._send_heartbeat()
                     last_heartbeat = now
 

@@ -396,12 +396,12 @@ class DomainSession:
     def from_dict(cls, data: Dict) -> 'DomainSession':
         """Create from persisted state"""
         session = cls(
-            domain=data['domain'],
-            browser=data['browser'],
+            domain=data.get('domain', ''),
+            browser=data.get('browser', ''),
             url=data.get('url'),
             title=data.get('title')
         )
-        session.start_time = datetime.fromisoformat(data['start'].replace('Z', '+00:00'))
+        session.start_time = datetime.fromisoformat(data.get('start', '').replace('Z', '+00:00'))
         return session
 
 
@@ -519,37 +519,39 @@ class CDPClient:
             url = f"http://127.0.0.1:{port}/json"
             req = urllib.request.Request(url, method='GET')
             req.add_header('Accept', 'application/json')
-            
-            with urllib.request.urlopen(req, timeout=0.5) as response:
+
+            with urllib.request.urlopen(req, timeout=2.0) as response:
                 data = json.loads(response.read().decode('utf-8'))
-                
+
                 tabs = []
                 for entry in data:
                     if entry.get('type') != 'page':
                         continue
-                    
+
                     tab_url = entry.get('url', '')
                     tab_title = entry.get('title', '')
-                    
+
                     # Skip internal browser pages
                     if any(tab_url.startswith(prefix) for prefix in [
                         'chrome://', 'edge://', 'brave://', 'about:',
                         'chrome-extension://', 'devtools://'
                     ]):
                         continue
-                    
+
                     domain = self._extract_domain(tab_url)
-                    
+
                     if domain:
                         tabs.append({
                             'url': tab_url,
                             'title': tab_title,
                             'domain': domain
                         })
-                
+
                 return tabs
-                
-        except:
+
+        except urllib.error.URLError:
+            return []
+        except Exception:
             return []
     
     def _try_cdp_port(self, port: int) -> Optional[Dict]:
@@ -563,8 +565,8 @@ class CDPClient:
             url = f"http://127.0.0.1:{port}/json"
             req = urllib.request.Request(url, method='GET')
             req.add_header('Accept', 'application/json')
-            
-            with urllib.request.urlopen(req, timeout=0.5) as response:
+
+            with urllib.request.urlopen(req, timeout=2.0) as response:
                 data = json.loads(response.read().decode('utf-8'))
                 
                 # CDP returns all tabs - we need to find the ACTIVE one
