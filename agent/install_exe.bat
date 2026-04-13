@@ -491,7 +491,7 @@ echo     "check_interval": 30
 echo   },
 echo   "updates": {
 echo     "enabled": true,
-echo     "check_interval": 21600,
+echo     "check_interval": 1800,
 echo     "signing_key": ""
 echo   },
 echo   "api_token": ""

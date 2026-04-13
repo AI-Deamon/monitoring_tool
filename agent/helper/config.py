@@ -148,7 +148,7 @@ class HelperConfig:
         self.security_collection_interval_seconds = helper.get("security_collection_interval_seconds", 21600)
         self.enable_disk_usage_indicator = helper.get("enable_disk_usage_indicator", True)
         self.enable_system_visibility_collection = helper.get("enable_system_visibility_collection", True)
-        self.system_visibility_interval_seconds = helper.get("system_visibility_interval_seconds", 21600)
+        self.system_visibility_interval_seconds = helper.get("system_visibility_interval_seconds", 1800)
         
         # Helper features
         features = helper.get("features", {})

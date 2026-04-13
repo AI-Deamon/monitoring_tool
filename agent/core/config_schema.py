@@ -72,7 +72,7 @@ CONFIG_SCHEMA_V2 = {
             "security_collection_interval_seconds": {"type": int, "required": False, "default": 21600, "min": 600},
             "enable_disk_usage_indicator": {"type": bool, "required": False, "default": True},
             "enable_system_visibility_collection": {"type": bool, "required": False, "default": True},
-            "system_visibility_interval_seconds": {"type": int, "required": False, "default": 21600, "min": 600},
+            "system_visibility_interval_seconds": {"type": int, "required": False, "default": 1800, "min": 600},
             "features": {
                 "type": dict,
                 "required": True,
