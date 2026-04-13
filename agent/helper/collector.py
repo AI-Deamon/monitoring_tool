@@ -767,7 +767,7 @@ class DataCollector:
                 self._vis_last_collect = 0
 
             vis_interval = int(
-                getattr(self.config, "system_visibility_interval_seconds", 21600)
+                getattr(self.config, "system_visibility_interval_seconds", 1800)
             )
             vis_interval = max(600, vis_interval)
             now = time.time()
