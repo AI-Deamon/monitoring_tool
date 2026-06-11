@@ -165,6 +165,15 @@ def create_app():
         except ImportError as e:
             logger.debug(f"[UPDATES] Auto-update module not available: {e}")
 
+        # Reports blueprint
+        try:
+            from server_reports import reports_bp
+            app.register_blueprint(reports_bp)
+            logger.info("[REPORTS] Report generation endpoints registered")
+        except ImportError as e:
+            logger.warning(f"[REPORTS] Report module not available: {e}")
+
+
         # Ensure models are loaded
         import server_models
         

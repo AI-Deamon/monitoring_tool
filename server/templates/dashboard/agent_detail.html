@@ -99,6 +99,13 @@
                 class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
                 <img src="{{ url_for('static', filename='report.png') }}" class="w-4 h-4 mr-2" /> Report
             </a>
+            <button onclick="deleteAgent('{{ agent.agent_id }}', '{{ agent.hostname or agent.agent_id }}')"
+                class="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+                Delete
+            </button>
             {% endif%}
         </div>
     </div>
@@ -220,103 +227,112 @@
             </div>
         </div>
     </div>
-    <!-- Quick Stats -->
-    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Quick Stats</h3>
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-            <div class="flex items-center">
-                <div class="text-2xl mr-3"><img src="{{ url_for('static', filename='clock.png') }}" class="w-6 h-6" />
+    <!-- Endpoint Availability -->
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4"><img
+            src="{{ url_for('static', filename='bar-chart.png') }}" class="w-6 h-6 mr-2 inline-block" /> Endpoint Availability
+    </h3>
+    <div id="availability-card" class="mb-6 rounded-xl overflow-hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm" style="display:grid;grid-template-columns:5fr 3fr;min-height:148px;">
+
+        <!-- Left 5/8: Productive Time Hero -->
+        <div style="padding:20px 24px;border-right:1px solid;" class="border-gray-200 dark:border-gray-700">
+            <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-3">Productive Time</div>
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:14px;">
+                <span id="ea-productive-time" class="text-gray-900 dark:text-gray-100" style="font-size:2rem;font-weight:700;line-height:1;">--</span>
+                <span id="ea-shift-target-label" class="text-gray-400 dark:text-gray-500" style="font-size:0.9rem;font-weight:500;">/ 8h 00m</span>
+            </div>
+            <!-- Progress bar -->
+            <div style="height:8px;border-radius:4px;overflow:hidden;margin-bottom:10px;" class="bg-gray-100 dark:bg-gray-900">
+                <div id="ea-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#10b981,#059669);border-radius:4px;transition:width 0.6s ease;"></div>
+            </div>
+            <div id="ea-caption" class="text-xs text-gray-400 dark:text-gray-500">0% of standard shift was active.</div>
+        </div>
+
+        <!-- Right 3/8: Inactive Breakdown -->
+        <div style="padding:20px 24px;">
+            <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-3">Inactive Breakdown</div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+                <!-- Away -->
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;flex-shrink:0;display:inline-block;"></span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">Away (Extended Absence)</span>
+                    </div>
+                    <span id="ea-away-stat" class="text-xs font-medium text-gray-700 dark:text-gray-300" style="white-space:nowrap;">-- (0%)</span>
                 </div>
-                <div>
-                    <div id="quick-screen-time" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
-                    <div class="text-sm text-gray-500 dark:text-gray-400">Screen Time</div>
+                <!-- Locked -->
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="width:8px;height:8px;border-radius:50%;background:#94a3b8;flex-shrink:0;display:inline-block;"></span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">Screen Locked / Lid Closed</span>
+                    </div>
+                    <span id="ea-locked-stat" class="text-xs font-medium text-gray-700 dark:text-gray-300" style="white-space:nowrap;">-- (0%)</span>
+                </div>
+                <!-- Idle -->
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="width:8px;height:8px;border-radius:50%;background:#eab308;flex-shrink:0;display:inline-block;"></span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">System Idle</span>
+                    </div>
+                    <span id="ea-idle-stat" class="text-xs font-medium text-gray-700 dark:text-gray-300" style="white-space:nowrap;">-- (0%)</span>
                 </div>
             </div>
         </div>
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-            <div class="flex items-center">
-                <div class="text-2xl mr-3"><img src="{{ url_for('static', filename='app.png') }}"
-                        class="w-4 h-4 inline mr-2" /></div>
-                <div>
-                    <div id="quick-apps-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
-                    <div class="text-sm text-gray-500 dark:text-gray-400">Apps Used</div>
-                </div>
-            </div>
-        </div>
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-            <div class="flex items-center">
-                <div class="text-2xl mr-3"><img src="{{ url_for('static', filename='globe.png') }}" class="w-6 h-6" />
-                </div>
-                <div>
-                    <div id="quick-domains-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
-                    <div class="text-sm text-gray-500 dark:text-gray-400">Domains Visited</div>
-                </div>
-            </div>
-        </div>
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
-            <div class="flex items-center">
-                <div class="text-2xl mr-3"><img src="{{ url_for('static', filename='session.png') }}" class="w-6 h-6" />
-                </div>
-                <div>
-                    <div id="quick-sessions-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
-                    <div class="text-sm text-gray-500 dark:text-gray-400">App Sessions</div>
-                </div>
-            </div>
-        </div>
+
     </div>
 
-    <!-- Screen Time Metrics -->
-    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4"><img
-            src="{{ url_for('static', filename='bar-chart.png') }}" class="w-6 h-6 mr-2 inline-block" /> Screen Time
-    </h3>
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        <div
-            class="bg-gradient-to-br from-blue-50 dark:from-blue-900/20 to-blue-100 dark:to-blue-800/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-            <div class="text-2xl mb-2"><img src="{{ url_for('static', filename='online.png') }}" class="w-6 h-6" />
+    <!-- 24h Timeline + Quick Stats -->
+    <div class="mb-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm rounded-lg p-4 flex gap-4">
+        <!-- Timeline 70% -->
+        <div style="flex:7;min-width:0;">
+            <div class="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">24h Timeline — all states</div>
+            <div id="timeline-combined"></div>
+        </div>
+        <!-- Quick Stats 30% -->
+        <div style="flex:3;min-width:0;border-left:1px solid;padding-left:1rem;" class="border-gray-200 dark:border-gray-700">
+            <div class="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-3 uppercase tracking-wide">Quick Stats</div>
+            <div class="flex flex-col gap-3">
+                <div class="flex items-center gap-2">
+                    <img src="{{ url_for('static', filename='app.png') }}" class="w-4 h-4 flex-shrink-0" />
+                    <div>
+                        <div id="quick-apps-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400">Apps Used</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <img src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 flex-shrink-0" />
+                    <div>
+                        <div id="quick-domains-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400">Domains Visited</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <img src="{{ url_for('static', filename='session.png') }}" class="w-4 h-4 flex-shrink-0" />
+                    <div>
+                        <div id="quick-sessions-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400">App Sessions</div>
+                    </div>
+                </div>
             </div>
-            <div class="text-sm text-blue-600 dark:text-blue-400 font-medium">Active Time</div>
-            <div id="active-time" class="text-xl font-bold text-blue-900 dark:text-blue-100">--</div>
-            <div id="active-pct" class="text-xs text-blue-600 dark:text-blue-400">--</div>
-        </div>
-        <div
-            class="bg-gradient-to-br from-yellow-50 dark:from-yellow-900/20 to-yellow-100 dark:to-yellow-800/20 rounded-lg p-4 border border-yellow-200 dark:border-yellow-800">
-            <div class="text-2xl mb-2">💤</div>
-            <div class="text-sm text-yellow-600 dark:text-yellow-400 font-medium">Idle Time</div>
-            <div id="idle-time" class="text-xl font-bold text-yellow-900 dark:text-yellow-100">--</div>
-            <div id="idle-pct" class="text-xs text-yellow-600 dark:text-yellow-400">--</div>
-        </div>
-        <div
-            class="bg-gradient-to-br from-gray-50 dark:from-gray-800 to-gray-100 dark:to-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-            <div class="text-2xl mb-2"><img src="{{ url_for('static', filename='lock.png') }}" class="w-6 h-6" /></div>
-            <div class="text-sm text-gray-600 dark:text-gray-300 font-medium">Locked Time</div>
-            <div id="locked-time" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
-            <div id="locked-pct" class="text-xs text-gray-600 dark:text-gray-400">--</div>
-        </div>
-        <div
-            class="bg-gradient-to-br from-red-50 dark:from-red-900/20 to-red-100 dark:to-red-800/20 rounded-lg p-4 border border-red-200 dark:border-red-800">
-            <div class="text-2xl mb-2"><img src="{{ url_for('static', filename='no.png') }}" class="w-6 h-6" /></div>
-            <div class="text-sm text-red-600 dark:text-red-400 font-medium">Away Time</div>
-            <div id="away-time" class="text-xl font-bold text-red-900 dark:text-red-100">--</div>
-            <div id="away-pct" class="text-xs text-red-600 dark:text-red-400">--</div>
-        </div>
-        <div
-            class="bg-gradient-to-br from-purple-50 dark:from-purple-900/20 to-purple-100 dark:to-purple-800/20 rounded-lg p-4 border border-purple-200 dark:border-purple-800">
-            <div class="text-2xl mb-2"><img src="{{ url_for('static', filename='clock.png') }}" class="w-6 h-6" /></div>
-            <div class="text-sm text-purple-600 dark:text-purple-400 font-medium">Total Productive</div>
-            <div id="total-time" class="text-xl font-bold text-purple-900 dark:text-purple-100">--</div>
-            <div class="text-xs text-purple-600 dark:text-purple-400">Full day activity</div>
         </div>
     </div>
+        <!-- hidden stubs so JS doesn't throw on missing IDs -->
+        <div style="display:none">
+            <div id="quick-screen-time"></div>
+            <div id="fc-avail-pct"></div><div id="fc-avail-time"></div><div id="fc-avail-sub"></div>
+            <div id="fc-locked-pct"></div><div id="fc-locked-time"></div>
+            <div id="fc-away-pct"></div><div id="fc-away-time"></div><div id="fc-away-front"></div>
+            <div id="availability-frame"></div>
+        </div>
 
     <!-- 7-Day Chart -->
     <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4"><img
-            src="{{ url_for('static', filename='bar-chart.png') }}" class="w-6 h-6 mr-2 inline-block" /> Screen Time
-        (Last 7 Days)</h3>
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+            src="{{ url_for('static', filename='bar-chart.png') }}" class="w-6 h-6 mr-2 inline-block" /> Screen Time (Last 7 Days)</h3>
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
         <div class="h-80 relative">
             <canvas id="screentime-history-chart"></canvas>
         </div>
     </div>
+
 </div>
 
 <!-- Tab: Activity -->
@@ -1149,4 +1165,31 @@
 </script>
 
 <script src="{{ url_for('static', filename='js/agent_detail.js') }}"></script>
+<script>
+async function deleteAgent(agentId, hostname) {
+    if (!confirm(`Delete agent "${hostname}"?\n\nThis will permanently remove ALL data (screen time, apps, domains, inventory, hardware, security indicators, etc.) for this agent. This cannot be undone.`)) {
+        return;
+    }
+
+    if (!confirm(`Are you absolutely sure? This is irreversible.`)) {
+        return;
+    }
+
+    try {
+        const resp = await fetch(`/dashboard/api/agent/${encodeURIComponent(agentId)}/delete`, {
+            method: 'POST',
+            credentials: 'same-origin'
+        });
+        const data = await resp.json();
+
+        if (resp.ok) {
+            window.location.href = '/dashboard/agents';
+        } else {
+            alert(`Failed to delete agent: ${data.error || 'Unknown error'}`);
+        }
+    } catch (err) {
+        alert(`Error deleting agent: ${err.message}`);
+    }
+}
+</script>
 {% endblock %}

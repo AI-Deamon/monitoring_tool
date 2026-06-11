@@ -183,6 +183,17 @@ def is_subdomain(domain: str) -> bool:
     parts = domain.split('.')
     return len(parts) > 2
 
+
+def _has_visit_source_table(cursor: sqlite3.Cursor) -> bool:
+    """Check whether Chromium visit_source table exists in current DB."""
+    try:
+        cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='visit_source' LIMIT 1"
+        )
+        return cursor.fetchone() is not None
+    except Exception:
+        return False
+
 # ============================================================================
 #   END OF ENHANCED EXTRACTION FUNCTIONS
 # ============================================================================
@@ -1116,13 +1127,26 @@ class ActiveDomainTracker:
                     search_terms.append(short_title)
             
             # Try each search term
+            has_visit_source = _has_visit_source_table(cursor)
             for search_term in search_terms:
-                cursor.execute('''
-                    SELECT url, title FROM urls 
-                    WHERE title LIKE ? 
-                    ORDER BY last_visit_time DESC 
-                    LIMIT 1
-                ''', (f'%{search_term[:50]}%',))
+                if has_visit_source:
+                    cursor.execute('''
+                        SELECT u.url, u.title
+                        FROM urls u
+                        JOIN visits v ON v.url = u.id
+                        LEFT JOIN visit_source vs ON vs.id = v.id
+                        WHERE u.title LIKE ?
+                          AND (vs.source IS NULL OR vs.source = 1)
+                        ORDER BY v.visit_time DESC
+                        LIMIT 1
+                    ''', (f'%{search_term[:50]}%',))
+                else:
+                    cursor.execute('''
+                        SELECT url, title FROM urls
+                        WHERE title LIKE ?
+                        ORDER BY last_visit_time DESC
+                        LIMIT 1
+                    ''', (f'%{search_term[:50]}%',))
                 
                 row = cursor.fetchone()
                 if row:
@@ -1591,14 +1615,25 @@ class BrowserHistoryTracker:
             cursor = conn.cursor()
             
             last_visit = self._last_visit_times.get(browser_key, 0)
-            
-            cursor.execute('''
-                SELECT url, title, last_visit_time 
-                FROM urls 
-                WHERE last_visit_time > ?
-                ORDER BY last_visit_time ASC
-                LIMIT 100
-            ''', (last_visit,))
+            if _has_visit_source_table(cursor):
+                cursor.execute('''
+                    SELECT u.url, u.title, v.visit_time
+                    FROM visits v
+                    JOIN urls u ON u.id = v.url
+                    LEFT JOIN visit_source vs ON vs.id = v.id
+                    WHERE v.visit_time > ?
+                      AND (vs.source IS NULL OR vs.source = 1)
+                    ORDER BY v.visit_time ASC
+                    LIMIT 100
+                ''', (last_visit,))
+            else:
+                cursor.execute('''
+                    SELECT url, title, last_visit_time
+                    FROM urls
+                    WHERE last_visit_time > ?
+                    ORDER BY last_visit_time ASC
+                    LIMIT 100
+                ''', (last_visit,))
             
             visits = []
             max_visit_time = last_visit

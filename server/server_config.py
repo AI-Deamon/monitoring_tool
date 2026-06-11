@@ -55,4 +55,13 @@ def get_config() -> SimpleNamespace:
         SSL_CERT_PATH=os.getenv('SSL_CERT_PATH', 'certs/server.crt'),
         SSL_KEY_PATH=os.getenv('SSL_KEY_PATH', 'certs/server.key'),
         SSL_CA_PATH=os.getenv('SSL_CA_PATH', 'certs/ca.crt'),
+
+        # Core Hours Window (IST) — used for timeline overlay only.
+        # Format: "HH:MM" 24-hour. Override via env vars.
+        CORE_HOURS_START=os.getenv('CORE_HOURS_START', '09:00'),
+        CORE_HOURS_END=os.getenv('CORE_HOURS_END', '19:00'),
+
+        # Shift Target — denominator for productive-time % calculation.
+        # Default 8 hours (28800s). Override via SHIFT_TARGET_HOURS env var.
+        SHIFT_TARGET_HOURS=float(os.getenv('SHIFT_TARGET_HOURS', '8')),
     )

@@ -584,7 +584,98 @@ def start_background_tasks(app):
     scheduler.add_interval_job(
         func=sync_available_versions, seconds=3600, name="Available versions sync"
     )
+    # Report schedules — check every 5 minutes
+    scheduler.add_interval_job(
+        func=run_scheduled_reports, seconds=300, name="Scheduled reports"
+    )
+
+    # One-time correction: recalculate next_run for all enabled schedules
+    # (fixes stale values created while BUG-003 was present)
+    try:
+        with app.app_context():
+            _fix_stale_next_runs()
+    except Exception as e:
+        logger.warning(f"[REPORTS] Could not fix stale next_run values: {e}")
 
     scheduler.start()
 
     return scheduler
+
+
+def _fix_stale_next_runs():
+    """Recalculate next_run for all enabled schedules using their stored fields (BUG-015)."""
+    from extensions import db
+    from sqlalchemy import text
+    from server_reports import _calc_next_run
+
+    rows = db.session.execute(text(
+        "SELECT id, frequency, day_of_week, day_of_month, send_hour "
+        "FROM report_schedules WHERE enabled = true"
+    )).fetchall()
+
+    for row in rows:
+        s = dict(row._mapping)
+        next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9))
+        db.session.execute(text(
+            "UPDATE report_schedules SET next_run = :nr WHERE id = :id"
+        ), {'nr': next_run, 'id': s['id']})
+
+    db.session.commit()
+    logger.info(f"[REPORTS] Recalculated next_run for {len(rows)} schedule(s)")
+
+
+def run_scheduled_reports():
+    """Check report_schedules table and send any due reports."""
+    from extensions import db
+    from sqlalchemy import text
+    from report_engine import create_job, run_report_job
+    import json
+
+    try:
+        due = db.session.execute(text("""
+            SELECT id, report_type, scope, agent_id, recipients,
+                   frequency, day_of_week, day_of_month, send_hour,
+                   auto_email, include_pdf
+            FROM report_schedules
+            WHERE enabled = true AND next_run <= NOW()
+        """)).fetchall()
+
+        if not due:
+            return
+
+        for row in due:
+            s = dict(row._mapping)
+            start_date, end_date = _get_schedule_date_range(s['report_type'], s['frequency'])
+            recipients = json.loads(s['recipients']) if isinstance(s['recipients'], str) else (s['recipients'] or [])
+
+            job_id = create_job(db, s['report_type'], s['scope'], s['agent_id'],
+                                start_date, end_date, created_by='scheduler', schedule_id=s['id'])
+            run_report_job(None, db, job_id, s['report_type'], s['scope'], s['agent_id'],
+                           start_date, end_date, auto_email=bool(s['auto_email']), recipients=recipients)
+
+            from server_reports import _calc_next_run
+            next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9))
+            db.session.execute(text(
+                "UPDATE report_schedules SET last_run=NOW(), next_run=:nr WHERE id=:id"
+            ), {'nr': next_run, 'id': s['id']})
+            db.session.commit()
+
+    except Exception as e:
+        logger.error(f"[REPORTS] Scheduled reports check failed: {e}")
+
+
+def _get_schedule_date_range(report_type, frequency):
+    """Calculate date range for a scheduled report."""
+    from datetime import date, timedelta
+    today = date.today()
+    if report_type == 'daily' or frequency == 'daily':
+        d = today - timedelta(days=1)
+        return d, d
+    elif report_type == 'weekly' or frequency == 'weekly':
+        days_since_mon = today.weekday()
+        last_mon = today - timedelta(days=days_since_mon + 7)
+        return last_mon, last_mon + timedelta(days=6)
+    else:  # monthly
+        first_this = today.replace(day=1)
+        last_end = first_this - timedelta(days=1)
+        return last_end.replace(day=1), last_end

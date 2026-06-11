@@ -412,6 +412,7 @@ class SentinelHelper:
         last_eol_check = time.time()
         last_connection_check = time.time()
         last_resource_check = time.time()
+        last_network_change_check = time.time()
         was_suspended = False  # Track suspend→resume transitions
 
         consecutive_heartbeat_failures = 0
@@ -558,6 +559,13 @@ class SentinelHelper:
                         self._check_extended_inventory()
                     last_ext_inventory_check = now
 
+                # Network change check (every 5 minutes)
+                network_check_interval = 300  # 5 min
+                if now - last_network_change_check >= network_check_interval:
+                    if self.core_connected:
+                        self._check_network_change()
+                    last_network_change_check = now
+                
                 # Security indicators check (configurable, default every 6 hours)
                 security_interval = max(
                     600, int(self.config.security_collection_interval_seconds)
@@ -1049,7 +1057,26 @@ class SentinelHelper:
 
         except Exception as e:
             self.logger.error(f"Hardware check error: {e}", exc_info=True)
+    
+    def _check_network_change(self):
+        """
+        Check if network adapters have changed and send partial update.
+        This is called every 5 minutes to detect WiFi/Ethernet switches.
+        """
+        try:
+            network_data = self.collector.collect_network_partial()
+            
+            if network_data:
+                if self.communicator.send_network_partial(network_data):
+                    self.logger.info("[OK] Network partial update sent")
+                else:
+                    self.logger.warning("Failed to send network partial update")
+            else:
+                self.logger.debug("No network changes detected")
 
+        except Exception as e:
+            self.logger.error(f"Network change check error: {e}", exc_info=True)
+    
     def stop(self, crashed: bool = False):
         """Stop helper gracefully"""
         self.logger.info("Stopping helper...")

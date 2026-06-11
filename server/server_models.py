@@ -930,8 +930,7 @@ class AssetInfo(db.Model):
     ram_total_gb = db.Column(db.Float, nullable=True)
     ram_slots_used = db.Column(db.Integer, nullable=True)
     ram_slots_total = db.Column(db.Integer, nullable=True)
-    gpu_name = db.Column(db.Text, nullable=True)
-    gpu_memory_gb = db.Column(db.Float, nullable=True)
+    gpus_json = db.Column(db.Text, nullable=True)  # JSON array of {name, memory_gb}
     disks_json = db.Column(db.Text, nullable=True)  # JSON array of disk info
     motherboard = db.Column(db.Text, nullable=True)
 
@@ -991,8 +990,7 @@ class AssetInfo(db.Model):
             "ram_total_gb": self.ram_total_gb,
             "ram_slots_used": self.ram_slots_used,
             "ram_slots_total": self.ram_slots_total,
-            "gpu_name": self.gpu_name,
-            "gpu_memory_gb": self.gpu_memory_gb,
+            "gpus": _json.loads(self.gpus_json) if self.gpus_json else [],
             "disks": _json.loads(self.disks_json) if self.disks_json else [],
             "motherboard": self.motherboard,
             "primary_mac": self.primary_mac,
@@ -1690,3 +1688,49 @@ class UpdateVersion(db.Model):
             else None,
             "is_active": self.is_active,
         }
+
+
+class ReportSchedule(db.Model):
+    """Scheduled report generation and email delivery"""
+    __tablename__ = "report_schedules"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    report_type = db.Column(db.String(20), nullable=False)
+    scope = db.Column(db.String(20), nullable=False)
+    agent_id = db.Column(db.String(100), nullable=True)
+    recipients = db.Column(db.Text, nullable=False)
+    frequency = db.Column(db.String(20), nullable=False)
+    day_of_week = db.Column(db.Integer, nullable=True)
+    day_of_month = db.Column(db.Integer, nullable=True)
+    send_hour = db.Column(db.Integer, default=9, nullable=False)
+    enabled = db.Column(db.Boolean, default=True, nullable=False)
+    last_run = db.Column(db.DateTime, nullable=True)
+    next_run = db.Column(db.DateTime, nullable=True)
+    created_by = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    include_pdf = db.Column(db.Boolean, default=False, nullable=False)
+    auto_email = db.Column(db.Boolean, default=True, nullable=False)
+    template_name = db.Column(db.String(100), nullable=True)
+    recipients_json = db.Column(postgresql.JSONB, nullable=True)  # overrides recipients field
+
+
+class ReportGenerationJob(db.Model):
+    """Async report generation job tracking"""
+    __tablename__ = "report_generation_jobs"
+
+    id = db.Column(db.String(36), primary_key=True)  # UUID string
+    schedule_id = db.Column(db.Integer, db.ForeignKey('report_schedules.id', ondelete='SET NULL'), nullable=True)
+    report_type = db.Column(db.String(20), nullable=False)
+    scope = db.Column(db.String(20), nullable=False)
+    agent_id = db.Column(db.String(100), nullable=True)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(20), default='pending', nullable=False)
+    progress = db.Column(postgresql.JSONB, default=dict, nullable=False)
+    result_html = db.Column(db.Text, nullable=True)
+    result_pdf_path = db.Column(db.String(500), nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    created_by = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    completed_at = db.Column(db.DateTime, nullable=True)

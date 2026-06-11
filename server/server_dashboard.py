@@ -20,7 +20,7 @@ from flask import (
     g,
     session,
 )
-from sqlalchemy import func, desc, case
+from sqlalchemy import func, desc, case, text
 from extensions import db
 import server_models
 
@@ -36,6 +36,70 @@ def utc_to_ist(utc_dt):
     # Convert to IST (UTC+5:30)
     ist_dt = utc_dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
     return ist_dt.isoformat()
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format seconds into a human-readable string like '5h 22m' or '28m 3s'."""
+    s = int(seconds or 0)
+    if s <= 0:
+        return "0m"
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h > 0:
+        return f"{h}h {m:02d}m" if m else f"{h}h"
+    if m > 0:
+        return f"{m}m {sec:02d}s" if sec else f"{m}m"
+    return f"{sec}s"
+
+
+def _compute_core_hours_utilization(
+    active_s: float,
+    idle_s: float,
+    locked_s: float,
+    away_s: float,
+    core_start: str = "09:00",
+    core_end: str = "17:00",
+    shift_target_hours: float = 8.0,
+) -> dict:
+    """
+    Compute shift-goal utilization against a configurable shift target (default 8h).
+
+    Productive time = active_s only. Idle, locked, and away are loss categories.
+    productive_pct is capped at 100%; loss category percentages are uncapped
+    (e.g. locked for 9h on an 8h shift = 112%).
+
+    Returns dict with raw ints (productive_pct, away_pct, locked_pct, idle_pct)
+    and pre-formatted strings (*_time_str) for direct template/JS consumption.
+    """
+    SHIFT_TARGET_S = max(1, shift_target_hours * 3600)
+
+    active_s = float(active_s or 0)
+    idle_s = float(idle_s or 0)
+    locked_s = float(locked_s or 0)
+    away_s = float(away_s or 0)
+
+    productive_pct = min(100, int(round(active_s / SHIFT_TARGET_S * 100)))
+    away_pct = int(round(away_s / SHIFT_TARGET_S * 100))
+    locked_pct = int(round(locked_s / SHIFT_TARGET_S * 100))
+    idle_pct = int(round(idle_s / SHIFT_TARGET_S * 100))
+
+    return {
+        # Raw integers
+        "productive_pct": productive_pct,
+        "away_pct": away_pct,
+        "locked_pct": locked_pct,
+        "idle_pct": idle_pct,
+        # Pre-formatted strings
+        "productive_time_str": _fmt_duration(active_s),
+        "away_time_str": _fmt_duration(away_s),
+        "locked_time_str": _fmt_duration(locked_s),
+        "idle_time_str": _fmt_duration(idle_s),
+        # Legacy fields kept for backward-compat with existing JS
+        "available_seconds": int(active_s),
+        "locked_ch": int(locked_s),
+        "away_ch": int(away_s),
+        "utilization_percent": productive_pct,
+    }
 
 
 def get_ist_today():
@@ -802,8 +866,7 @@ def get_single_asset_data(agent_id):
                 "ram_total_gb": info.ram_total_gb,
                 "ram_slots_used": info.ram_slots_used,
                 "ram_slots_total": info.ram_slots_total,
-                "gpu_name": info.gpu_name,
-                "gpu_memory_gb": info.gpu_memory_gb,
+                "gpus": json.loads(info.gpus_json or "[]"),
                 "motherboard": info.motherboard,
                 "disks": json.loads(info.disks_json or "[]"),
             },
@@ -817,6 +880,12 @@ def get_single_asset_data(agent_id):
                 "domain_name": info.domain_name,
             },
             "security": {
+                "os_name": info.os_name,
+                "os_version": info.os_version,
+                "os_build": info.os_build,
+                "os_edition": info.os_edition,
+                "os_sku": info.os_sku,
+                "os_architecture": info.os_architecture,
                 "antivirus": json.loads(info.antivirus_json or "[]"),
                 "firewall_enabled": info.firewall_enabled,
                 "bitlocker_status": info.bitlocker_status,
@@ -2111,6 +2180,10 @@ def api_agent_full_report(agent_id):
         if not agent:
             return jsonify({"error": "Agent not found"}), 404
 
+        # Enforce FR-006: non-admin users may only access their linked agent
+        if not can_view_agent(str(agent.agent_id)):
+            return jsonify({"error": "Access denied"}), 403
+
         is_online = agent.last_seen and agent.last_seen >= five_min_ago
 
         # Try to find username from various sources
@@ -2259,6 +2332,20 @@ def api_agent_full_report(agent_id):
         locked_s = screen_time.locked_seconds if screen_time else 0
         away_s = (screen_time.away_seconds or 0) if screen_time else 0
 
+        # Shift-goal utilization (8-hour target, productive = active only)
+        from server_config import get_config as _get_config
+        _cfg = _get_config()
+        _util = _compute_core_hours_utilization(
+            active_s, idle_s, locked_s, away_s,
+            _cfg.CORE_HOURS_START, _cfg.CORE_HOURS_END,
+            _cfg.SHIFT_TARGET_HOURS,
+        )
+
+        # Build human-readable shift target label (e.g. "8h 00m" or "7h 30m")
+        _st_h = int(_cfg.SHIFT_TARGET_HOURS)
+        _st_m = int(round((_cfg.SHIFT_TARGET_HOURS - _st_h) * 60))
+        _shift_target_label = f"{_st_h}h {_st_m:02d}m"
+
         screen_data = {
             "date": target_date.isoformat(),
             "active_seconds": active_s,
@@ -2268,6 +2355,23 @@ def api_agent_full_report(agent_id):
             "total_seconds": active_s + idle_s + locked_s + away_s,
             "active_hours": round(active_s / 3600, 2),
             "away_note": "Prolonged lock (>2h) classified as away",
+            # Shift-goal fields (new)
+            "productive_pct": _util["productive_pct"],
+            "away_pct": _util["away_pct"],
+            "locked_pct": _util["locked_pct"],
+            "idle_pct": _util["idle_pct"],
+            "productive_time_str": _util["productive_time_str"],
+            "away_time_str": _util["away_time_str"],
+            "locked_time_str": _util["locked_time_str"],
+            "idle_time_str": _util["idle_time_str"],
+            "shift_target_label": _shift_target_label,
+            # Legacy fields (kept for backward-compat)
+            "available_seconds": _util["available_seconds"],
+            "locked_ch": _util["locked_ch"],
+            "away_ch": _util["away_ch"],
+            "utilization_percent": _util["utilization_percent"],
+            "core_hours_start": _cfg.CORE_HOURS_START,
+            "core_hours_end": _cfg.CORE_HOURS_END,
         }
 
         # ================================================================
@@ -2513,6 +2617,29 @@ def api_agent_full_report(agent_id):
                     "count": len(inv_changes_data),
                     "data": inv_changes_data,
                 },
+                "state_events": [
+                    {
+                        "state": span.state,
+                        "start_time": str(span.start_time) + '+05:30' if isinstance(span.start_time, str) else span.start_time.strftime('%Y-%m-%dT%H:%M:%S+05:30'),
+                        "end_time": str(span.end_time) + '+05:30' if isinstance(span.end_time, str) else span.end_time.strftime('%Y-%m-%dT%H:%M:%S+05:30'),
+                        "duration_seconds": span.duration_seconds,
+                    }
+                    for span in db.session.execute(
+                        text(
+                            "SELECT state, start_time, end_time, duration_seconds"
+                            " FROM screen_time_spans"
+                            " WHERE agent_id = :agent_id"
+                            "   AND start_time >= :start_dt"
+                            "   AND start_time < :end_dt"
+                            " ORDER BY start_time"
+                        ),
+                        {
+                            "agent_id": resolved_agent_id,
+                            "start_dt": start_dt,
+                            "end_dt": end_dt,
+                        },
+                    ).fetchall()
+                ],
             }
         ), 200
 
@@ -3129,6 +3256,305 @@ def get_agent_recent_activities(agent_id):
 
     except Exception as e:
         logger.error(f"Error fetching recent activities: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# ANALYTICS API ENDPOINTS (Materialized Views)
+# ============================================================================
+
+
+def _parse_overview_date_range():
+    """Parse date and days query parameters to a [start_date, end_date] tuple."""
+    date_str = request.args.get("date")
+    days = request.args.get("days", "7")
+
+    try:
+        days_int = max(1, min(int(days), 60))
+    except (TypeError, ValueError):
+        days_int = 7
+
+    if date_str:
+        try:
+            end_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            end_date = datetime.now(timezone.utc).date()
+    else:
+        end_date = datetime.now(timezone.utc).date()
+
+    start_date = end_date - timedelta(days=days_int - 1)
+    return start_date, end_date
+
+
+def _build_username_filter_sql(prefix: str = "username"):
+    """Build SQL fragment + params for linked_username visibility filtering."""
+    user_filter = get_user_filter()
+    if not user_filter:
+        return "", {}
+
+    return (
+        f" AND ({prefix} ILIKE :uf_exact OR {prefix} ILIKE :uf_domain OR {prefix} ILIKE :uf_prefix)",
+        {
+            "uf_exact": user_filter,
+            "uf_domain": f"%\\{user_filter}",
+            "uf_prefix": f"{user_filter}%",
+        },
+    )
+
+
+def _resolve_agent(agent_id):
+    """Resolve agent by UUID string or legacy numeric ID."""
+    agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+    if agent:
+        return agent
+
+    try:
+        numeric_id = int(agent_id)
+    except ValueError:
+        return None
+
+    return server_models.Agent.query.filter_by(id=numeric_id).first()
+
+
+@bp.route("/api/overview/productivity-metrics", methods=["GET"])
+@login_required
+@api_rate_limit
+def api_overview_productivity_metrics():
+    """Fleet productivity aggregate metrics from mv_fleet_productivity."""
+    try:
+        start_date, end_date = _parse_overview_date_range()
+        visibility_clause, visibility_params = _build_username_filter_sql("username")
+
+        params = {"start_date": start_date, "end_date": end_date, **visibility_params}
+
+        daily_rows = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    date,
+                    ROUND(AVG(productivity_score)::numeric, 2) AS avg_productivity_score,
+                    SUM(active_seconds)::bigint AS active_seconds,
+                    SUM(idle_seconds)::bigint AS idle_seconds,
+                    SUM(locked_seconds)::bigint AS locked_seconds,
+                    COUNT(DISTINCT agent_id)::int AS agent_count
+                FROM mv_fleet_productivity
+                WHERE date BETWEEN :start_date AND :end_date
+                {visibility_clause}
+                GROUP BY date
+                ORDER BY date ASC
+                """
+            ),
+            params,
+        ).fetchall()
+
+        summary_row = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    ROUND(AVG(productivity_score)::numeric, 2) AS fleet_avg_score,
+                    COUNT(*) FILTER (WHERE productivity_score >= 70)::int AS high_count,
+                    COUNT(*) FILTER (WHERE productivity_score >= 40 AND productivity_score < 70)::int AS medium_count,
+                    COUNT(*) FILTER (WHERE productivity_score < 40)::int AS low_count
+                FROM mv_fleet_productivity
+                WHERE date BETWEEN :start_date AND :end_date
+                {visibility_clause}
+                """
+            ),
+            params,
+        ).first()
+
+        return jsonify(
+            {
+                "range": {
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                },
+                "daily": [
+                    {
+                        "date": r.date.isoformat(),
+                        "avg_productivity_score": float(r.avg_productivity_score or 0),
+                        "active_seconds": int(r.active_seconds or 0),
+                        "idle_seconds": int(r.idle_seconds or 0),
+                        "locked_seconds": int(r.locked_seconds or 0),
+                        "agent_count": int(r.agent_count or 0),
+                    }
+                    for r in daily_rows
+                ],
+                "summary": {
+                    "fleet_avg_score": float(summary_row.fleet_avg_score or 0),
+                    "distribution": {
+                        "high": int(summary_row.high_count or 0),
+                        "medium": int(summary_row.medium_count or 0),
+                        "low": int(summary_row.low_count or 0),
+                    },
+                },
+            }
+        )
+    except Exception as e:
+        logger.error(f"[DASHBOARD] productivity-metrics error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+
+@bp.route("/api/overview/top-apps", methods=["GET"])
+@login_required
+@api_rate_limit
+def api_overview_top_apps():
+    """Top applications with category data from app_usage + mv_app_category_breakdown."""
+    try:
+        start_date, end_date = _parse_overview_date_range()
+        limit = max(1, min(int(request.args.get("limit", 10)), 100))
+        visibility_clause, visibility_params = _build_username_filter_sql("au.username")
+
+        rows = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    au.app,
+                    COALESCE(cat.category, 'other') AS category,
+                    SUM(COALESCE(au.duration_seconds, 0))::bigint AS total_duration_seconds,
+                    SUM(COALESCE(au.session_count, 0))::bigint AS total_session_count
+                FROM app_usage au
+                LEFT JOIN mv_app_category_breakdown cat ON cat.app = au.app
+                WHERE au.date BETWEEN :start_date AND :end_date
+                {visibility_clause}
+                GROUP BY au.app, cat.category
+                ORDER BY total_duration_seconds DESC
+                LIMIT :limit
+                """
+            ),
+            {
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": limit,
+                **visibility_params,
+            },
+        ).fetchall()
+
+        return jsonify(
+            [
+                {
+                    "app": r.app,
+                    "category": r.category,
+                    "total_duration_seconds": int(r.total_duration_seconds or 0),
+                    "total_session_count": int(r.total_session_count or 0),
+                }
+                for r in rows
+            ]
+        )
+    except Exception as e:
+        logger.error(f"[DASHBOARD] top-apps error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/overview/top-domains", methods=["GET"])
+@login_required
+@api_rate_limit
+def api_overview_top_domains():
+    """Top domains with classification data from domain_usage + mv_domain_classified."""
+    try:
+        start_date, end_date = _parse_overview_date_range()
+        limit = max(1, min(int(request.args.get("limit", 10)), 100))
+        visibility_clause, visibility_params = _build_username_filter_sql("du.username")
+
+        rows = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    du.domain,
+                    COALESCE(dc.effective_category, du.domain) AS effective_category,
+                    COALESCE(dc.risk_action, 'unclassified') AS risk_action,
+                    SUM(COALESCE(du.duration_seconds, 0))::bigint AS total_duration_seconds,
+                    SUM(COALESCE(du.session_count, 0))::bigint AS total_session_count
+                FROM domain_usage du
+                LEFT JOIN mv_domain_classified dc
+                    ON dc.agent_id = du.agent_id
+                   AND dc.date = du.date
+                   AND dc.domain = du.domain
+                WHERE du.date BETWEEN :start_date AND :end_date
+                {visibility_clause}
+                GROUP BY du.domain, dc.effective_category, dc.risk_action
+                ORDER BY total_duration_seconds DESC
+                LIMIT :limit
+                """
+            ),
+            {
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": limit,
+                **visibility_params,
+            },
+        ).fetchall()
+
+        return jsonify(
+            [
+                {
+                    "domain": r.domain,
+                    "effective_category": r.effective_category,
+                    "risk_action": r.risk_action,
+                    "total_duration_seconds": int(r.total_duration_seconds or 0),
+                    "total_session_count": int(r.total_session_count or 0),
+                }
+                for r in rows
+            ]
+        )
+    except Exception as e:
+        logger.error(f"[DASHBOARD] top-domains error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/overview/after-hours-leaderboard", methods=["GET"])
+@login_required
+@api_rate_limit
+def api_overview_after_hours_leaderboard():
+    """Top after-hours workers from mv_after_hours_activity."""
+    try:
+        start_date, end_date = _parse_overview_date_range()
+        limit = max(1, min(int(request.args.get("limit", 10)), 100))
+        visibility_clause, visibility_params = _build_username_filter_sql("username")
+
+        rows = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    agent_id::text AS agent_id,
+                    hostname,
+                    SUM(duration_seconds)::bigint AS total_after_hours_seconds,
+                    SUM(session_count)::bigint AS total_after_hours_sessions
+                FROM mv_after_hours_activity
+                WHERE activity_date BETWEEN :start_date AND :end_date
+                  AND is_after_hours = TRUE
+                {visibility_clause}
+                GROUP BY agent_id, hostname
+                ORDER BY total_after_hours_seconds DESC
+                LIMIT :limit
+                """
+            ),
+            {
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": limit,
+                **visibility_params,
+            },
+        ).fetchall()
+
+        return jsonify(
+            [
+                {
+                    "agent_id": r.agent_id,
+                    "hostname": r.hostname,
+                    "total_after_hours_seconds": int(r.total_after_hours_seconds or 0),
+                    "total_after_hours_sessions": int(
+                        r.total_after_hours_sessions or 0
+                    ),
+                }
+                for r in rows
+            ]
+        )
+    except Exception as e:
+        logger.error(f"[DASHBOARD] after-hours-leaderboard error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -4017,4 +4443,33 @@ def api_canary_deploy():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Canary deploy error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/agent/<path:agent_id>/delete", methods=["POST"])
+@login_required
+def delete_agent(agent_id):
+    """Delete an agent and all its associated data (admin only)."""
+    if session.get("role") != "admin":
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if not agent:
+            return jsonify({"error": "Agent not found"}), 404
+
+        hostname = agent.hostname or agent_id
+
+        server_models.ReportSchedule.query.filter_by(agent_id=agent_id).delete()
+        server_models.ReportGenerationJob.query.filter_by(agent_id=agent_id).delete()
+
+        db.session.delete(agent)
+        db.session.commit()
+
+        logger.info(f"[DASHBOARD] Agent deleted: {hostname} ({agent_id})")
+        return jsonify({"status": "ok", "message": f"Agent {hostname} deleted"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[DASHBOARD] delete-agent error for {agent_id}: {e}")
         return jsonify({"error": str(e)}), 500

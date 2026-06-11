@@ -44,6 +44,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 bp = Blueprint('telemetry', __name__)
 
+RECOVERY_ACTIVE_SPAN_CAP_SECONDS = 8 * 3600
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
@@ -215,6 +217,16 @@ def validate_span(span: dict, agent_id: str) -> Optional[str]:
         # Reject unrealistically long spans (> 24h)
         if sent_duration > 86400:
             return "Span duration exceeds 24 hours"
+
+        if (
+            span.get("state") == "active"
+            and int(sent_duration) == RECOVERY_ACTIVE_SPAN_CAP_SECONDS
+            and abs(calc_duration - RECOVERY_ACTIVE_SPAN_CAP_SECONDS) <= 1
+        ):
+            return (
+                "Rejected probable capped recovery active span "
+                f"({RECOVERY_ACTIVE_SPAN_CAP_SECONDS}s)"
+            )
         
         # Special handling for capped spans (exactly 86400 seconds)
         # These are legitimately capped long sessions from crash recovery
@@ -304,6 +316,8 @@ def store_raw_event(agent_id, event_type, payload, processed=False, error=None):
         db.session.flush() # Ensure ID is generated
         return raw
     except Exception as e:
+        # Reset failed transaction state after flush errors.
+        db.session.rollback()
         logger.error(f"Failed to store raw event: {e}")
         return None
 

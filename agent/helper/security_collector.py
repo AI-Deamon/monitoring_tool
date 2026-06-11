@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Extension risk factors
 RISK_UNKNOWN_PUBLISHER = 30
 RISK_DISABLED_BY_USER = 10
-RISK_EXCESSIVE_COUNT = 5       # Per extension above threshold
+RISK_EXCESSIVE_COUNT = 5  # Per extension above threshold
 RISK_RISKY_NAME_PATTERN = 25
 RISK_NO_VERSION = 10
 
@@ -52,97 +52,141 @@ EXTENSION_COUNT_THRESHOLD = 15  # Extensions per browser before risk increases
 
 # Risky extension name patterns (case-insensitive substrings)
 RISKY_NAME_PATTERNS = [
-    'free vpn', 'vpn free', 'pdf converter', 'pdf download',
-    'video downloader', 'mp3 download', 'coupon', 'cashback',
-    'screen capture', 'web scraper', 'auto clicker',
-    'coin miner', 'crypto', 'wallet', 'toolbar',
-    'search bar', 'new tab', 'homepage', 'start page',
+    "free vpn",
+    "vpn free",
+    "pdf converter",
+    "pdf download",
+    "video downloader",
+    "mp3 download",
+    "coupon",
+    "cashback",
+    "screen capture",
+    "web scraper",
+    "auto clicker",
+    "coin miner",
+    "crypto",
+    "wallet",
+    "toolbar",
+    "search bar",
+    "new tab",
+    "homepage",
+    "start page",
 ]
 
 # Driver risk classification by device class
 DRIVER_RISK_CLASSES = {
-    'System':       'critical',   # Kernel-level access
-    'Display':      'high',       # GPU driver with kernel component
-    'Net':          'high',       # Network stack access
-    'SCSIAdapter':  'high',       # Storage controller
-    'HIDClass':     'medium',     # Input devices
-    'USB':          'medium',     # USB controller
-    'Media':        'low',        # Audio/video
-    'Printer':      'low',        # Printer drivers
-    'Image':        'low',        # Scanner/camera
+    "System": "critical",  # Kernel-level access
+    "Display": "high",  # GPU driver with kernel component
+    "Net": "high",  # Network stack access
+    "SCSIAdapter": "high",  # Storage controller
+    "HIDClass": "medium",  # Input devices
+    "USB": "medium",  # USB controller
+    "Media": "low",  # Audio/video
+    "Printer": "low",  # Printer drivers
+    "Image": "low",  # Scanner/camera
 }
 
 # System files to monitor for tampering
 SYSTEM_FILES = {
-    'hosts': {
-        'path': r'C:\Windows\System32\drivers\etc\hosts',
-        'type': 'text',
-        'severity': 'high',
-        'reason': 'DNS hijacking — redirect domains to malicious IPs',
+    "hosts": {
+        "path": r"C:\Windows\System32\drivers\etc\hosts",
+        "type": "text",
+        "severity": "high",
+        "reason": "DNS hijacking — redirect domains to malicious IPs",
     },
-    'sethc': {
-        'path': r'C:\Windows\System32\sethc.exe',
-        'type': 'binary',
-        'severity': 'critical',
-        'reason': 'Sticky keys backdoor — replaced with cmd.exe for login bypass',
+    "sethc": {
+        "path": r"C:\Windows\System32\sethc.exe",
+        "type": "binary",
+        "severity": "critical",
+        "reason": "Sticky keys backdoor — replaced with cmd.exe for login bypass",
     },
-    'utilman': {
-        'path': r'C:\Windows\System32\utilman.exe',
-        'type': 'binary',
-        'severity': 'critical',
-        'reason': 'Utility Manager backdoor — replaced with cmd.exe for login bypass',
+    "utilman": {
+        "path": r"C:\Windows\System32\utilman.exe",
+        "type": "binary",
+        "severity": "critical",
+        "reason": "Utility Manager backdoor — replaced with cmd.exe for login bypass",
     },
-    'osk': {
-        'path': r'C:\Windows\System32\osk.exe',
-        'type': 'binary',
-        'severity': 'high',
-        'reason': 'On-Screen Keyboard backdoor — replaced for accessibility bypass',
+    "osk": {
+        "path": r"C:\Windows\System32\osk.exe",
+        "type": "binary",
+        "severity": "high",
+        "reason": "On-Screen Keyboard backdoor — replaced for accessibility bypass",
     },
 }
 
 # Phase 2 — Risky executable paths (startup programs & scheduled tasks)
 RISKY_EXE_PATHS = [
-    '\\temp\\', '\\tmp\\', '\\downloads\\',
-    '\\appdata\\local\\temp\\', '\\appdata\\roaming\\',
-    '\\users\\public\\', '\\programdata\\',
+    "\\temp\\",
+    "\\tmp\\",
+    "\\downloads\\",
+    "\\appdata\\local\\temp\\",
+    "\\appdata\\roaming\\",
+    "\\users\\public\\",
+    "\\programdata\\",
 ]
 
 # Phase 2 — Dangerous listening ports
 DANGEROUS_PORTS = {
-    21:   ('FTP',        'high'),
-    23:   ('Telnet',     'critical'),
-    445:  ('SMB',        'high'),
-    1433: ('MSSQL',      'high'),
-    1434: ('MSSQL-UDP',  'high'),
-    3306: ('MySQL',      'high'),
-    3389: ('RDP',        'high'),
-    5432: ('PostgreSQL',  'medium'),
-    5900: ('VNC',        'high'),
-    5985: ('WinRM-HTTP', 'medium'),
-    5986: ('WinRM-HTTPS','medium'),
-    6379: ('Redis',      'high'),
-    27017:('MongoDB',    'high'),
+    21: ("FTP", "high"),
+    23: ("Telnet", "critical"),
+    445: ("SMB", "high"),
+    1433: ("MSSQL", "high"),
+    1434: ("MSSQL-UDP", "high"),
+    3306: ("MySQL", "high"),
+    3389: ("RDP", "high"),
+    5432: ("PostgreSQL", "medium"),
+    5900: ("VNC", "high"),
+    5985: ("WinRM-HTTP", "medium"),
+    5986: ("WinRM-HTTPS", "medium"),
+    6379: ("Redis", "high"),
+    27017: ("MongoDB", "high"),
 }
 
 # Microsoft scheduled task path prefixes to skip
 MS_TASK_PREFIXES = (
-    '\\Microsoft\\', '\\Mozilla\\', '\\Google\\',
-    '\\Adobe\\', '\\Apple\\',
+    "\\Microsoft\\",
+    "\\Mozilla\\",
+    "\\Google\\",
+    "\\Adobe\\",
+    "\\Apple\\",
 )
 
 # Phase 3 — Suspicious outbound ports (C2, IRC, proxy, common malware)
 SUSPICIOUS_OUTBOUND_PORTS = {
-    4444, 5555, 6666, 6667, 6668, 6669,  # Metasploit default, IRC
-    8443, 8888, 9999,                     # Common C2 callback
-    1080, 3128,                           # SOCKS/HTTP proxy
+    4444,
+    5555,
+    6666,
+    6667,
+    6668,
+    6669,  # Metasploit default, IRC
+    8443,
+    8888,
+    9999,  # Common C2 callback
+    1080,
+    3128,  # SOCKS/HTTP proxy
 }
 
 # Phase 3 — Known safe processes to exclude from connection analysis
 SAFE_PROCESSES = {
-    'svchost', 'system', 'lsass', 'services', 'wininit', 'csrss',
-    'chrome', 'msedge', 'firefox', 'opera', 'brave',
-    'code', 'teams', 'outlook', 'onedrive', 'searchhost',
-    'microsoftedgeupdate', 'googleupdate', 'spotify',
+    "svchost",
+    "system",
+    "lsass",
+    "services",
+    "wininit",
+    "csrss",
+    "chrome",
+    "msedge",
+    "firefox",
+    "opera",
+    "brave",
+    "code",
+    "teams",
+    "outlook",
+    "onedrive",
+    "searchhost",
+    "microsoftedgeupdate",
+    "googleupdate",
+    "spotify",
 }
 
 
@@ -150,20 +194,22 @@ SAFE_PROCESSES = {
 # DATACLASSES
 # =============================================================================
 
+
 @dataclass
 class SecurityIndicator:
     """A single security risk indicator."""
-    indicator_type: str           # 'unsigned_driver', 'suspicious_extension', 'file_change'
-    severity: str                 # 'critical', 'high', 'medium', 'low'
-    title: str                    # Human-readable summary
-    risk_score: int               # 0-100
+
+    indicator_type: str  # 'unsigned_driver', 'suspicious_extension', 'file_change'
+    severity: str  # 'critical', 'high', 'medium', 'low'
+    title: str  # Human-readable summary
+    risk_score: int  # 0-100
     details: Dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
-    
+
     def __post_init__(self):
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).isoformat()
-    
+
     def to_dict(self) -> Dict:
         return asdict(self)
 
@@ -172,60 +218,63 @@ class SecurityIndicator:
 # SECURITY COLLECTOR
 # =============================================================================
 
+
 class SecurityCollector:
     """
     Phase 1+2+3 security risk analyzer.
-    
+
     Phase 1: Analyzes existing collected data (drivers, extensions, files).
     Phase 2: Collects new data via PowerShell (startup, tasks, ports).
     Phase 3: Collects network connections, USB history, login events.
-    
+
     Produces SecurityIndicator objects sent via /security-indicators pipeline.
     """
-    
+
     def __init__(self, config=None):
         self.config = config
-        self.enable_disk_usage_indicator = getattr(config, 'enable_disk_usage_indicator', True) if config else True
-        self._baselines: Dict[str, str] = {}   # file_name -> sha256 hash
+        self.enable_disk_usage_indicator = (
+            getattr(config, "enable_disk_usage_indicator", True) if config else True
+        )
+        self._baselines: Dict[str, str] = {}  # file_name -> sha256 hash
         self._baseline_path = self._get_baseline_path()
         self._load_baselines()
-    
+
     def _get_baseline_path(self) -> Path:
         """Get path for storing file baselines."""
-        if self.config and hasattr(self.config, 'data_dir'):
+        if self.config and hasattr(self.config, "data_dir"):
             base = Path(self.config.data_dir)
         else:
-            base = Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'WinDiagSvc'
-        
-        baseline_dir = base / 'security'
+            base = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "WinDiagSvc"
+
+        baseline_dir = base / "security"
         baseline_dir.mkdir(parents=True, exist_ok=True)
-        return baseline_dir / 'file_baselines.json'
-    
+        return baseline_dir / "file_baselines.json"
+
     def _load_baselines(self):
         """Load stored file baselines from disk."""
         try:
             if self._baseline_path.exists():
-                with open(self._baseline_path, 'r') as f:
+                with open(self._baseline_path, "r") as f:
                     self._baselines = json.load(f)
                 logger.debug(f"[SECURITY] Loaded {len(self._baselines)} file baselines")
         except Exception as e:
             logger.warning(f"[SECURITY] Failed to load baselines: {e}")
             self._baselines = {}
-    
+
     def _save_baselines(self):
         """Persist file baselines to disk."""
         try:
-            with open(self._baseline_path, 'w') as f:
+            with open(self._baseline_path, "w") as f:
                 json.dump(self._baselines, f, indent=2)
         except Exception as e:
             logger.warning(f"[SECURITY] Failed to save baselines: {e}")
-    
+
     def _calculate_file_hash(self, filepath: str) -> Optional[str]:
         """Calculate SHA256 hash of a file."""
         try:
             sha256 = hashlib.sha256()
-            with open(filepath, 'rb') as f:
-                for chunk in iter(lambda: f.read(8192), b''):
+            with open(filepath, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
                     sha256.update(chunk)
             return sha256.hexdigest()
         except PermissionError:
@@ -242,176 +291,180 @@ class SecurityCollector:
     def analyze_unsigned_drivers(self, drivers: List[Dict]) -> List[SecurityIndicator]:
         """
         Analyze driver signing status from existing collected data.
-        
+
         Args:
             drivers: List of driver dicts from ExtendedInventoryCollector
-            
+
         Returns:
             SecurityIndicator for each unsigned driver
         """
         indicators = []
-        
+
         if not drivers:
             return indicators
-        
+
         # DEBUG LOG - MAY BE REMOVED
         logger.info(f"[SECURITY] START Driver analysis for {len(drivers)} drivers")
-        
+
         unsigned_count = 0
-        
+
         for drv in drivers:
-            is_signed = drv.get('is_signed', True)
-            
+            is_signed = drv.get("is_signed", True)
+
             if is_signed:
                 continue
-            
+
             unsigned_count += 1
-            device_class = drv.get('device_class', 'Unknown')
-            device_name = drv.get('device_name', 'Unknown device')
-            driver_name = drv.get('driver_name', '')
-            manufacturer = drv.get('manufacturer', 'Unknown')
-            
+            device_class = drv.get("device_class", "Unknown")
+            device_name = drv.get("device_name", "Unknown device")
+            driver_name = drv.get("driver_name", "")
+            manufacturer = drv.get("manufacturer", "Unknown")
+
             # Classify risk by device class
-            severity = DRIVER_RISK_CLASSES.get(device_class, 'medium')
-            
+            severity = DRIVER_RISK_CLASSES.get(device_class, "medium")
+
             # Calculate risk score
             risk_score = 40  # Base score for any unsigned driver
-            if severity == 'critical':
+            if severity == "critical":
                 risk_score = 85
-            elif severity == 'high':
+            elif severity == "high":
                 risk_score = 70
-            elif severity == 'medium':
+            elif severity == "medium":
                 risk_score = 50
-            
+
             indicator = SecurityIndicator(
-                indicator_type='unsigned_driver',
+                indicator_type="unsigned_driver",
                 severity=severity,
                 title=f"Unsigned {device_class} driver: {device_name}",
                 risk_score=risk_score,
                 details={
-                    'device_name': device_name,
-                    'driver_name': driver_name,
-                    'device_class': device_class,
-                    'manufacturer': manufacturer,
-                    'driver_version': drv.get('driver_version', ''),
-                    'device_id': drv.get('device_id', ''),
+                    "device_name": device_name,
+                    "driver_name": driver_name,
+                    "device_class": device_class,
+                    "manufacturer": manufacturer,
+                    "driver_version": drv.get("driver_version", ""),
+                    "device_id": drv.get("device_id", ""),
                 },
             )
             indicators.append(indicator)
-        
+
         logger.info(
             f"[SECURITY] Driver analysis: {unsigned_count} unsigned "
             f"out of {len(drivers)} total drivers"
         )
-        
+
         return indicators
 
     # =========================================================================
     # P1-B: Browser Extension Risk Analysis
     # =========================================================================
 
-    def analyze_extension_risks(self, extensions: List[Dict]) -> List[SecurityIndicator]:
+    def analyze_extension_risks(
+        self, extensions: List[Dict]
+    ) -> List[SecurityIndicator]:
         """
         Score browser extensions for security risk.
-        
+
         Risk factors:
           - Unknown/empty publisher (+30)
           - Matches risky name patterns (+25)
           - No version info (+10)
           - Browser has excessive extensions (+5 each above threshold)
-        
+
         Only reports extensions with risk_score >= 30.
         """
         indicators = []
-        
+
         if not extensions:
             return indicators
-        
+
         # DEBUG LOG - MAY BE REMOVED
-        logger.info(f"[SECURITY] START Extension analysis for {len(extensions)} extensions")
-        
+        logger.info(
+            f"[SECURITY] START Extension analysis for {len(extensions)} extensions"
+        )
+
         # Count extensions per browser for excessive-count penalty
         browser_counts: Dict[str, int] = {}
         for ext in extensions:
             if not isinstance(ext, dict):
                 continue
-                
-            ext_id = ext.get('extension_id', 'unknown')
-            browser = ext.get('browser', 'Unknown')
+
+            ext_id = ext.get("extension_id", "unknown")
+            browser = ext.get("browser", "Unknown")
             browser_counts[browser] = browser_counts.get(browser, 0) + 1
-        
+
         high_risk_count = 0
-        
+
         for ext in extensions:
             risk_score = 0
             risk_factors = []
-            
-            name = ext.get('name', 'Unknown')
-            browser = ext.get('browser', 'Unknown')
-            version = ext.get('version', '')
-            ext_id = ext.get('extension_id', '')
-            
+
+            name = ext.get("name", "Unknown")
+            browser = ext.get("browser", "Unknown")
+            version = ext.get("version", "")
+            ext_id = ext.get("extension_id", "")
+
             # Factor 1: Unknown publisher / no name
-            if name in ('Unknown', '', None):
+            if name in ("Unknown", "", None):
                 risk_score += RISK_UNKNOWN_PUBLISHER
-                risk_factors.append('unknown_name')
-            
+                risk_factors.append("unknown_name")
+
             # Factor 2: Risky name patterns
-            name_lower = (name or '').lower()
+            name_lower = (name or "").lower()
             for pattern in RISKY_NAME_PATTERNS:
                 if pattern in name_lower:
                     risk_score += RISK_RISKY_NAME_PATTERN
-                    risk_factors.append(f'risky_pattern:{pattern}')
+                    risk_factors.append(f"risky_pattern:{pattern}")
                     break  # Only count once
-            
+
             # Factor 3: No version
-            if not version or version in ('Unknown', '0.0.0'):
+            if not version or version in ("Unknown", "0.0.0"):
                 risk_score += RISK_NO_VERSION
-                risk_factors.append('no_version')
-            
+                risk_factors.append("no_version")
+
             # Factor 4: Excessive extensions per browser
             count = browser_counts.get(browser, 0)
             if count > EXTENSION_COUNT_THRESHOLD:
                 excess = count - EXTENSION_COUNT_THRESHOLD
                 penalty = excess * RISK_EXCESSIVE_COUNT
                 risk_score += penalty
-                risk_factors.append(f'excessive_count:{count}')
-            
+                risk_factors.append(f"excessive_count:{count}")
+
             # Only report if risk score meets threshold
             if risk_score >= 30:
                 high_risk_count += 1
-                
+
                 # Map score to severity
                 if risk_score >= 70:
-                    severity = 'high'
+                    severity = "high"
                 elif risk_score >= 50:
-                    severity = 'medium'
+                    severity = "medium"
                 else:
-                    severity = 'low'
-                
+                    severity = "low"
+
                 indicator = SecurityIndicator(
-                    indicator_type='suspicious_extension',
+                    indicator_type="suspicious_extension",
                     severity=severity,
                     title=f"Suspicious {browser} extension: {name}",
                     risk_score=min(risk_score, 100),
                     details={
-                        'browser': browser,
-                        'extension_id': ext_id,
-                        'name': name,
-                        'version': version,
-                        'enabled': ext.get('enabled', True),
-                        'profile': ext.get('profile', ''),
-                        'risk_factors': risk_factors,
+                        "browser": browser,
+                        "extension_id": ext_id,
+                        "name": name,
+                        "version": version,
+                        "enabled": ext.get("enabled", True),
+                        "profile": ext.get("profile", ""),
+                        "risk_factors": risk_factors,
                     },
                 )
                 indicators.append(indicator)
-        
+
         logger.info(
             f"[SECURITY] Extension analysis: {high_risk_count} suspicious "
             f"out of {len(extensions)} total extensions "
             f"(browsers: {browser_counts})"
         )
-        
+
         return indicators
 
     # =========================================================================
@@ -421,85 +474,89 @@ class SecurityCollector:
     def check_system_files(self) -> List[SecurityIndicator]:
         """
         Detect changes in security-critical system files using SHA256 baselines.
-        
+
         First run: creates baselines (no alerts).
         Subsequent runs: reports any hash changes.
         """
         indicators = []
         baselines_changed = False
-        
+
         # DEBUG LOG - MAY BE REMOVED
         logger.info("[SECURITY] START System file change check")
-        
+
         for file_name, file_info in SYSTEM_FILES.items():
-            filepath = file_info['path']
-            
+            filepath = file_info["path"]
+
             if not os.path.exists(filepath):
                 logger.debug(f"[SECURITY] File not found: {filepath}")
                 continue
-            
+
             current_hash = self._calculate_file_hash(filepath)
             if current_hash is None:
                 continue
-            
+
             stored_hash = self._baselines.get(file_name)
-            
+
             if stored_hash is None:
                 # First run — store baseline
                 self._baselines[file_name] = current_hash
                 baselines_changed = True
-                logger.info(f"[SECURITY] Baseline created for {file_name}: {current_hash[:16]}...")
-                
+                logger.info(
+                    f"[SECURITY] Baseline created for {file_name}: {current_hash[:16]}..."
+                )
+
             elif stored_hash != current_hash:
                 # Change detected
                 try:
                     mtime = os.path.getmtime(filepath)
-                    last_modified = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+                    last_modified = datetime.fromtimestamp(
+                        mtime, tz=timezone.utc
+                    ).isoformat()
                 except Exception:
                     last_modified = None
-                
+
                 details = {
-                    'file': file_name,
-                    'path': filepath,
-                    'old_hash': stored_hash,
-                    'new_hash': current_hash,
-                    'last_modified': last_modified,
-                    'reason': file_info['reason'],
+                    "file": file_name,
+                    "path": filepath,
+                    "old_hash": stored_hash,
+                    "new_hash": current_hash,
+                    "last_modified": last_modified,
+                    "reason": file_info["reason"],
                 }
-                
+
                 # For text files (hosts), include content diff
-                if file_info['type'] == 'text':
+                if file_info["type"] == "text":
                     try:
-                        with open(filepath, 'r', errors='ignore') as f:
+                        with open(filepath, "r", errors="ignore") as f:
                             content = f.read(4096)  # Cap at 4KB
-                        details['content_preview'] = content
+                        details["content_preview"] = content
                     except Exception:
                         pass
-                
+
                 indicator = SecurityIndicator(
-                    indicator_type='file_change',
-                    severity=file_info['severity'],
+                    indicator_type="file_change",
+                    severity=file_info["severity"],
                     title=f"System file modified: {file_name}",
-                    risk_score=90 if file_info['severity'] == 'critical' else 75,
+                    risk_score=90 if file_info["severity"] == "critical" else 75,
                     details=details,
                 )
                 indicators.append(indicator)
-                
+
                 # Update baseline to new hash
                 self._baselines[file_name] = current_hash
                 baselines_changed = True
-                
+
                 logger.warning(
                     f"[SECURITY] FILE CHANGE DETECTED: {file_name} "
                     f"({stored_hash[:16]}... -> {current_hash[:16]}...)"
                 )
-        
+
         if baselines_changed:
             self._save_baselines()
-        
+
         if not indicators:
             logger.debug("[SECURITY] No system file changes detected")
-        
+
         return indicators
 
     # =========================================================================
@@ -509,23 +566,34 @@ class SecurityCollector:
     def _run_powershell(self, script: str, timeout: int = 60) -> Optional[str]:
         """Run a PowerShell command and return stdout."""
         try:
-            # Use CREATE_NO_WINDOW for robust background execution
+            # Use CREATE_NO_WINDOW and -WindowStyle Hidden for robust background execution
             result = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-NonInteractive",
-                 "-ExecutionPolicy", "Bypass", "-Command", script],
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    script,
+                ],
                 capture_output=True,
                 text=True,
-                encoding='utf-8',
-                errors='ignore',
+                encoding="utf-8",
+                errors="ignore",
                 timeout=timeout,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
 
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
                 stderr_preview = result.stderr[:200] if result.stderr else "No stderr"
-                logger.debug(f"[SECURITY] PowerShell execution failed (code {result.returncode}): {stderr_preview}")
+                logger.debug(
+                    f"[SECURITY] PowerShell execution failed (code {result.returncode}): {stderr_preview}"
+                )
                 return None
 
         except subprocess.TimeoutExpired:
@@ -554,10 +622,10 @@ class SecurityCollector:
         """
         # DEBUG LOG - MAY BE REMOVED
         logger.info("[SECURITY] START Startup programs collection")
-        
+
         indicators = []
 
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 
 # Registry HKLM Run
@@ -598,7 +666,7 @@ try {
 } catch {}
 
 $results | ConvertTo-Json -Compress -Depth 3
-'''
+"""
 
         output = self._run_powershell(ps_script, timeout=30)
         if not output:
@@ -618,9 +686,9 @@ $results | ConvertTo-Json -Compress -Depth 3
         suspicious_count = 0
 
         for entry in entries:
-            name = entry.get('Name', 'Unknown')
-            command = entry.get('Command', '')
-            source = entry.get('Source', '')
+            name = entry.get("Name", "Unknown")
+            command = entry.get("Command", "")
+            source = entry.get("Source", "")
             dedup_key = (name.lower(), command.lower())
 
             if dedup_key in seen:
@@ -633,19 +701,25 @@ $results | ConvertTo-Json -Compress -Depth 3
 
             if self._is_risky_path(command):
                 risk_score += 60
-                risk_factors.append('risky_path')
+                risk_factors.append("risky_path")
 
             # Encoded commands or script blocks
             cmd_lower = command.lower()
-            if '-encodedcommand' in cmd_lower or '-enc ' in cmd_lower:
+            if "-encodedcommand" in cmd_lower or "-enc " in cmd_lower:
                 risk_score += 70
-                risk_factors.append('encoded_command')
-            elif 'powershell' in cmd_lower and ('-c ' in cmd_lower or '-command' in cmd_lower):
+                risk_factors.append("encoded_command")
+            elif "powershell" in cmd_lower and (
+                "-c " in cmd_lower or "-command" in cmd_lower
+            ):
                 risk_score += 40
-                risk_factors.append('inline_powershell')
-            elif cmd_lower.endswith('.vbs') or cmd_lower.endswith('.bat') or cmd_lower.endswith('.js'):
+                risk_factors.append("inline_powershell")
+            elif (
+                cmd_lower.endswith(".vbs")
+                or cmd_lower.endswith(".bat")
+                or cmd_lower.endswith(".js")
+            ):
                 risk_score += 30
-                risk_factors.append('script_extension')
+                risk_factors.append("script_extension")
 
             if risk_score < 30:
                 continue  # Not suspicious enough to report
@@ -653,26 +727,28 @@ $results | ConvertTo-Json -Compress -Depth 3
             suspicious_count += 1
 
             if risk_score >= 70:
-                severity = 'high'
+                severity = "high"
             elif risk_score >= 50:
-                severity = 'medium'
+                severity = "medium"
             else:
-                severity = 'low'
+                severity = "low"
 
-            indicators.append(SecurityIndicator(
-                indicator_type='startup_program',
-                severity=severity,
-                title=f"Suspicious startup: {name}",
-                risk_score=min(risk_score, 100),
-                details={
-                    'name': name,
-                    'command': command[:500],
-                    'source': source,
-                    'user': entry.get('User', ''),
-                    'location': entry.get('Location', ''),
-                    'risk_factors': risk_factors,
-                },
-            ))
+            indicators.append(
+                SecurityIndicator(
+                    indicator_type="startup_program",
+                    severity=severity,
+                    title=f"Suspicious startup: {name}",
+                    risk_score=min(risk_score, 100),
+                    details={
+                        "name": name,
+                        "command": command[:500],
+                        "source": source,
+                        "user": entry.get("User", ""),
+                        "location": entry.get("Location", ""),
+                        "risk_factors": risk_factors,
+                    },
+                )
+            )
 
         logger.info(
             f"[SECURITY] Startup analysis: {suspicious_count} suspicious "
@@ -696,7 +772,7 @@ $results | ConvertTo-Json -Compress -Depth 3
 
         indicators = []
 
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.State -ne 'Disabled' } | ForEach-Object {
@@ -734,12 +810,14 @@ if ($results.Count -eq 0) {
     exit 0
 }
 $results | ConvertTo-Json -Compress -Depth 4
-'''
+"""
 
         output = self._run_powershell(ps_script, timeout=45)
         if not output or output.strip() == "NO_TASKS_FOUND":
             # Fallback: try schtasks.exe which works without admin
-            logger.info("[SECURITY] PowerShell failed or empty, trying schtasks.exe fallback")
+            logger.info(
+                "[SECURITY] PowerShell failed or empty, trying schtasks.exe fallback"
+            )
             return self._collect_tasks_schtasks()
 
         try:
@@ -747,7 +825,9 @@ $results | ConvertTo-Json -Compress -Depth 4
             if isinstance(tasks, dict):
                 tasks = [tasks]
         except json.JSONDecodeError:
-            logger.warning(f"[SECURITY] Failed to parse scheduled task JSON. Output: {output[:200]}")
+            logger.warning(
+                f"[SECURITY] Failed to parse scheduled task JSON. Output: {output[:200]}"
+            )
             return indicators
 
         return self._analyze_tasks(tasks)
@@ -756,34 +836,40 @@ $results | ConvertTo-Json -Compress -Depth 4
         """Fallback: collect tasks via schtasks.exe (works without admin)"""
         try:
             result = subprocess.run(
-                ['schtasks', '/query', '/fo', 'CSV', '/v'],
-                capture_output=True, text=True, timeout=30
+                ["schtasks", "/query", "/fo", "CSV", "/v", "/tn", "\\*"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             if result.returncode != 0:
                 logger.warning(f"[SECURITY] schtasks.exe failed: {result.stderr[:200]}")
                 return []
 
-            lines = result.stdout.strip().split('\n')
+            lines = result.stdout.strip().split("\n")
             if len(lines) < 2:
                 logger.info("[SECURITY] No tasks found via schtasks.exe")
                 return []
 
             import csv
             import io
+
             reader = csv.DictReader(io.StringIO(result.stdout))
             tasks = []
             for row in reader:
-                state = row.get('Status', '').strip().lower()
-                if state == 'disabled':
+                state = row.get("Status", "").strip().lower()
+                if state == "disabled":
                     continue
-                tasks.append({
-                    'TaskPath': row.get('TaskName', ''),
-                    'TaskName': row.get('TaskName', '').split('\\')[-1],
-                    'State': row.get('Status', ''),
-                    'Execute': row.get('Task To Run', ''),
-                    'Arguments': '',
-                    'Principal': row.get('Run As User', ''),
-                })
+                tasks.append(
+                    {
+                        "TaskPath": row.get("TaskName", ""),
+                        "TaskName": row.get("TaskName", "").split("\\")[-1],
+                        "State": row.get("Status", ""),
+                        "Execute": row.get("Task To Run", ""),
+                        "Arguments": "",
+                        "Principal": row.get("Run As User", ""),
+                    }
+                )
 
             if tasks:
                 logger.info(f"[SECURITY] schtasks.exe found {len(tasks)} tasks")
@@ -800,24 +886,27 @@ $results | ConvertTo-Json -Compress -Depth 4
         suspicious_count = 0
 
         for task in tasks:
-            task_path = task.get('TaskPath', '')
-            task_name = task.get('TaskName', 'Unknown')
-            principal = task.get('Principal', '') or ''
+            task_path = task.get("TaskPath", "")
+            task_name = task.get("TaskName", "Unknown")
+            principal = task.get("Principal", "") or ""
 
             # Skip known vendor tasks
             if any(task_path.startswith(prefix) for prefix in MS_TASK_PREFIXES):
                 continue
 
             # Handle both PowerShell (Actions list) and schtasks (Execute string) formats
-            if 'Actions' in task:
-                actions = task.get('Actions', [])
+            if "Actions" in task:
+                actions = task.get("Actions", [])
                 if isinstance(actions, dict):
                     actions = [actions]
-                action_items = [(a.get('Execute', ''), a.get('Arguments', '') or '') for a in actions]
+                action_items = [
+                    (a.get("Execute", ""), a.get("Arguments", "") or "")
+                    for a in actions
+                ]
             else:
                 # schtasks format: single Execute + Arguments
-                exe = task.get('Execute', '')
-                args = task.get('Arguments', '') or ''
+                exe = task.get("Execute", "")
+                args = task.get("Arguments", "") or ""
                 action_items = [(exe, args)]
 
             for exe, args in action_items:
@@ -829,21 +918,25 @@ $results | ConvertTo-Json -Compress -Depth 4
                 # Risky executable path
                 if self._is_risky_path(exe):
                     risk_score += 60
-                    risk_factors.append('risky_exe_path')
+                    risk_factors.append("risky_exe_path")
 
                 # Encoded PowerShell
                 cmd_lower = full_cmd.lower()
-                if '-encodedcommand' in cmd_lower or '-enc ' in cmd_lower:
+                if "-encodedcommand" in cmd_lower or "-enc " in cmd_lower:
                     risk_score += 70
-                    risk_factors.append('encoded_command')
-                elif 'powershell' in cmd_lower and ('-c ' in cmd_lower or '-command' in cmd_lower):
+                    risk_factors.append("encoded_command")
+                elif "powershell" in cmd_lower and (
+                    "-c " in cmd_lower or "-command" in cmd_lower
+                ):
                     risk_score += 35
-                    risk_factors.append('inline_powershell')
+                    risk_factors.append("inline_powershell")
 
                 # SYSTEM principal on non-standard path
-                if 'system' in principal.lower() and not exe.lower().startswith('c:\\windows\\'):
+                if "system" in principal.lower() and not exe.lower().startswith(
+                    "c:\\windows\\"
+                ):
                     risk_score += 25
-                    risk_factors.append('system_non_standard')
+                    risk_factors.append("system_non_standard")
 
                 if risk_score < 30:
                     continue
@@ -851,28 +944,30 @@ $results | ConvertTo-Json -Compress -Depth 4
                 suspicious_count += 1
 
                 if risk_score >= 70:
-                    severity = 'high'
+                    severity = "high"
                 elif risk_score >= 50:
-                    severity = 'medium'
+                    severity = "medium"
                 else:
-                    severity = 'low'
+                    severity = "low"
 
-                indicators.append(SecurityIndicator(
-                    indicator_type='scheduled_task',
-                    severity=severity,
-                    title=f"Suspicious task: {task_name}",
-                    risk_score=min(risk_score, 100),
-                    details={
-                        'task_name': task_name,
-                        'task_path': task_path,
-                        'execute': exe[:300],
-                        'arguments': args[:300],
-                        'principal': principal,
-                        'state': task.get('State', ''),
-                        'triggers': task.get('Triggers', ''),
-                        'risk_factors': risk_factors,
-                    },
-                ))
+                indicators.append(
+                    SecurityIndicator(
+                        indicator_type="scheduled_task",
+                        severity=severity,
+                        title=f"Suspicious task: {task_name}",
+                        risk_score=min(risk_score, 100),
+                        details={
+                            "task_name": task_name,
+                            "task_path": task_path,
+                            "execute": exe[:300],
+                            "arguments": args[:300],
+                            "principal": principal,
+                            "state": task.get("State", ""),
+                            "triggers": task.get("Triggers", ""),
+                            "risk_factors": risk_factors,
+                        },
+                    )
+                )
 
         logger.info(
             f"[SECURITY] Task analysis: {suspicious_count} suspicious "
@@ -891,10 +986,10 @@ $results | ConvertTo-Json -Compress -Depth 4
         """
         # DEBUG LOG - MAY BE REMOVED
         logger.info("[SECURITY] START Open ports collection")
-        
+
         indicators = []
 
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
@@ -912,7 +1007,7 @@ try {
     }
 } catch {}
 $results | ConvertTo-Json -Compress -Depth 3
-'''
+"""
 
         output = self._run_powershell(ps_script, timeout=30)
         if not output:
@@ -935,19 +1030,19 @@ $results | ConvertTo-Json -Compress -Depth 3
             if not isinstance(entry, dict):
                 continue
 
-            port = entry.get('LocalPort', 0)
-            addr = entry.get('LocalAddress', '')
-            proc_name = entry.get('ProcessName', 'Unknown')
+            port = entry.get("LocalPort", 0)
+            addr = entry.get("LocalAddress", "")
+            proc_name = entry.get("ProcessName", "Unknown")
             # Fix: Ensure proc_path is a string to avoid NoneType subscriptable error
-            proc_path = str(entry.get('ProcessPath') or '')
-            pid = entry.get('ProcessId', 0)
+            proc_path = str(entry.get("ProcessPath") or "")
+            pid = entry.get("ProcessId", 0)
 
             if port in seen_ports:
                 continue
             seen_ports.add(port)
 
             # Skip localhost-only listeners (generally safe)
-            if addr in ('127.0.0.1', '::1') and port not in DANGEROUS_PORTS:
+            if addr in ("127.0.0.1", "::1") and port not in DANGEROUS_PORTS:
                 continue
 
             risk_score = 0
@@ -956,23 +1051,23 @@ $results | ConvertTo-Json -Compress -Depth 3
             # Check against known dangerous ports
             if port in DANGEROUS_PORTS:
                 service_name, port_severity = DANGEROUS_PORTS[port]
-                risk_score += 60 if port_severity in ('high', 'critical') else 40
-                risk_factors.append(f'dangerous_port:{service_name}')
+                risk_score += 60 if port_severity in ("high", "critical") else 40
+                risk_factors.append(f"dangerous_port:{service_name}")
 
                 # Listening on all interfaces is worse
-                if addr in ('0.0.0.0', '::'):
+                if addr in ("0.0.0.0", "::"):
                     risk_score += 20
-                    risk_factors.append('all_interfaces')
+                    risk_factors.append("all_interfaces")
 
             # Unknown process on high port
-            elif port > 1024 and proc_name in ('Unknown', 'System'):
+            elif port > 1024 and proc_name in ("Unknown", "System"):
                 risk_score += 35
-                risk_factors.append('unknown_process')
+                risk_factors.append("unknown_process")
 
             # Risky process path
             if self._is_risky_path(proc_path):
                 risk_score += 30
-                risk_factors.append('risky_process_path')
+                risk_factors.append("risky_process_path")
 
             if risk_score < 30:
                 continue
@@ -980,26 +1075,28 @@ $results | ConvertTo-Json -Compress -Depth 3
             flagged_count += 1
 
             if risk_score >= 70:
-                severity = 'high'
+                severity = "high"
             elif risk_score >= 50:
-                severity = 'medium'
+                severity = "medium"
             else:
-                severity = 'low'
+                severity = "low"
 
-            indicators.append(SecurityIndicator(
-                indicator_type='open_port',
-                severity=severity,
-                title=f"Port {port} ({proc_name}) listening on {addr}",
-                risk_score=min(risk_score, 100),
-                details={
-                    'port': port,
-                    'address': addr,
-                    'process_name': proc_name,
-                    'process_path': proc_path[:300],
-                    'pid': pid,
-                    'risk_factors': risk_factors,
-                },
-            ))
+            indicators.append(
+                SecurityIndicator(
+                    indicator_type="open_port",
+                    severity=severity,
+                    title=f"Port {port} ({proc_name}) listening on {addr}",
+                    risk_score=min(risk_score, 100),
+                    details={
+                        "port": port,
+                        "address": addr,
+                        "process_name": proc_name,
+                        "process_path": proc_path[:300],
+                        "pid": pid,
+                        "risk_factors": risk_factors,
+                    },
+                )
+            )
 
         logger.info(
             f"[SECURITY] Port analysis: {flagged_count} flagged "
@@ -1018,10 +1115,10 @@ $results | ConvertTo-Json -Compress -Depth 3
         """
         # DEBUG LOG - MAY BE REMOVED
         logger.info("[SECURITY] START Active connections collection")
-        
+
         indicators = []
 
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | ForEach-Object {
@@ -1041,7 +1138,7 @@ try {
     }
 } catch {}
 $results | ConvertTo-Json -Compress -Depth 3
-'''
+"""
 
         output = self._run_powershell(ps_script, timeout=30)
         if not output:
@@ -1059,7 +1156,7 @@ $results | ConvertTo-Json -Compress -Depth 3
         # Count connections per process for volume detection
         proc_conn_counts: Dict[str, int] = {}
         for c in conns:
-            pname = (c.get('ProcessName') or 'Unknown').lower()
+            pname = (c.get("ProcessName") or "Unknown").lower()
             proc_conn_counts[pname] = proc_conn_counts.get(pname, 0) + 1
 
         seen = set()  # (remote_addr, remote_port, process_name)
@@ -1068,23 +1165,25 @@ $results | ConvertTo-Json -Compress -Depth 3
         for entry in conns:
             if not isinstance(entry, dict):
                 continue
-                
-            local_addr = entry.get('LocalAddress', '')
-            local_port = entry.get('LocalPort', 0)
-            remote_addr = entry.get('RemoteAddress', '')
-            remote_port = entry.get('RemotePort', 0)
-            state = entry.get('State', 'Established')
-            proc_name = entry.get('ProcessName', 'Unknown')
+
+            local_addr = entry.get("LocalAddress", "")
+            local_port = entry.get("LocalPort", 0)
+            remote_addr = entry.get("RemoteAddress", "")
+            remote_port = entry.get("RemotePort", 0)
+            state = entry.get("State", "Established")
+            proc_name = entry.get("ProcessName", "Unknown")
             # Fix: Ensure proc_path is a string
-            proc_path = str(entry.get('ProcessPath') or '')
-            pid = entry.get('ProcessId', 0)
+            proc_path = str(entry.get("ProcessPath") or "")
+            pid = entry.get("ProcessId", 0)
 
             # Skip safe processes
             if proc_name.lower() in SAFE_PROCESSES:
                 continue
 
             # Skip localhost/link-local
-            if remote_addr in ('127.0.0.1', '::1', '0.0.0.0') or remote_addr.startswith('fe80'):
+            if remote_addr in ("127.0.0.1", "::1", "0.0.0.0") or remote_addr.startswith(
+                "fe80"
+            ):
                 continue
 
             dedup_key = (remote_addr, remote_port, proc_name.lower())
@@ -1098,51 +1197,53 @@ $results | ConvertTo-Json -Compress -Depth 3
             # Suspicious outbound port
             if remote_port in SUSPICIOUS_OUTBOUND_PORTS:
                 risk_score += 65
-                risk_factors.append(f'suspicious_port:{remote_port}')
+                risk_factors.append(f"suspicious_port:{remote_port}")
 
             # Risky process path
             if self._is_risky_path(proc_path):
                 risk_score += 50
-                risk_factors.append('risky_process_path')
+                risk_factors.append("risky_process_path")
 
             # High connection volume from single process
             conn_count = proc_conn_counts.get(proc_name.lower(), 0)
             if conn_count > 20:
                 risk_score += 25
-                risk_factors.append(f'high_volume:{conn_count}')
+                risk_factors.append(f"high_volume:{conn_count}")
 
             # Unknown process connecting outbound
-            if proc_name == 'Unknown':
+            if proc_name == "Unknown":
                 risk_score += 40
-                risk_factors.append('unknown_process')
+                risk_factors.append("unknown_process")
 
             if risk_score < 30:
                 continue
 
             flagged += 1
             if risk_score >= 70:
-                severity = 'high'
+                severity = "high"
             elif risk_score >= 50:
-                severity = 'medium'
+                severity = "medium"
             else:
-                severity = 'low'
+                severity = "low"
 
-            indicators.append(SecurityIndicator(
-                indicator_type='network_connection',
-                severity=severity,
-                title=f"{proc_name} -> {remote_addr}:{remote_port}",
-                risk_score=min(risk_score, 100),
-                details={
-                    'process_name': proc_name,
-                    'process_path': proc_path[:300],
-                    'pid': pid,
-                    'remote_address': remote_addr,
-                    'remote_port': remote_port,
-                    'local_port': entry.get('LocalPort', 0),
-                    'total_connections': conn_count,
-                    'risk_factors': risk_factors,
-                },
-            ))
+            indicators.append(
+                SecurityIndicator(
+                    indicator_type="network_connection",
+                    severity=severity,
+                    title=f"{proc_name} -> {remote_addr}:{remote_port}",
+                    risk_score=min(risk_score, 100),
+                    details={
+                        "process_name": proc_name,
+                        "process_path": proc_path[:300],
+                        "pid": pid,
+                        "remote_address": remote_addr,
+                        "remote_port": remote_port,
+                        "local_port": entry.get("LocalPort", 0),
+                        "total_connections": conn_count,
+                        "risk_factors": risk_factors,
+                    },
+                )
+            )
 
         logger.info(
             f"[SECURITY] Connection analysis: {flagged} suspicious "
@@ -1161,10 +1262,10 @@ $results | ConvertTo-Json -Compress -Depth 3
         """
         # DEBUG LOG - MAY BE REMOVED
         logger.info("[SECURITY] START USB history collection")
-        
+
         indicators = []
 
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     $usbstorPath = 'HKLM:\SYSTEM\CurrentControlSet\Enum\USBSTOR'
@@ -1189,7 +1290,7 @@ try {
     }
 } catch {}
 $results | ConvertTo-Json -Compress -Depth 3
-'''
+"""
 
         output = self._run_powershell(ps_script, timeout=30)
         if not output:
@@ -1207,50 +1308,52 @@ $results | ConvertTo-Json -Compress -Depth 3
         device_count = len(devices)
 
         for dev in devices:
-            device_class = dev.get('DeviceClass', 'Unknown')
-            serial = dev.get('SerialNumber', '')
-            friendly = dev.get('FriendlyName', '') or device_class
-            manufacturer = dev.get('Manufacturer', '')
+            device_class = dev.get("DeviceClass", "Unknown")
+            serial = dev.get("SerialNumber", "")
+            friendly = dev.get("FriendlyName", "") or device_class
+            manufacturer = dev.get("Manufacturer", "")
 
             risk_score = 0
             risk_factors = []
 
             # No friendly name / unknown vendor
-            if not dev.get('FriendlyName'):
+            if not dev.get("FriendlyName"):
                 risk_score += 15
-                risk_factors.append('no_friendly_name')
+                risk_factors.append("no_friendly_name")
 
             # Many unique USB storage devices = data exfiltration risk
             if device_count > 5:
                 risk_score += 20
-                risk_factors.append(f'high_device_count:{device_count}')
+                risk_factors.append(f"high_device_count:{device_count}")
 
             # All USB storage devices get a base score (removable media policy)
             risk_score += 10
-            risk_factors.append('removable_storage')
+            risk_factors.append("removable_storage")
 
             if risk_score < 30:
                 continue
 
             if risk_score >= 50:
-                severity = 'medium'
+                severity = "medium"
             else:
-                severity = 'low'
+                severity = "low"
 
-            indicators.append(SecurityIndicator(
-                indicator_type='usb_device',
-                severity=severity,
-                title=f"USB storage: {friendly}",
-                risk_score=min(risk_score, 100),
-                details={
-                    'device_class': device_class,
-                    'serial_number': serial,
-                    'friendly_name': friendly,
-                    'manufacturer': manufacturer,
-                    'total_usb_devices': device_count,
-                    'risk_factors': risk_factors,
-                },
-            ))
+            indicators.append(
+                SecurityIndicator(
+                    indicator_type="usb_device",
+                    severity=severity,
+                    title=f"USB storage: {friendly}",
+                    risk_score=min(risk_score, 100),
+                    details={
+                        "device_class": device_class,
+                        "serial_number": serial,
+                        "friendly_name": friendly,
+                        "manufacturer": manufacturer,
+                        "total_usb_devices": device_count,
+                        "risk_factors": risk_factors,
+                    },
+                )
+            )
 
         logger.info(
             f"[SECURITY] USB analysis: {len(indicators)} flagged "
@@ -1269,10 +1372,10 @@ $results | ConvertTo-Json -Compress -Depth 3
         """
         # DEBUG LOG - MAY BE REMOVED
         logger.info("[SECURITY] START Login history analysis")
-        
+
         indicators = []
 
-        ps_script = r'''
+        ps_script = r"""
 $result = @{ FailedLogins = @(); RDPLogins = @(); FailedCount = 0 }
 try {
     # Failed logins (Event 4625) in last 24 hours
@@ -1311,7 +1414,7 @@ try {
     }
 } catch {}
 $result | ConvertTo-Json -Compress -Depth 4
-'''
+"""
 
         output = self._run_powershell(ps_script, timeout=45)
         if not output:
@@ -1325,8 +1428,8 @@ $result | ConvertTo-Json -Compress -Depth 4
             return indicators
 
         # --- Analyze failed logins ---
-        failed_total = data.get('FailedCount', 0)
-        failed_entries = data.get('FailedLogins', [])
+        failed_total = data.get("FailedCount", 0)
+        failed_entries = data.get("FailedLogins", [])
         if isinstance(failed_entries, dict):
             failed_entries = [failed_entries]
 
@@ -1336,86 +1439,95 @@ $result | ConvertTo-Json -Compress -Depth 4
 
             if failed_total >= 10:
                 risk_score = 85
-                severity = 'critical'
-                risk_factors.append('brute_force_likely')
+                severity = "critical"
+                risk_factors.append("brute_force_likely")
             elif failed_total >= 5:
                 risk_score = 65
-                severity = 'high'
-                risk_factors.append('multiple_failures')
+                severity = "high"
+                risk_factors.append("multiple_failures")
             elif failed_total >= 3:
                 risk_score = 45
-                severity = 'medium'
-                risk_factors.append('repeated_failures')
+                severity = "medium"
+                risk_factors.append("repeated_failures")
             else:
                 risk_score = 25
-                severity = 'low'
-                risk_factors.append('minor_failures')
+                severity = "low"
+                risk_factors.append("minor_failures")
 
             if risk_score >= 25:
                 # Build summary of top targeted accounts
                 top_accounts = []
                 for fe in failed_entries[:5]:
-                    top_accounts.append({
-                        'account': fe.get('Account', ''),
-                        'count': fe.get('Count', 0),
-                        'source_ip': fe.get('SourceIP', ''),
-                        'last_time': fe.get('LastTime', ''),
-                    })
+                    top_accounts.append(
+                        {
+                            "account": fe.get("Account", ""),
+                            "count": fe.get("Count", 0),
+                            "source_ip": fe.get("SourceIP", ""),
+                            "last_time": fe.get("LastTime", ""),
+                        }
+                    )
 
-                indicators.append(SecurityIndicator(
-                    indicator_type='login_event',
-                    severity=severity,
-                    title=f"{failed_total} failed logins in last 24h",
-                    risk_score=min(risk_score, 100),
-                    details={
-                        'event_type': 'failed_logins',
-                        'total_failures': failed_total,
-                        'top_accounts': top_accounts,
-                        'risk_factors': risk_factors,
-                    },
-                ))
+                indicators.append(
+                    SecurityIndicator(
+                        indicator_type="login_event",
+                        severity=severity,
+                        title=f"{failed_total} failed logins in last 24h",
+                        risk_score=min(risk_score, 100),
+                        details={
+                            "event_type": "failed_logins",
+                            "total_failures": failed_total,
+                            "top_accounts": top_accounts,
+                            "risk_factors": risk_factors,
+                        },
+                    )
+                )
 
         # --- Analyze RDP logins ---
-        rdp_logins = data.get('RDPLogins', [])
+        rdp_logins = data.get("RDPLogins", [])
         if isinstance(rdp_logins, dict):
             rdp_logins = [rdp_logins]
 
         non_local_rdp = [
-            r for r in rdp_logins
-            if r.get('SourceIP') not in ('127.0.0.1', '::1', '-', '', None)
+            r
+            for r in rdp_logins
+            if r.get("SourceIP") not in ("127.0.0.1", "::1", "-", "", None)
         ]
 
         if non_local_rdp:
             risk_score = 50
-            severity = 'medium'
-            risk_factors = ['remote_rdp_access']
+            severity = "medium"
+            risk_factors = ["remote_rdp_access"]
 
             if len(non_local_rdp) > 5:
                 risk_score = 70
-                severity = 'high'
-                risk_factors.append('frequent_rdp')
+                severity = "high"
+                risk_factors.append("frequent_rdp")
 
             rdp_details = []
             for r in non_local_rdp[:10]:
-                rdp_details.append({
-                    'account': r.get('Account', ''),
-                    'domain': r.get('Domain', ''),
-                    'source_ip': r.get('SourceIP', ''),
-                    'time': r.get('Time', ''),
-                })
+                rdp_details.append(
+                    {
+                        "account": r.get("Account", ""),
+                        "domain": r.get("Domain", ""),
+                        "source_ip": r.get("SourceIP", ""),
+                        "time": r.get("Time", ""),
+                    }
+                )
 
-            indicators.append(SecurityIndicator(
-                indicator_type='login_event',
-                severity=severity,
-                title=f"{len(non_local_rdp)} RDP sessions in last 7 days",
-                risk_score=min(risk_score, 100),
-                details={
-                    'event_type': 'rdp_sessions',
-                    'total_sessions': len(non_local_rdp),
-                    'sessions': rdp_details,
-                    'risk_factors': risk_factors,
-                },
-            ))
+            indicators.append(
+                SecurityIndicator(
+                    indicator_type="login_event",
+                    severity=severity,
+                    title=f"{len(non_local_rdp)} RDP sessions in last 7 days",
+                    risk_score=min(risk_score, 100),
+                    details={
+                        "event_type": "rdp_sessions",
+                        "total_sessions": len(non_local_rdp),
+                        "sessions": rdp_details,
+                        "risk_factors": risk_factors,
+                    },
+                )
+            )
 
         logger.info(
             f"[SECURITY] Login analysis: {failed_total} failed logins, "
@@ -1433,7 +1545,7 @@ $result | ConvertTo-Json -Compress -Depth 4
         """
         indicators = []
 
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue | ForEach-Object {
@@ -1473,7 +1585,7 @@ try {
     }
 } catch {}
 $results | ConvertTo-Json -Compress -Depth 3
-'''
+"""
 
         output = self._run_powershell(ps_script, timeout=25)
         if not output:
@@ -1488,35 +1600,37 @@ $results | ConvertTo-Json -Compress -Depth 3
             return indicators
 
         for disk in disks:
-            used_pct = float(disk.get('UsedPercent', 0))
+            used_pct = float(disk.get("UsedPercent", 0))
             if used_pct < 85:
                 continue
 
             if used_pct >= 95:
-                severity = 'critical'
+                severity = "critical"
                 risk_score = 95
             elif used_pct >= 90:
-                severity = 'high'
+                severity = "high"
                 risk_score = 80
             else:
-                severity = 'medium'
+                severity = "medium"
                 risk_score = 60
 
-            drive = disk.get('Drive', 'Unknown')
-            volume = disk.get('VolumeName', '')
-            indicators.append(SecurityIndicator(
-                indicator_type='disk_usage',
-                severity=severity,
-                title=f"Disk usage high on {drive}: {used_pct:.1f}%",
-                risk_score=risk_score,
-                details={
-                    'drive': drive,
-                    'volume_name': volume,
-                    'used_percent': used_pct,
-                    'free_gb': float(disk.get('FreeGB', 0)),
-                    'size_gb': float(disk.get('SizeGB', 0)),
-                },
-            ))
+            drive = disk.get("Drive", "Unknown")
+            volume = disk.get("VolumeName", "")
+            indicators.append(
+                SecurityIndicator(
+                    indicator_type="disk_usage",
+                    severity=severity,
+                    title=f"Disk usage high on {drive}: {used_pct:.1f}%",
+                    risk_score=risk_score,
+                    details={
+                        "drive": drive,
+                        "volume_name": volume,
+                        "used_percent": used_pct,
+                        "free_gb": float(disk.get("FreeGB", 0)),
+                        "size_gb": float(disk.get("SizeGB", 0)),
+                    },
+                )
+            )
 
         logger.info(
             f"[SECURITY] Disk usage analysis: {len(indicators)} drives above threshold"
@@ -1529,7 +1643,7 @@ $results | ConvertTo-Json -Compress -Depth 3
 
     def _collect_all_startup_programs_raw(self) -> List[Dict[str, Any]]:
         """Collect all startup programs (raw visibility view)."""
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     $hklm = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue
@@ -1563,7 +1677,7 @@ try {
     }
 } catch {}
 $results | ConvertTo-Json -Compress -Depth 3
-'''
+"""
         output = self._run_powershell(ps_script, timeout=30)
         if not output:
             return []
@@ -1579,25 +1693,29 @@ $results | ConvertTo-Json -Compress -Depth 3
         results = []
         seen = set()
         for entry in entries:
-            name = entry.get('Name', 'Unknown')
-            command = entry.get('Command', '')
-            source = entry.get('Source', '')
+            name = entry.get("Name", "Unknown")
+            command = entry.get("Command", "")
+            source = entry.get("Source", "")
             dedup_key = (name.lower(), str(command).lower(), source)
             if dedup_key in seen:
                 continue
             seen.add(dedup_key)
-            results.append({
-                'name': name,
-                'command': command[:600] if isinstance(command, str) else str(command),
-                'source': source,
-                'user': entry.get('User', ''),
-                'location': entry.get('Location', ''),
-            })
+            results.append(
+                {
+                    "name": name,
+                    "command": command[:600]
+                    if isinstance(command, str)
+                    else str(command),
+                    "source": source,
+                    "user": entry.get("User", ""),
+                    "location": entry.get("Location", ""),
+                }
+            )
         return results
 
     def _collect_all_scheduled_tasks_raw(self) -> List[Dict[str, Any]]:
         """Collect all enabled scheduled tasks (raw visibility view)."""
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' } | ForEach-Object {
@@ -1624,7 +1742,7 @@ try {
     }
 } catch {}
 $results | ConvertTo-Json -Compress -Depth 4
-'''
+"""
         output = self._run_powershell(ps_script, timeout=45)
         if not output:
             return []
@@ -1639,28 +1757,32 @@ $results | ConvertTo-Json -Compress -Depth 4
 
         results = []
         for task in tasks:
-            actions = task.get('Actions', [])
+            actions = task.get("Actions", [])
             if isinstance(actions, dict):
                 actions = [actions]
             normalized_actions = []
             for action in actions:
-                normalized_actions.append({
-                    'execute': action.get('Execute', ''),
-                    'arguments': action.get('Arguments', ''),
-                })
-            results.append({
-                'task_name': task.get('TaskName', 'Unknown'),
-                'task_path': task.get('TaskPath', ''),
-                'state': task.get('State', ''),
-                'principal': task.get('Principal', ''),
-                'triggers': task.get('Triggers', ''),
-                'actions': normalized_actions,
-            })
+                normalized_actions.append(
+                    {
+                        "execute": action.get("Execute", ""),
+                        "arguments": action.get("Arguments", ""),
+                    }
+                )
+            results.append(
+                {
+                    "task_name": task.get("TaskName", "Unknown"),
+                    "task_path": task.get("TaskPath", ""),
+                    "state": task.get("State", ""),
+                    "principal": task.get("Principal", ""),
+                    "triggers": task.get("Triggers", ""),
+                    "actions": normalized_actions,
+                }
+            )
         return results
 
     def _collect_all_open_ports_raw(self) -> List[Dict[str, Any]]:
         """Collect all listening TCP ports (raw visibility view)."""
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
@@ -1678,7 +1800,7 @@ try {
     }
 } catch {}
 $results | ConvertTo-Json -Compress -Depth 3
-'''
+"""
         output = self._run_powershell(ps_script, timeout=30)
         if not output:
             return []
@@ -1693,18 +1815,22 @@ $results | ConvertTo-Json -Compress -Depth 3
 
         results = []
         for entry in ports:
-            results.append({
-                'local_port': entry.get('LocalPort', 0),
-                'local_address': entry.get('LocalAddress', ''),
-                'process_id': entry.get('ProcessId', 0),
-                'process_name': entry.get('ProcessName', 'Unknown'),
-                'process_path': entry.get('ProcessPath', '')[:400] if isinstance(entry.get('ProcessPath', ''), str) else '',
-            })
+            results.append(
+                {
+                    "local_port": entry.get("LocalPort", 0),
+                    "local_address": entry.get("LocalAddress", ""),
+                    "process_id": entry.get("ProcessId", 0),
+                    "process_name": entry.get("ProcessName", "Unknown"),
+                    "process_path": entry.get("ProcessPath", "")[:400]
+                    if isinstance(entry.get("ProcessPath", ""), str)
+                    else "",
+                }
+            )
         return results
 
     def _collect_all_active_connections_raw(self) -> List[Dict[str, Any]]:
         """Collect all established TCP connections (raw visibility view)."""
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue | ForEach-Object {
@@ -1724,7 +1850,7 @@ try {
     }
 } catch {}
 $results | ConvertTo-Json -Compress -Depth 3
-'''
+"""
         output = self._run_powershell(ps_script, timeout=30)
         if not output:
             return []
@@ -1739,20 +1865,24 @@ $results | ConvertTo-Json -Compress -Depth 3
 
         results = []
         for entry in conns:
-            results.append({
-                'local_port': entry.get('LocalPort', 0),
-                'local_address': entry.get('LocalAddress', ''),
-                'remote_port': entry.get('RemotePort', 0),
-                'remote_address': entry.get('RemoteAddress', ''),
-                'process_id': entry.get('ProcessId', 0),
-                'process_name': entry.get('ProcessName', 'Unknown'),
-                'process_path': entry.get('ProcessPath', '')[:400] if isinstance(entry.get('ProcessPath', ''), str) else '',
-            })
+            results.append(
+                {
+                    "local_port": entry.get("LocalPort", 0),
+                    "local_address": entry.get("LocalAddress", ""),
+                    "remote_port": entry.get("RemotePort", 0),
+                    "remote_address": entry.get("RemoteAddress", ""),
+                    "process_id": entry.get("ProcessId", 0),
+                    "process_name": entry.get("ProcessName", "Unknown"),
+                    "process_path": entry.get("ProcessPath", "")[:400]
+                    if isinstance(entry.get("ProcessPath", ""), str)
+                    else "",
+                }
+            )
         return results
 
     def _collect_all_disk_usage_raw(self) -> List[Dict[str, Any]]:
         """Collect disk usage for all fixed drives (raw visibility view)."""
-        ps_script = r'''
+        ps_script = r"""
 $results = @()
 try {
     Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue | ForEach-Object {
@@ -1792,7 +1922,7 @@ try {
     }
 } catch {}
 $results | ConvertTo-Json -Compress -Depth 3
-'''
+"""
         output = self._run_powershell(ps_script, timeout=25)
         if not output:
             return []
@@ -1807,14 +1937,16 @@ $results | ConvertTo-Json -Compress -Depth 3
 
         results = []
         for disk in disks:
-            results.append({
-                'drive': disk.get('Drive', ''),
-                'volume_name': disk.get('VolumeName', ''),
-                'file_system': disk.get('FileSystem', ''),
-                'size_gb': float(disk.get('SizeGB', 0)),
-                'free_gb': float(disk.get('FreeGB', 0)),
-                'used_percent': float(disk.get('UsedPercent', 0)),
-            })
+            results.append(
+                {
+                    "drive": disk.get("Drive", ""),
+                    "volume_name": disk.get("VolumeName", ""),
+                    "file_system": disk.get("FileSystem", ""),
+                    "size_gb": float(disk.get("SizeGB", 0)),
+                    "free_gb": float(disk.get("FreeGB", 0)),
+                    "used_percent": float(disk.get("UsedPercent", 0)),
+                }
+            )
         return results
 
     def collect_system_visibility_snapshot(self) -> Dict[str, Any]:
@@ -1829,19 +1961,19 @@ $results | ConvertTo-Json -Compress -Depth 3
         disk_usage = self._collect_all_disk_usage_raw()
 
         return {
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'startup_programs': startup_programs,
-            'scheduled_tasks': scheduled_tasks,
-            'open_ports': open_ports,
-            'network_connections': network_connections,
-            'disk_usage': disk_usage,
-            'counts': {
-                'startup_programs': len(startup_programs),
-                'scheduled_tasks': len(scheduled_tasks),
-                'open_ports': len(open_ports),
-                'network_connections': len(network_connections),
-                'disk_usage': len(disk_usage),
-            }
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "startup_programs": startup_programs,
+            "scheduled_tasks": scheduled_tasks,
+            "open_ports": open_ports,
+            "network_connections": network_connections,
+            "disk_usage": disk_usage,
+            "counts": {
+                "startup_programs": len(startup_programs),
+                "scheduled_tasks": len(scheduled_tasks),
+                "open_ports": len(open_ports),
+                "network_connections": len(network_connections),
+                "disk_usage": len(disk_usage),
+            },
         }
 
     # =========================================================================
@@ -1851,87 +1983,87 @@ $results | ConvertTo-Json -Compress -Depth 3
     def collect_all_security(self, ext_inventory: Optional[Dict] = None) -> Dict:
         """
         Run all Phase 1 + 2 + 3 security analyses.
-        
+
         Args:
             ext_inventory: Dict from ExtendedInventoryCollector.collect_all()
                           If None, only independent checks run.
-        
+
         Returns:
             Dict with 'indicators' list and 'summary' metadata
         """
         all_indicators: List[Dict] = []
         summary = {
-            'unsigned_drivers': 0,
-            'suspicious_extensions': 0,
-            'file_changes': 0,
-            'suspicious_startups': 0,
-            'suspicious_tasks': 0,
-            'open_ports': 0,
-            'suspicious_connections': 0,
-            'usb_devices': 0,
-            'login_events': 0,
-            'disk_usage': 0,
+            "unsigned_drivers": 0,
+            "suspicious_extensions": 0,
+            "file_changes": 0,
+            "suspicious_startups": 0,
+            "suspicious_tasks": 0,
+            "open_ports": 0,
+            "suspicious_connections": 0,
+            "usb_devices": 0,
+            "login_events": 0,
+            "disk_usage": 0,
         }
-        
+
         # --- Phase 1: Analyze existing data ---
         if ext_inventory:
-            drivers = ext_inventory.get('drivers', [])
+            drivers = ext_inventory.get("drivers", [])
             if drivers:
                 driver_indicators = self.analyze_unsigned_drivers(drivers)
-                summary['unsigned_drivers'] = len(driver_indicators)
+                summary["unsigned_drivers"] = len(driver_indicators)
                 all_indicators.extend(ind.to_dict() for ind in driver_indicators)
-            
-            extensions = ext_inventory.get('browser_extensions', [])
+
+            extensions = ext_inventory.get("browser_extensions", [])
             if extensions:
                 ext_indicators = self.analyze_extension_risks(extensions)
-                summary['suspicious_extensions'] = len(ext_indicators)
+                summary["suspicious_extensions"] = len(ext_indicators)
                 all_indicators.extend(ind.to_dict() for ind in ext_indicators)
-        
+
         # Always check system files (independent of ext_inventory)
         file_indicators = self.check_system_files()
-        summary['file_changes'] = len(file_indicators)
+        summary["file_changes"] = len(file_indicators)
         all_indicators.extend(ind.to_dict() for ind in file_indicators)
-        
+
         # --- Phase 2: Persistence & network exposure ---
         try:
             startup_indicators = self.collect_startup_programs()
-            summary['suspicious_startups'] = len(startup_indicators)
+            summary["suspicious_startups"] = len(startup_indicators)
             all_indicators.extend(ind.to_dict() for ind in startup_indicators)
         except Exception as e:
             logger.error(f"[SECURITY] Startup collection failed: {e}")
-        
+
         try:
             task_indicators = self.collect_scheduled_tasks()
-            summary['suspicious_tasks'] = len(task_indicators)
+            summary["suspicious_tasks"] = len(task_indicators)
             all_indicators.extend(ind.to_dict() for ind in task_indicators)
         except Exception as e:
             logger.error(f"[SECURITY] Task collection failed: {e}")
-        
+
         try:
             port_indicators = self.collect_open_ports()
-            summary['open_ports'] = len(port_indicators)
+            summary["open_ports"] = len(port_indicators)
             all_indicators.extend(ind.to_dict() for ind in port_indicators)
         except Exception as e:
             logger.error(f"[SECURITY] Port collection failed: {e}")
-        
+
         # --- Phase 3: Connections, USB, login history ---
         try:
             conn_indicators = self.collect_active_connections()
-            summary['suspicious_connections'] = len(conn_indicators)
+            summary["suspicious_connections"] = len(conn_indicators)
             all_indicators.extend(ind.to_dict() for ind in conn_indicators)
         except Exception as e:
             logger.error(f"[SECURITY] Connection collection failed: {e}")
-        
+
         try:
             usb_indicators = self.collect_usb_history()
-            summary['usb_devices'] = len(usb_indicators)
+            summary["usb_devices"] = len(usb_indicators)
             all_indicators.extend(ind.to_dict() for ind in usb_indicators)
         except Exception as e:
             logger.error(f"[SECURITY] USB collection failed: {e}")
-        
+
         try:
             login_indicators = self.collect_login_history()
-            summary['login_events'] = len(login_indicators)
+            summary["login_events"] = len(login_indicators)
             all_indicators.extend(ind.to_dict() for ind in login_indicators)
         except Exception as e:
             logger.error(f"[SECURITY] Login history collection failed: {e}")
@@ -1939,11 +2071,11 @@ $results | ConvertTo-Json -Compress -Depth 3
         if self.enable_disk_usage_indicator:
             try:
                 disk_indicators = self.collect_disk_usage()
-                summary['disk_usage'] = len(disk_indicators)
+                summary["disk_usage"] = len(disk_indicators)
                 all_indicators.extend(ind.to_dict() for ind in disk_indicators)
             except Exception as e:
                 logger.error(f"[SECURITY] Disk usage collection failed: {e}")
-        
+
         total = len(all_indicators)
         logger.info(
             f"[SECURITY] Collection complete ({total} total): "
@@ -1958,9 +2090,9 @@ $results | ConvertTo-Json -Compress -Depth 3
             f"logins={summary['login_events']}, "
             f"disk={summary['disk_usage']}"
         )
-        
+
         return {
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'indicators': all_indicators,
-            'summary': summary,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "indicators": all_indicators,
+            "summary": summary,
         }

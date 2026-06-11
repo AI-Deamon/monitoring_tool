@@ -464,8 +464,32 @@
         document.getElementById('hw-cpu-speed').textContent = `${(data.hardware.cpu_speed_mhz / 1000).toFixed(2)} GHz`;
         document.getElementById('hw-ram-total').textContent = `${Math.round(data.hardware.ram_total_gb)} GB`;
         document.getElementById('hw-ram-slots').textContent = `${data.hardware.ram_slots_used} / ${data.hardware.ram_slots_total}`;
-        document.getElementById('hw-gpu').textContent = data.hardware.gpu_name;
-        document.getElementById('hw-gpu-mem').textContent = `VRAM: ${data.hardware.gpu_memory_gb} GB`;
+        
+        // GPU Card - Handle multiple GPUs
+        const gpus = data.hardware.gpus || [];
+        const hwGpuEl = document.getElementById('hw-gpu');
+        const hwGpuMemEl = document.getElementById('hw-gpu-mem');
+        
+        if (gpus.length > 0) {
+            if (gpus.length === 1) {
+                // Single GPU
+                hwGpuEl.textContent = gpus[0].name;
+                hwGpuMemEl.textContent = `VRAM: ${gpus[0].memory_gb} GB`;
+            } else {
+                // Multiple GPUs - show count and expand button
+                const gpuNames = gpus.map(g => g.name).join(', ');
+                const totalVRAM = gpus.reduce((sum, g) => sum + (parseFloat(g.memory_gb) || 0), 0);
+                hwGpuEl.textContent = `${gpus.length} GPUs detected`;
+                hwGpuEl.title = gpuNames;
+                hwGpuMemEl.textContent = `Total VRAM: ${totalVRAM.toFixed(1)} GB`;
+                
+                // Make card clickable to show all GPUs
+                document.querySelector('[id="tab-hardware"] .bg-slate-800:nth-child(3)').style.cursor = 'pointer';
+            }
+        } else {
+            hwGpuEl.textContent = 'No GPU detected';
+            hwGpuMemEl.textContent = 'VRAM: N/A';
+        }
 
         // Disk Table
         const diskBody = document.getElementById('hw-disks-body');

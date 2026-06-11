@@ -67,6 +67,33 @@
     /* Slate 700 */
     --state-away-bg: #f1f5f9;
     /* Slate 100 */
+
+    /* ==================== RESPONSIVE DESIGN SYSTEM ==================== */
+    /* Fluid Container Sizing - Scales with viewport and zoom */
+    --container-max-width: min(95vw, 1400px);
+    --container-padding: clamp(0.5rem, 3vw, 2rem);
+    
+    /* Responsive Font Scaling */
+    --font-size-xs: clamp(0.65rem, 1.5vw, 0.875rem);
+    --font-size-sm: clamp(0.75rem, 2vw, 1rem);
+    --font-size-base: clamp(0.875rem, 2.2vw, 1.125rem);
+    --font-size-lg: clamp(1rem, 2.5vw, 1.375rem);
+    --font-size-xl: clamp(1.125rem, 3vw, 1.5rem);
+    --font-size-2xl: clamp(1.375rem, 3.5vw, 1.875rem);
+    
+    /* Responsive Spacing - Scales proportionally */
+    --space-responsive-sm: clamp(0.375rem, 1vw, 0.75rem);
+    --space-responsive-md: clamp(0.75rem, 1.5vw, 1.5rem);
+    --space-responsive-lg: clamp(1rem, 2vw, 2rem);
+    --space-responsive-xl: clamp(1.5rem, 3vw, 3rem);
+    
+    /* Responsive Chart Heights */
+    --chart-height-sm: clamp(250px, 35vh, 350px);
+    --chart-height-md: clamp(300px, 40vh, 450px);
+    --chart-height-lg: clamp(350px, 45vh, 500px);
+    
+    /* Responsive Grid Gap */
+    --grid-gap: clamp(0.75rem, 2vw, 2rem);
 }
 
 /* ==================== DARK MODE ==================== */
@@ -171,7 +198,7 @@
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
         Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    font-size: 16px;
+    font-size: clamp(14px, 2vw, 18px);
     line-height: 1.6;
     color: var(--text-primary);
     background: var(--bg-primary);
@@ -317,11 +344,11 @@ h6 {
     }
 }
 
-/* Navbar Layout - Robust Three-Zone System */
+/* Navbar Layout - Responsive Height */
 .navbar {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    height: 70px;
+    height: clamp(60px, 10vh, 80px);
     display: flex;
     align-items: center;
     position: sticky;
@@ -1097,12 +1124,17 @@ h6 {
 
 .chart-container {
     position: relative;
-    height: 300px;
+    height: var(--chart-height-sm);
     width: 100%;
+    min-height: 250px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .chart-container-lg {
-    height: 400px;
+    height: var(--chart-height-lg);
+    min-height: 300px;
 }
 
 /* ==================== MICRO-INTERACTIONS ==================== */
@@ -1139,14 +1171,14 @@ h6 {
 
 .container {
     width: 100%;
-    max-width: 1400px;
+    max-width: var(--container-max-width);
     margin: 0 auto;
-    padding: 0 var(--space-lg);
+    padding: 0 var(--container-padding);
 }
 
 main.container {
-    margin-top: var(--space-2xl);
-    margin-bottom: var(--space-2xl);
+    margin-top: var(--space-responsive-lg);
+    margin-bottom: var(--space-responsive-lg);
     display: block;
 }
 
@@ -1161,9 +1193,79 @@ main.container {
 
 .charts-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(clamp(300px, 35vw, 450px), 1fr));
+    gap: var(--grid-gap);
+    margin-bottom: var(--space-responsive-lg);
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(clamp(300px, 35vw, 450px), 1fr));
+    gap: var(--grid-gap);
+}
+
+/* Dashboard 2-column layout (60% left, 40% right) - Responsive */
+.dashboard-main-grid {
+    display: grid;
+    grid-template-columns: clamp(50%, 60%, 70%) clamp(25%, 40%, 50%);
+    gap: var(--grid-gap);
+}
+
+.dashboard-left {
+    display: flex;
+    flex-direction: column;
     gap: var(--space-lg);
-    margin-bottom: var(--space-xl);
+}
+
+.dashboard-right {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+@media (max-width: 1400px) {
+    :root {
+        --container-max-width: min(92vw, 1200px);
+        --container-padding: clamp(0.75rem, 2.5vw, 1.75rem);
+    }
+}
+
+@media (max-width: 1024px) {
+    :root {
+        --container-max-width: min(90vw, 1000px);
+        --container-padding: clamp(0.5rem, 2vw, 1.5rem);
+        --grid-gap: clamp(0.5rem, 1.5vw, 1.5rem);
+        --chart-height-sm: clamp(220px, 30vh, 320px);
+        --chart-height-md: clamp(260px, 35vh, 380px);
+    }
+
+    .charts-grid,
+    .dashboard-grid {
+        grid-template-columns: repeat(auto-fit, minmax(clamp(280px, 30vw, 400px), 1fr));
+    }
+    
+    .dashboard-main-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    :root {
+        --container-max-width: min(95vw, 800px);
+        --container-padding: clamp(0.5rem, 3vw, 1.25rem);
+        --grid-gap: clamp(0.5rem, 2vw, 1.25rem);
+        --chart-height-sm: clamp(200px, 28vh, 300px);
+        --chart-height-md: clamp(240px, 32vh, 350px);
+    }
+
+    .dashboard-main-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .charts-grid,
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* Footer */
@@ -1217,6 +1319,10 @@ main.container {
     }
 
     .charts-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-grid {
         grid-template-columns: 1fr;
     }
 

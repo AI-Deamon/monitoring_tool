@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Server timezone (matches PostgreSQL stored procedures)
 SERVER_TIMEZONE = 'Asia/Kolkata'
 IST = ZoneInfo("Asia/Kolkata")
+RECOVERY_ACTIVE_SPAN_CAP_SECONDS = 8 * 3600
 
 # Logging configuration
 VERBOSE_TELEMETRY = False  # Set to True for detailed debugging
@@ -175,6 +176,16 @@ def validate_span(span: dict, agent_id: str) -> Optional[str]:
         if sent_duration > 86400:
             return "Span duration exceeds 24 hours"
 
+        if (
+            span.get("state") == "active"
+            and int(sent_duration) == RECOVERY_ACTIVE_SPAN_CAP_SECONDS
+            and abs(calc_duration - RECOVERY_ACTIVE_SPAN_CAP_SECONDS) <= 1
+        ):
+            return (
+                "Rejected probable capped recovery active span "
+                f"({RECOVERY_ACTIVE_SPAN_CAP_SECONDS}s)"
+            )
+
         if sent_duration == 86400 and calc_duration >= 86400:
             short_id = short_agent_id(agent_id)
             logger.info(
@@ -227,5 +238,7 @@ def store_raw_event(agent_id, event_type, payload, processed=False, error=None):
         db.session.flush()
         return raw
     except Exception as e:
+        # Reset failed transaction state after flush errors.
+        db.session.rollback()
         logger.error(f"Failed to store raw event: {e}")
         return None

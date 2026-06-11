@@ -221,7 +221,7 @@ class StateDetector:
             logger.info(f"[STATE] Startup gap handling: {gap_info}")
 
         # Recover crash-safe helper state (pending final-day payload + interrupted span).
-        self._load_persisted_state()
+        self._load_persisted_state(persisted)
 
     def _is_session_locked(self) -> bool:
         """Check if workstation is locked OR fast user switched (no lock event).
@@ -976,7 +976,7 @@ class StateDetector:
     # CRASH RECOVERY
     # ========================================================================
 
-    def _load_persisted_state(self):
+    def _load_persisted_state(self, state_machine_state: Optional[dict] = None):
         """Recover in-progress session on startup."""
         try:
             import json
@@ -1009,17 +1009,54 @@ class StateDetector:
 
                 duration = now - session_start
 
-                # Cap recovery duration to 8 hours (reasonable max for unattended session)
+                last_event = (
+                    str((state_machine_state or {}).get("last_event") or "")
+                    .strip()
+                    .lower()
+                )
+                if last_event in {
+                    LastEvent.SHUTDOWN.value,
+                    LastEvent.CRASH.value,
+                    LastEvent.SLEEP.value,
+                }:
+                    logger.info(
+                        f"[RECOVERY] Skipping interrupted {prev_state} span after "
+                        f"{last_event}; gap is handled by ScreenTimeEngine"
+                    )
+                    return
+
+                saved_day = str(data.get("date") or "")
+                today = datetime.now().date().isoformat()
+                if saved_day and saved_day != today:
+                    logger.info(
+                        f"[RECOVERY] Skipping interrupted {prev_state} span from "
+                        f"previous day {saved_day}; today is {today}"
+                    )
+                    return
+
+                if prev_state not in ("active", "idle", "locked"):
+                    logger.info(
+                        f"[RECOVERY] Skipping unsupported interrupted state: {prev_state}"
+                    )
+                    return
+
+                if duration < 0:
+                    logger.warning(
+                        f"[RECOVERY] Skipping interrupted {prev_state} span with "
+                        f"negative duration: {duration:.1f}s"
+                    )
+                    return
+
+                # Long gaps are ambiguous after restart. Do not rewrite them to
+                # "now - 8h"; that fabricates overnight activity after shutdown.
                 MAX_RECOVERY_DURATION = 8 * 3600  # 8 hours
 
                 if duration > MAX_RECOVERY_DURATION:
                     logger.warning(
                         f"[RECOVERY] Interrupted session too long ({duration:.1f}s), "
-                        f"capping to {MAX_RECOVERY_DURATION}s"
+                        f"skipping recovery"
                     )
-                    duration = MAX_RECOVERY_DURATION
-                    # Adjust start time to match capped duration
-                    session_start = now - MAX_RECOVERY_DURATION
+                    return
 
                 if duration > 60:  # Only if > 1 minute
                     # Create span for the interrupted session
