@@ -1433,6 +1433,64 @@ class BufferDB:
             """,
                 ids,
             )
+    
+    def store_network_partial(self, data: Dict) -> int:
+        """Store partial network update for later upload"""
+        import hashlib
+        
+        agent_id = data.get("agent_id", "unknown")
+        timestamp = _get_ist_timestamp()
+        
+        # Create idempotency key from hash of network data
+        network_data = data.get("network", {})
+        hash_input = f"{agent_id}:{json.dumps(network_data, sort_keys=True)}"
+        idempotency_key = f"net_partial:{hashlib.md5(hash_input.encode()).hexdigest()[:16]}"
+        
+        payload_json = json.dumps(data, default=str)
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO hardware_snapshots 
+                    (agent_id, timestamp, payload_json, idempotency_key, uploaded)
+                    VALUES (?, ?, ?, ?, 0)
+                """,
+                    (agent_id, timestamp, payload_json, idempotency_key),
+                )
+                conn.commit()
+                return cursor.lastrowid or 0
+            except sqlite3.IntegrityError:
+                return 0  # Duplicate
+    
+    def get_unuploaded_network_partials(self, limit: int = 10) -> List[Dict]:
+        """Get unuploaded network partial updates"""
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                """
+                SELECT * FROM hardware_snapshots
+                WHERE uploaded = 0 
+                AND idempotency_key LIKE 'net_partial:%'
+                ORDER BY id ASC
+                LIMIT ?
+            """,
+                (limit,),
+            )
+            
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    "id": row["id"],
+                    "agent_id": row["agent_id"],
+                    "timestamp": _normalize_timestamp_to_ist(row["timestamp"]),
+                    "data": json.loads(row["payload_json"])
+                })
+            
+            return results
 
     # ========================================================================
     #   EXTENDED INVENTORY

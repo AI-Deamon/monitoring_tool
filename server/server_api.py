@@ -130,6 +130,9 @@ def store_raw_event(agent_id, event_type, payload, processed=False, error=None):
         db.session.flush() # Ensure ID is generated
         return raw
     except Exception as e:
+        # A flush failure leaves the SQLAlchemy session in failed state.
+        # Reset it here so callers can continue handling the request cleanly.
+        db.session.rollback()
         logger.error(f"Failed to store raw event: {e}")
         return None
 
@@ -326,10 +329,18 @@ def inventory():
     """
     from flask import g
     data = request.get_json() or {}
-    
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+
+    auth_agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    payload_agent_id = data.get('agent_id')
+
+    if payload_agent_id and auth_agent_id and payload_agent_id != auth_agent_id:
+        logger.warning(
+            f"Inventory: payload agent_id mismatch "
+            f"(payload={payload_agent_id}, auth={auth_agent_id}); using authenticated agent_id"
+        )
+
+    # Security and consistency: always trust authenticated agent identity first.
+    agent_id = auth_agent_id or payload_agent_id
     
     if not agent_id:
         logger.warning(f"Inventory: Missing agent_id in request or JWT")
@@ -343,6 +354,12 @@ def inventory():
     if 'apps' not in data:
         logger.warning(f"[AGENT {agent_id}] Inventory: Missing apps data")
         return jsonify({'status': 'error', 'message': 'Missing apps data'}), 400
+
+    sid = short_agent_id(agent_id)
+    agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+    if not agent:
+        logger.warning(f"[AGENT {sid}] Inventory: Unknown agent")
+        return jsonify({'status': 'error', 'message': 'Unknown agent'}), 404
     
     # Store Raw Event
     raw_event = store_raw_event(agent_id, 'inventory', data, processed=False)
@@ -1342,8 +1359,15 @@ def asset_hardware():
         existing.ram_total_gb = hardware.get('ram_total_gb', 0.0)
         existing.ram_slots_used = hardware.get('ram_slots_used', 0)
         existing.ram_slots_total = hardware.get('ram_slots_total', 0)
-        existing.gpu_name = hardware.get('gpu_name', '')
-        existing.gpu_memory_gb = hardware.get('gpu_memory_gb', 0.0)
+        
+        # Handle GPU array (multiple GPUs support)
+        gpus_list = hardware.get('gpus', [])
+        if isinstance(gpus_list, list):
+            gpus_to_store = [{'name': g.get('name', ''), 'memory_gb': float(g.get('memory_gb', 0) or 0)} for g in gpus_list]
+            existing.gpus_json = json.dumps(gpus_to_store)
+        else:
+            existing.gpus_json = json.dumps([])
+        
         existing.disks_json = json.dumps(hardware.get('disks', []))
         existing.motherboard = hardware.get('motherboard', '')
         
@@ -1361,6 +1385,8 @@ def asset_hardware():
         existing.os_version = security.get('os_version', '')
         existing.os_build = security.get('os_build', '')
         existing.os_architecture = security.get('os_architecture', '')
+        existing.os_edition = security.get('os_edition', '')
+        existing.os_sku = security.get('os_sku', 0) or 0
         existing.antivirus_json = json.dumps(security.get('antivirus_installed', []))
         existing.firewall_enabled = security.get('firewall_enabled', False)
         existing.last_boot_time = security.get('last_boot_time', '')
@@ -1383,6 +1409,60 @@ def asset_hardware():
         db.session.rollback()
         logger.error(f"[ASSET {sid}] Error: {e}")
         return jsonify({'error': 'Asset update failed', 'message': str(e)}), 500
+
+
+@bp.route('/asset-hardware/network', methods=['POST'])
+@require_auth
+def asset_hardware_network():
+    """
+    Receive partial network update when adapter changes.
+    Updates only network fields, leaves other asset data intact.
+    """
+    from flask import g
+    data = request.get_json() or {}
+    
+    agent_id = data.get('agent_id')
+    if not agent_id:
+        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    
+    if not agent_id:
+        return jsonify({'error': 'Missing agent_id'}), 400
+    
+    sid = short_agent_id(agent_id)
+    
+    try:
+        agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if not agent:
+            logger.warning(f"[ASSET {sid}] Unknown agent for network update")
+            return jsonify({'error': 'Unknown agent'}), 404
+
+        existing = server_models.AssetInfo.query.filter_by(agent_id=agent_id).first()
+        if not existing:
+            logger.warning(f"[ASSET {sid}] No existing asset_info for network update")
+            return jsonify({'error': 'No existing asset record'}), 404
+        
+        network = data.get('network', {})
+        
+        # Update only network fields
+        existing.primary_mac = network.get('primary_mac', '') or existing.primary_mac
+        existing.primary_ip = network.get('primary_ip', '') or existing.primary_ip
+        existing.all_macs_json = json.dumps(network.get('all_macs', []))
+        existing.all_ips_json = json.dumps(network.get('all_ips', []))
+        existing.dns_servers_json = json.dumps(network.get('dns_servers', []))
+        existing.domain_joined = network.get('domain_joined', existing.domain_joined)
+        existing.domain_name = network.get('domain_name', '') or existing.domain_name
+        existing.collected_at = datetime.now(timezone.utc)
+        existing.collection_hash = data.get('collection_hash', existing.collection_hash)
+        
+        db.session.commit()
+        
+        logger.info(f"[ASSET {sid}] Network updated: {network.get('primary_mac', 'N/A')}")
+        return jsonify({'status': 'network_updated'}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[ASSET {sid}] Network update error: {e}")
+        return jsonify({'error': 'Network update failed', 'message': str(e)}), 500
 
 
 # =============================================================================

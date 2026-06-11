@@ -528,6 +528,13 @@
                 </button>`;
             }
 
+            actionHtml += ` <button onclick="deleteAgent('${agent.agent_id}', '${agent.hostname || agent.agent_id}')" class="inline-flex items-center px-2 py-1.5 text-xs font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 dark:text-red-300 dark:bg-red-900/30 dark:hover:bg-red-900/50 transition-colors" title="Delete agent" aria-label="Delete agent">
+                <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+                Delete
+            </button>`;
+
             tr.innerHTML = `
                 <td class="px-6 py-4 whitespace-nowrap">
                     <a href="/dashboard/agent/${agent.agent_id}" class="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">
@@ -562,5 +569,27 @@
 
     // Auto-refresh every 60 seconds
     setInterval(loadAgents, 60000);
+
+    async function deleteAgent(agentId, hostname) {
+        if (!confirm(`Delete agent "${hostname}"?\n\nThis will permanently remove all historical data (screen time, apps, domains, inventory, etc.) for this agent. This cannot be undone.`)) {
+            return;
+        }
+
+        try {
+            const resp = await fetch(`/dashboard/api/agent/${encodeURIComponent(agentId)}/delete`, {
+                method: 'POST',
+                credentials: 'same-origin'
+            });
+            const data = await resp.json();
+
+            if (resp.ok) {
+                loadAgents();
+            } else {
+                alert(`Failed to delete agent: ${data.error || 'Unknown error'}`);
+            }
+        } catch (err) {
+            alert(`Error deleting agent: ${err.message}`);
+        }
+    }
 </script>
 {% endblock %}

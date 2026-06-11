@@ -10,6 +10,7 @@ Run daily via cron or scheduler.
 """
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from flask import Flask
 from extensions import db
@@ -19,9 +20,9 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
-# Retention periods
-SESSION_RETENTION_DAYS = 30  # Keep detailed sessions for 30 days
-VISIT_RETENTION_DAYS = 30    # Keep domain visits for 30 days
+# Retention periods — configurable via env vars (FR-002)
+SESSION_RETENTION_DAYS = int(os.getenv('SESSION_RETENTION_DAYS', '30'))
+VISIT_RETENTION_DAYS = int(os.getenv('VISIT_RETENTION_DAYS', '30'))
 
 
 def cleanup_old_data():
@@ -40,45 +41,44 @@ def cleanup_old_data():
         cutoff_date = datetime.now(timezone.utc).date() - timedelta(days=SESSION_RETENTION_DAYS)
         cutoff_datetime = datetime.combine(cutoff_date, datetime.min.time())
         
-        print(f"=== Data Cleanup ===")
-        print(f"Cutoff date: {cutoff_date}")
-        print(f"Retention: {SESSION_RETENTION_DAYS} days")
+        logger.info("=== Data Cleanup ===")
+        logger.info(f"Cutoff date: {cutoff_date}")
+        logger.info(f"Retention: {SESSION_RETENTION_DAYS} days")
         
         try:
             # 1. Delete old app_sessions
             deleted = server_models.AppSession.query.filter(
                 server_models.AppSession.start_time < cutoff_datetime
             ).delete()
-            print(f"[OK] Deleted {deleted} old app_sessions")
+            logger.info(f"[CLEANUP] Deleted {deleted} old app_sessions")
             
             # 2. Delete old domain_sessions
             deleted = server_models.DomainSession.query.filter(
                 server_models.DomainSession.start_time < cutoff_datetime
             ).delete()
-            print(f"[OK] Deleted {deleted} old domain_sessions")
+            logger.info(f"[CLEANUP] Deleted {deleted} old domain_sessions")
             
             # 3. Delete old domain_visits
             deleted = server_models.DomainVisit.query.filter(
                 server_models.DomainVisit.visited_at < cutoff_datetime
             ).delete()
-            print(f"[OK] Deleted {deleted} old domain_visits")
+            logger.info(f"[CLEANUP] Deleted {deleted} old domain_visits")
             
             # 4. Delete old state_changes
             deleted = server_models.StateChange.query.filter(
                 server_models.StateChange.timestamp < cutoff_datetime
             ).delete()
-            print(f"[OK] Deleted {deleted} old state_changes")
+            logger.info(f"[CLEANUP] Deleted {deleted} old state_changes")
             
             # Note: We keep screen_time and app_usage (daily aggregates) forever
             # These are already summarized per-day
             
             db.session.commit()
-            print("\n[OK] Cleanup complete!")
+            logger.info("[CLEANUP] Cleanup complete!")
             
         except Exception as e:
             db.session.rollback()
-            print(f"✗ Cleanup error: {e}")
-            logger.error(f"Data cleanup error: {e}")
+            logger.error(f"[CLEANUP] Data cleanup error: {e}")
 
 
 def get_daily_summary(agent_id: str, date):

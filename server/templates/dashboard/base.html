@@ -337,13 +337,13 @@
     </div>
 
     <!-- Main Content -->
-    <main id="main-content" class="max-w-7xl mx-auto min-h-[82vh] pt-8 px-6" tabindex="-1">
+    <main id="main-content" class="mx-auto min-h-[82vh] pt-8 transition-all" style="max-width: var(--container-max-width); padding-left: var(--container-padding); padding-right: var(--container-padding);" tabindex="-1">
         {% block content %}{% endblock %}
     </main>
 
     <!-- Footer -->
     <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-3 transition-colors">
-        <div class="max-w-7xl mx-auto px-6 py-4">
+        <div class="mx-auto px-6 py-4" style="max-width: var(--container-max-width); padding-left: var(--container-padding); padding-right: var(--container-padding);">
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">&copy; 2025 <span

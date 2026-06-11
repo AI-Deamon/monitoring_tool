@@ -47,6 +47,7 @@ class CoreCommunicator:
         self.config = config
         self.replay_cache = ReplayProtectionCache()
         self.queue = PersistenceQueue(config.data_dir)
+        self._hmac_missing_warned = False
         
         # Initial flush of pending items
         try:
@@ -63,6 +64,26 @@ class CoreCommunicator:
     def agent_id(self) -> str:
         """Get agent_id dynamically from config (may change after identity sync)"""
         return self.config.agent_id or os.environ.get('COMPUTERNAME', 'unknown')
+
+    def _build_signed_headers(self, payload: bytes) -> Dict[str, str]:
+        """Build request headers and attach HMAC signature when key is available."""
+        headers = {
+            'Content-Type': 'application/json',
+            'X-Agent-Id': self.agent_id
+        }
+
+        key = self.config.get_hmac_key()
+        if key:
+            headers['X-HMAC-Signature'] = hmac.new(
+                key, payload, hashlib.sha256
+            ).hexdigest()
+        elif not self._hmac_missing_warned:
+            logger.warning(
+                "[COMM] local_agent_key is empty; requests are sent without HMAC signature"
+            )
+            self._hmac_missing_warned = True
+
+        return headers
         
     def _make_request(self, endpoint: str, data: Dict, timeout: int = 30) -> Optional[Dict]:
         """Make HTTP request to core (Security Disabled)"""
@@ -71,14 +92,12 @@ class CoreCommunicator:
             
             # Prepare request
             json_data = json.dumps(data).encode('utf-8')
+            headers = self._build_signed_headers(json_data)
             
             req = urllib.request.Request(
                 url,
                 data=json_data,
-                headers={
-                    'Content-Type': 'application/json',
-                    'X-Agent-Id': self.agent_id
-                },
+                headers=headers,
                 method='POST'
             )
             # mTLS support
@@ -116,11 +135,8 @@ class CoreCommunicator:
                     logger.warning(f"[COMM] SSL error, falling back to HTTP: {http_url}")
                     http_req = urllib.request.Request(
                         http_url,
-                        data=json.dumps(data).encode('utf-8'),
-                        headers={
-                            'Content-Type': 'application/json',
-                            'X-Agent-Id': self.agent_id
-                        },
+                        data=json_data,
+                        headers=headers,
                         method='POST'
                     )
                     with urllib.request.urlopen(http_req, timeout=timeout) as response:
@@ -271,6 +287,20 @@ class CoreCommunicator:
             True if successful
         """
         self.queue.add(hardware, '/hardware')
+        self._flush_queue()
+        return True
+    
+    def send_network_partial(self, network_data: Dict) -> bool:
+        """
+        Queue and send partial network update to core (when adapter changes)
+        
+        Args:
+            network_data: Network-only data dict with 'network' key
+            
+        Returns:
+            True if successful
+        """
+        self.queue.add(network_data, '/hardware/network')
         self._flush_queue()
         return True
     

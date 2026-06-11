@@ -782,6 +782,9 @@ class ServerUploader:
             # Upload hardware asset info
             self._upload_hardware()
             
+            # Upload network partial updates (when adapter changes)
+            self._upload_network_partial()
+            
             # Upload extended inventory (CLI tools, drivers, extensions, etc.)
             self._upload_extended_inventory()
             
@@ -1054,7 +1057,10 @@ class ServerUploader:
         
         for record in inventory_records:
             payload = {
-                'agent_id': record['agent_id'],
+                # Always bind uploads to current runtime identity.
+                # This prevents stale buffered rows from a prior agent_id
+                # from being rejected as "Unknown agent" after re-registration.
+                'agent_id': self.config.agent_id,
                 'timestamp': record['timestamp'],
                 'apps': record.get('apps', []),
                 'changes': record.get('changes', {})
@@ -1078,7 +1084,9 @@ class ServerUploader:
             return
         
         for record in hardware_records:
-            payload = record.get('data', {})
+            payload = dict(record.get('data', {}))
+            # Normalize to current runtime identity for the same reason as inventory.
+            payload['agent_id'] = self.config.agent_id
             
             response = self._make_request('/asset-hardware', payload)
             
@@ -1092,6 +1100,31 @@ class ServerUploader:
             else:
                 self.buffer.record_upload_ack_failure()
                 logger.debug("Failed to upload hardware (server offline?)")
+                break  # Stop on first failure
+    
+    def _upload_network_partial(self):
+        """Upload partial network updates (when adapter changes)"""
+        network_records = self.buffer.get_unuploaded_network_partials(limit=5)
+        
+        if not network_records:
+            return
+        
+        for record in network_records:
+            payload = dict(record.get('data', {}))
+            payload['agent_id'] = self.config.agent_id
+            
+            response = self._make_request('/asset-hardware/network', payload)
+            
+            if self._is_ack_success(response):
+                self.buffer.mark_hardware_uploaded([record['id']])
+                network_info = payload.get('network', {})
+                logger.info(
+                    f"[OK] Uploaded network partial: "
+                    f"{network_info.get('primary_mac', 'N/A')}"
+                )
+            else:
+                self.buffer.record_upload_ack_failure()
+                logger.debug("Failed to upload network partial (server offline?)")
                 break  # Stop on first failure
     
     def _upload_extended_inventory(self):

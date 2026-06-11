@@ -82,7 +82,27 @@ class HelperMonitor:
         self.restart_cooldown_minutes = 30  # After max attempts, wait 30 min
 
         # Monitoring settings
-        self.heartbeat_timeout_seconds = 120  # 2 minutes without heartbeat = problem
+        # Heartbeat timeout is intentionally conservative because Helper can run
+        # at 120s cadence while locked. Restarting too early breaks lock-session
+        # continuity and undercounts locked time.
+        helper_cfg = self.config.helper_config or {}
+        helper_interval = int(helper_cfg.get("heartbeat_interval", 10) or 10)
+        self.max_expected_helper_interval_seconds = max(120, helper_interval)
+        default_timeout = max(300, self.max_expected_helper_interval_seconds * 3)
+        self.heartbeat_timeout_seconds = int(
+            os.environ.get(
+                "SENTINELEDGE_HELPER_HEARTBEAT_TIMEOUT_SECONDS", str(default_timeout)
+            )
+        )
+        self.heartbeat_timeout_seconds = max(
+            self.max_expected_helper_interval_seconds, self.heartbeat_timeout_seconds
+        )
+        self.heartbeat_timeout_grace_seconds = int(
+            os.environ.get("SENTINELEDGE_HELPER_HEARTBEAT_GRACE_SECONDS", "90")
+        )
+        self.heartbeat_timeout_grace_seconds = max(
+            0, self.heartbeat_timeout_grace_seconds
+        )
         self.check_interval_seconds = 60  # Check every 60 seconds
         self.startup_grace_seconds = 600  # 10 min grace for helper initial collection
         self.helper_startup_time: Optional[datetime] = (
@@ -245,9 +265,22 @@ class HelperMonitor:
                 return True
 
         if elapsed > self.heartbeat_timeout_seconds:
+            within_grace = (
+                elapsed
+                <= self.heartbeat_timeout_seconds + self.heartbeat_timeout_grace_seconds
+            )
+            if within_grace:
+                self.logger.warning(
+                    f"[HelperMonitor] Heartbeat overdue for {elapsed:.0f}s "
+                    f"(timeout: {self.heartbeat_timeout_seconds}s, "
+                    f"grace: +{self.heartbeat_timeout_grace_seconds}s) - "
+                    "holding restart"
+                )
+                return True
             self.logger.warning(
                 f"[HelperMonitor] No heartbeat for {elapsed:.0f}s "
-                f"(timeout: {self.heartbeat_timeout_seconds}s)"
+                f"(timeout: {self.heartbeat_timeout_seconds}s, "
+                f"grace: +{self.heartbeat_timeout_grace_seconds}s)"
             )
             return False
 
@@ -322,6 +355,22 @@ class HelperMonitor:
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
 
+        def _collect_helper_processes():
+            if not HAS_PSUTIL:
+                return []
+            matches = []
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    name = (proc.info.get("name") or "").lower()
+                    cmdline = " ".join(proc.info.get("cmdline") or []).lower()
+                    if name in self.helper_exe_names or (
+                        "python" in name and "sentinel_helper" in cmdline
+                    ):
+                        matches.append(proc)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            return matches
+
         try:
             # 1) End helper scheduled tasks first (stuck task instances are common after sleep/wake).
             for task_name in self.helper_task_names:
@@ -330,21 +379,36 @@ class HelperMonitor:
                 except Exception:
                     pass
 
-            # 2) Kill stale helper processes (best-effort).
+            # Give helper a short chance to exit and flush state cleanly after task end.
             if HAS_PSUTIL:
-                for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                end_wait_deadline = time.time() + 8
+                while time.time() < end_wait_deadline:
+                    if not _collect_helper_processes():
+                        break
+                    time.sleep(0.5)
+
+            # 2) Kill stale helper processes only if they survived task end.
+            if HAS_PSUTIL:
+                candidates = _collect_helper_processes()
+                for proc in candidates:
                     try:
-                        name = (proc.info.get("name") or "").lower()
-                        cmdline = " ".join(proc.info.get("cmdline") or []).lower()
-                        if name in self.helper_exe_names or (
-                            "python" in name and "sentinel_helper" in cmdline
-                        ):
-                            self.logger.warning(
-                                f"[HelperMonitor] Terminating stale helper PID {proc.pid}"
-                            )
-                            proc.kill()
+                        self.logger.warning(
+                            f"[HelperMonitor] Stale helper still alive after /end, "
+                            f"requesting terminate PID {proc.pid}"
+                        )
+                        proc.terminate()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
+                if candidates:
+                    _, alive = psutil.wait_procs(candidates, timeout=3)
+                    for proc in alive:
+                        try:
+                            self.logger.warning(
+                                f"[HelperMonitor] Force-killing helper PID {proc.pid}"
+                            )
+                            proc.kill()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
 
             # 3) Start preferred task first, fallback to legacy task name.
             for task_name in self.helper_task_names:

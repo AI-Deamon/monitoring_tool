@@ -11,6 +11,145 @@
         </h1>
         <p class="text-gray-600 dark:text-gray-400 mt-1">Export fleet-wide or individual agent activity data</p>
     </div>
+    {% if session.get('role') == 'admin' %}
+    <button onclick="openUnifiedModal()" id="unified-modal-trigger"
+        class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow transition-colors">
+        <i class="fas fa-chart-bar"></i> Generate Report
+    </button>
+    {% endif %}
+</div>
+
+<!-- Unified Report Modal -->
+<div id="unified-modal" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true">
+    <div class="absolute inset-0 bg-black bg-opacity-60" onclick="closeUnifiedModal()"></div>
+    <div class="relative z-10 flex items-center justify-center min-h-screen p-4">
+        <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+
+            <!-- Header -->
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-chart-bar text-indigo-600 dark:text-indigo-400 text-lg"></i>
+                    <h2 id="um-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100">Generate Report</h2>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden text-sm">
+                        <button id="um-mode-generate" onclick="setUmMode('generate')"
+                            class="px-3 py-1.5 bg-indigo-600 text-white font-medium transition-colors">Generate Now</button>
+                        <button id="um-mode-schedule" onclick="setUmMode('schedule')"
+                            class="px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium transition-colors">Schedule</button>
+                    </div>
+                    <button onclick="closeUnifiedModal()" class="ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl leading-none">&times;</button>
+                </div>
+            </div>
+
+            <!-- Step: Config -->
+            <div id="um-step-config" class="flex flex-col md:flex-row flex-1 overflow-auto">
+                <!-- Left: config 60% -->
+                <div class="flex-1 p-6 border-b md:border-b-0 md:border-r border-gray-200 dark:border-gray-700 overflow-y-auto">
+                    <!-- Report Type -->
+                    <div class="mb-5">
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Report Type</label>
+                        <div class="flex gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-type" value="weekly" checked onchange="umTypeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Weekly</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-type" value="monthly" onchange="umTypeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Monthly</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-type" value="daily" onchange="umTypeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Daily</span></label>
+                        </div>
+                    </div>
+                    <!-- Scope -->
+                    <div class="mb-5">
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Scope</label>
+                        <div class="flex gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-scope" value="team" checked onchange="umScopeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Team Report</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-scope" value="individual" onchange="umScopeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Individual Agent</span></label>
+                        </div>
+                    </div>
+                    <!-- Agent selector -->
+                    <div id="um-agent-wrap" class="mb-5 hidden">
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Agent</label>
+                        <select id="um-agent" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                            <option value="">-- Select Agent --</option>
+                        </select>
+                    </div>
+                    <!-- Date Range -->
+                    <div class="mb-5">
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Date Range</label>
+                        <div class="flex gap-2 mb-2 flex-wrap">
+                            <button type="button" onclick="umPreset('last_week')" class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900">Last Week</button>
+                            <button type="button" onclick="umPreset('this_week')" class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900">This Week</button>
+                            <button type="button" onclick="umPreset('last_month')" class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900">Last Month</button>
+                        </div>
+                        <div class="flex gap-3">
+                            <div class="flex-1"><label class="block text-xs text-gray-500 mb-1">Start</label><input type="date" id="um-start" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"></div>
+                            <div class="flex-1"><label class="block text-xs text-gray-500 mb-1">End</label><input type="date" id="um-end" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"></div>
+                        </div>
+                        <p id="um-period-hint" class="text-xs text-gray-400 mt-1"></p>
+                    </div>
+                    <!-- Options -->
+                    <div class="mb-5">
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Options</label>
+                        <div class="space-y-2">
+                            <label id="um-pdf-wrap" class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="um-include-pdf" class="text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">Include PDF export (WeasyPrint)</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="um-auto-email" class="text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">Auto-email upon generation</span></label>
+                        </div>
+                    </div>
+                    <!-- Schedule options -->
+                    <div id="um-schedule-opts" class="hidden mb-5 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Schedule Options</label>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="block text-xs text-gray-500 mb-1">Frequency</label><select id="um-freq" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg text-sm"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="daily">Daily</option></select></div>
+                            <div><label class="block text-xs text-gray-500 mb-1">Send Hour (IST)</label><input type="number" id="um-send-hour" value="9" min="0" max="23" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg text-sm"></div>
+                            <div class="col-span-2"><label class="block text-xs text-gray-500 mb-1">Schedule Name</label><input type="text" id="um-sched-name" placeholder="Weekly Team Report" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg text-sm"></div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Right: recipients 40% -->
+                <div class="w-full md:w-80 p-6 overflow-y-auto">
+                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Email Recipients</label>
+                    <input type="text" id="um-recipient-search" placeholder="Search users..." oninput="umFilterRecipients()"
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm mb-2">
+                    <div class="flex gap-2 mb-2">
+                        <button type="button" onclick="umSelectAllRecipients()" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Select All</button>
+                        <span class="text-gray-300 dark:text-gray-600">|</span>
+                        <button type="button" onclick="umClearRecipients()" class="text-xs text-gray-500 hover:underline">Clear</button>
+                    </div>
+                    <div id="um-recipients-list" class="space-y-1 max-h-52 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-2 mb-3">
+                        <p class="text-xs text-gray-400">Loading users...</p>
+                    </div>
+                    <label class="block text-xs text-gray-500 mb-1">Or enter emails manually</label>
+                    <input type="text" id="um-manual-emails" placeholder="user@example.com, ..."
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm">
+                </div>
+            </div>
+
+            <!-- Step: Generating -->
+            <div id="um-step-generating" class="hidden flex-1 flex flex-col items-center justify-center p-10 text-center">
+                <div class="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-6"></div>
+                <p id="um-gen-status" class="text-gray-700 dark:text-gray-300 font-medium mb-2">Starting generation...</p>
+                <p id="um-gen-detail" class="text-sm text-gray-500 dark:text-gray-400"></p>
+            </div>
+
+            <!-- Step: Result -->
+            <div id="um-step-result" class="hidden flex-1 flex flex-col items-center justify-center p-10 text-center">
+                <div id="um-result-icon" class="text-5xl mb-4">&#x2705;</div>
+                <p id="um-result-msg" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Report generated successfully</p>
+                <p id="um-result-detail" class="text-sm text-gray-500 dark:text-gray-400 mb-6"></p>
+                <div class="flex flex-wrap gap-3 justify-center">
+                    <button id="um-btn-view" onclick="umViewReport()" class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium"><i class="fas fa-eye"></i> View Report</button>
+                    <button id="um-btn-email" onclick="umSendEmail()" class="inline-flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium"><i class="fas fa-envelope"></i> Send Email</button>
+                    <button onclick="umReset()" class="inline-flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium"><i class="fas fa-redo"></i> New Report</button>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div id="um-footer" class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <p id="um-footer-error" class="text-sm text-red-600 dark:text-red-400 hidden"></p>
+                <div class="flex gap-3 ml-auto">
+                    <button onclick="closeUnifiedModal()" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 transition-colors">Cancel</button>
+                    <button id="um-submit-btn" onclick="umSubmit()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">Generate</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Report Type Selection -->
@@ -87,6 +226,39 @@
             </div>
         </div>
     </button>
+
+    <!-- Activity Reports Card -->
+    <button type="button"
+        class="text-left w-full bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 cursor-pointer hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-600 transition-all duration-200 group focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
+        onclick="showSection('activity')">
+        <div class="text-center">
+            <div class="w-16 h-16 mx-auto bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-indigo-200 dark:group-hover:bg-indigo-800 transition-colors">
+                <i class="fas fa-chart-bar text-2xl text-indigo-600 dark:text-indigo-400"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Activity Reports</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Weekly / Monthly team & individual</p>
+            <div class="flex justify-center gap-2">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200">Preview</span>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200">Email</span>
+            </div>
+        </div>
+    </button>
+
+    <!-- Email Schedules Card -->
+    <button type="button"
+        class="text-left w-full bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 cursor-pointer hover:shadow-md hover:border-teal-300 dark:hover:border-teal-600 transition-all duration-200 group focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
+        onclick="showSection('schedules')">
+        <div class="text-center">
+            <div class="w-16 h-16 mx-auto bg-teal-100 dark:bg-teal-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-teal-200 dark:group-hover:bg-teal-800 transition-colors">
+                <i class="fas fa-clock text-2xl text-teal-600 dark:text-teal-400"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Email Schedules</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Auto-send reports via noreply</p>
+            <div class="flex justify-center">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200">Scheduled</span>
+            </div>
+        </div>
+     </button>
 </div>
 
 <!-- Individual Agent Report Section -->
@@ -236,6 +408,190 @@
     </button>
 </div>
 
+
+<!-- ── Activity Reports Section ─────────────────────────────────────────── -->
+<div id="section-activity"
+    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6"
+    style="display:none;">
+    <div class="flex items-center gap-3 mb-6">
+        <div class="w-10 h-10 bg-indigo-100 dark:bg-indigo-900 rounded-lg flex items-center justify-center">
+            <i class="fas fa-chart-bar text-indigo-600 dark:text-indigo-400"></i>
+        </div>
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Activity Reports</h2>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Report Type</label>
+            <select id="ar-type" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="daily">Daily</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Scope</label>
+            <select id="ar-scope" onchange="toggleArAgent()" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                <option value="team">Team (All)</option>
+                <option value="individual">Individual Agent</option>
+            </select>
+        </div>
+        <div id="ar-agent-wrap" style="display:none;">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Agent</label>
+            <select id="ar-agent" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                <option value="">-- Select Agent --</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Date</label>
+            <input type="date" id="ar-start" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Date</label>
+            <input type="date" id="ar-end" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+        </div>
+    </div>
+
+    <!-- Email Now -->
+    <div id="ar-email-wrap" class="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Send Email To (comma-separated)</label>
+        <input type="text" id="ar-recipients" placeholder="user@example.com, user2@example.com"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+    </div>
+
+    <div id="ar-status" class="mb-4 hidden p-3 rounded-lg text-sm"></div>
+
+    <div class="flex flex-wrap gap-3">
+        <button id="ar-generate-btn" onclick="generateActivityReport()"
+            class="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors">
+            <i class="fas fa-play mr-2"></i> Generate Report
+        </button>
+        <button id="ar-view-btn" onclick="viewActivityReport()" style="display:none"
+            class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+            <i class="fas fa-eye mr-2"></i> View Report
+        </button>
+        <button id="ar-email-btn" onclick="emailActivityReport()" style="display:none"
+            class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors">
+            <i class="fas fa-envelope mr-2"></i> Send Email
+        </button>
+    </div>
+</div>
+
+<!-- Job History Section -->
+<div id="section-job-history" class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6" style="display:none;">
+    <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-indigo-100 dark:bg-indigo-900 rounded-lg flex items-center justify-center">
+                <i class="fas fa-history text-indigo-600 dark:text-indigo-400"></i>
+            </div>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Recent Report Jobs</h2>
+        </div>
+        <button onclick="loadJobHistory()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">Refresh</button>
+    </div>
+    <div id="job-history-table"><p class="text-gray-500 dark:text-gray-400 text-sm">Loading...</p></div>
+</div>
+
+<!-- ── Email Schedules Section ──────────────────────────────────────────── -->
+<div id="section-schedules"
+    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6"
+    style="display:none;">
+    <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-teal-100 dark:bg-teal-900 rounded-lg flex items-center justify-center">
+                <i class="fas fa-clock text-teal-600 dark:text-teal-400"></i>
+            </div>
+            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Email Schedules</h2>
+        </div>
+        <button onclick="toggleNewScheduleForm()"
+            class="inline-flex items-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors">
+            <i class="fas fa-plus mr-2"></i> New Schedule
+        </button>
+    </div>
+
+    <!-- New Schedule Form -->
+    <div id="new-schedule-form" class="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600" style="display:none;">
+        <h3 class="font-semibold text-gray-900 dark:text-gray-100 mb-4">Create Schedule</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+                <input type="text" id="sch-name" placeholder="Weekly Team Report"
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Report Type</label>
+                <select id="sch-type" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="daily">Daily</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Scope</label>
+                <select id="sch-scope" onchange="toggleSchAgent()" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+                    <option value="team">Team</option>
+                    <option value="individual">Individual</option>
+                </select>
+            </div>
+            <div id="sch-agent-wrap" style="display:none;">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Agent</label>
+                <select id="sch-agent" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+                    <option value="">-- Select Agent --</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Frequency</label>
+                <select id="sch-freq" onchange="toggleFreqFields()" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="daily">Daily</option>
+                </select>
+            </div>
+            <div id="sch-dow-wrap">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Day of Week</label>
+                <select id="sch-dow" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+                    <option value="0">Monday</option>
+                    <option value="1">Tuesday</option>
+                    <option value="2">Wednesday</option>
+                    <option value="3">Thursday</option>
+                    <option value="4">Friday</option>
+                </select>
+            </div>
+            <div id="sch-dom-wrap" style="display:none;">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Day of Month</label>
+                <input type="number" id="sch-dom" min="1" max="28" value="1"
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Send Hour (IST)</label>
+                <input type="number" id="sch-hour" min="0" max="23" value="9"
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+            </div>
+        </div>
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recipients (comma-separated emails)</label>
+            <input type="text" id="sch-recipients" placeholder="user@example.com, manager@example.com"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+        </div>
+        <div id="sch-status" class="mb-3 hidden"></div>
+        <div class="flex gap-3">
+            <button onclick="createSchedule()"
+                class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors">
+                Save Schedule
+            </button>
+            <button onclick="toggleNewScheduleForm()"
+                class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 font-medium rounded-lg transition-colors">
+                Cancel
+            </button>
+        </div>
+    </div>
+
+    <!-- Schedules List -->
+    <div id="schedules-list">
+        <div class="text-center text-gray-500 dark:text-gray-400 py-8">Loading schedules...</div>
+    </div>
+</div>
+
+
 <!-- Quick Access Section -->
 <div class="mb-6">
     <div class="flex items-center gap-3 mb-4">
@@ -274,6 +630,7 @@
         if (response && response.data) {
             allAgents = response.data;
             populateAgentSelects();
+            populateActivityAgentSelects();
             renderAgentsGrid();
         }
     });
@@ -336,14 +693,6 @@
             `;
             grid.appendChild(card);
         });
-    }
-
-    function showSection(section) {
-        // Hide all sections
-        document.querySelectorAll('[id^="section-"]').forEach(el => el.style.display = 'none');
-
-        // Show selected section
-        document.getElementById(`section-${section}`).style.display = 'block';
     }
 
     function openAgentReport() {
@@ -539,5 +888,647 @@
         link.click();
         document.body.removeChild(link);
     }
+
+
+    // ── Activity Reports ────────────────────────────────────────────────────
+    function toggleArAgent() {
+        document.getElementById('ar-agent-wrap').style.display =
+            document.getElementById('ar-scope').value === 'individual' ? '' : 'none';
+    }
+
+    function getArDates() {
+        const type = document.getElementById('ar-type').value;
+        // Use IST (UTC+5:30) for date calculations
+        const now = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000; // IST offset in ms
+        const istTime = new Date(now.getTime() + istOffset);
+        const today = new Date(istTime.getUTCFullYear(), istTime.getUTCMonth(), istTime.getUTCDate());
+        let start, end;
+        if (type === 'daily') {
+            const d = new Date(today); d.setDate(d.getDate() - 1);
+            start = end = d.toISOString().split('T')[0];
+        } else if (type === 'monthly') {
+            const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            const last = new Date(today.getFullYear(), today.getMonth(), 0);
+            start = first.toISOString().split('T')[0]; end = last.toISOString().split('T')[0];
+        } else {
+            const dow = today.getDay() || 7;
+            const mon = new Date(today); mon.setDate(today.getDate() - dow - 6);
+            const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+            start = mon.toISOString().split('T')[0]; end = sun.toISOString().split('T')[0];
+        }
+        return { start: document.getElementById('ar-start').value || start, end: document.getElementById('ar-end').value || end };
+    }
+
+    async function previewActivityReport() {
+        const scope = document.getElementById('ar-scope').value;
+        const type = document.getElementById('ar-type').value;
+        const agentId = document.getElementById('ar-agent').value;
+        const { start, end } = getArDates();
+        if (scope === 'individual' && !agentId) { alert('Select an agent'); return; }
+        const statusEl = document.getElementById('ar-status');
+        statusEl.className = 'mb-4 p-3 bg-blue-50 dark:bg-blue-900 text-blue-700 dark:text-blue-200 rounded-lg text-sm';
+        statusEl.textContent = 'Generating report…'; statusEl.classList.remove('hidden');
+        try {
+            const resp = await fetch('/dashboard/reports/generate', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ report_type: type, scope, agent_id: agentId, start_date: start, end_date: end }),
+            });
+            if (!resp.ok) { const e = await resp.json(); throw new Error(e.error || resp.statusText); }
+            const html = await resp.text();
+            const win = window.open('', '_blank'); win.document.write(html); win.document.close();
+            statusEl.classList.add('hidden');
+        } catch (e) {
+            statusEl.className = 'mb-4 p-3 bg-red-50 dark:bg-red-900 text-red-700 dark:text-red-200 rounded-lg text-sm';
+            statusEl.textContent = 'Error: ' + e.message;
+        }
+    }
+
+    async function emailActivityReport() {
+        const scope = document.getElementById('ar-scope').value;
+        const type = document.getElementById('ar-type').value;
+        const agentId = document.getElementById('ar-agent').value;
+        const { start, end } = getArDates();
+        const recipientsRaw = document.getElementById('ar-recipients').value.trim();
+        if (!recipientsRaw) { alert('Enter at least one recipient email'); return; }
+        if (scope === 'individual' && !agentId) { alert('Select an agent'); return; }
+        const recipients = recipientsRaw.split(',').map(s => s.trim()).filter(Boolean);
+        const statusEl = document.getElementById('ar-status');
+        statusEl.className = 'mb-4 p-3 bg-blue-50 dark:bg-blue-900 text-blue-700 dark:text-blue-200 rounded-lg text-sm';
+        statusEl.textContent = 'Sending email…'; statusEl.classList.remove('hidden');
+        try {
+            const resp = await fetch('/dashboard/reports/email', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ report_type: type, scope, agent_id: agentId, start_date: start, end_date: end, recipients }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                statusEl.className = 'mb-4 p-3 bg-green-50 dark:bg-green-900 text-green-700 dark:text-green-200 rounded-lg text-sm';
+                statusEl.textContent = '✓ ' + data.message;
+            } else { throw new Error(data.error || 'Send failed'); }
+        } catch (e) {
+            statusEl.className = 'mb-4 p-3 bg-red-50 dark:bg-red-900 text-red-700 dark:text-red-200 rounded-lg text-sm';
+            statusEl.textContent = 'Error: ' + e.message;
+        }
+    }
+
+    // ── Email Schedules ─────────────────────────────────────────────────────
+    function toggleNewScheduleForm() {
+        const f = document.getElementById('new-schedule-form');
+        f.style.display = f.style.display === 'none' ? '' : 'none';
+    }
+    function toggleSchAgent() {
+        document.getElementById('sch-agent-wrap').style.display =
+            document.getElementById('sch-scope').value === 'individual' ? '' : 'none';
+    }
+    function toggleFreqFields() {
+        const freq = document.getElementById('sch-freq').value;
+        document.getElementById('sch-dow-wrap').style.display = freq === 'weekly' ? '' : 'none';
+        document.getElementById('sch-dom-wrap').style.display = freq === 'monthly' ? '' : 'none';
+    }
+
+    async function loadSchedules() {
+        const list = document.getElementById('schedules-list');
+        try {
+            const data = await fetchJSON('/dashboard/reports/schedules');
+            if (!data || data.length === 0) {
+                list.innerHTML = '<p class="text-center text-gray-500 dark:text-gray-400 py-8">No schedules yet. Click "New Schedule" to create one.</p>';
+                return;
+            }
+            list.innerHTML = `<div class="overflow-x-auto"><table class="w-full text-sm">
+                <thead><tr class="border-b border-gray-200 dark:border-gray-700">
+                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Name</th>
+                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Type</th>
+                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Frequency</th>
+                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Recipients</th>
+                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Next Run (UTC)</th>
+                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Last Run</th>
+                    <th class="py-2 px-3"></th>
+                </tr></thead>
+                <tbody>${data.map(s => `<tr class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td class="py-2 px-3 font-medium text-gray-900 dark:text-gray-100">${s.name}</td>
+                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400">${s.report_type} / ${s.scope}</td>
+                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400">${s.frequency}</td>
+                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400 text-xs">${(s.recipients||[]).slice(0,2).join(', ')}${s.recipients.length>2?' +more':''}</td>
+                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400">${s.next_run ? s.next_run.replace('T',' ').slice(0,16) : '—'}</td>
+                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400">${s.last_run ? s.last_run.replace('T',' ').slice(0,16) : 'Never'}</td>
+                    <td class="py-2 px-3">
+                        <div class="flex gap-1">
+                            <button onclick="runScheduleNow(${s.id})" class="px-2 py-1 bg-green-100 hover:bg-green-200 dark:bg-green-900 dark:hover:bg-green-800 text-green-700 dark:text-green-300 rounded text-xs font-medium">▶ Run</button>
+                            <button onclick="deleteSchedule(${s.id})" class="px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-700 dark:text-red-300 rounded text-xs font-medium">✕</button>
+                        </div>
+                    </td>
+                </tr>`).join('')}</tbody>
+            </table></div>`;
+        } catch (e) {
+            list.innerHTML = `<p class="text-center text-red-500 py-4">Failed to load: ${e.message}</p>`;
+        }
+    }
+
+    async function createSchedule() {
+        const recipientsRaw = document.getElementById('sch-recipients').value.trim();
+        if (!document.getElementById('sch-name').value.trim()) { alert('Name is required'); return; }
+        if (!recipientsRaw) { alert('Recipients are required'); return; }
+        const freq = document.getElementById('sch-freq').value;
+        const payload = {
+            name: document.getElementById('sch-name').value.trim(),
+            report_type: document.getElementById('sch-type').value,
+            scope: document.getElementById('sch-scope').value,
+            agent_id: document.getElementById('sch-agent').value || null,
+            frequency: freq,
+            day_of_week: freq === 'weekly' ? parseInt(document.getElementById('sch-dow').value) : null,
+            day_of_month: freq === 'monthly' ? parseInt(document.getElementById('sch-dom').value) : null,
+            send_hour: parseInt(document.getElementById('sch-hour').value),
+            recipients: recipientsRaw.split(',').map(s => s.trim()).filter(Boolean),
+        };
+        const statusEl = document.getElementById('sch-status');
+        statusEl.className = 'mb-3 p-3 bg-blue-50 dark:bg-blue-900 text-blue-700 dark:text-blue-200 rounded-lg text-sm';
+        statusEl.textContent = 'Saving…'; statusEl.classList.remove('hidden');
+        try {
+            const resp = await fetch('/dashboard/reports/schedules', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                statusEl.className = 'mb-3 p-3 bg-green-50 dark:bg-green-900 text-green-700 dark:text-green-200 rounded-lg text-sm';
+                statusEl.textContent = `✓ Saved. Next run: ${data.next_run.replace('T',' ').slice(0,16)} UTC`;
+                setTimeout(() => { toggleNewScheduleForm(); loadSchedules(); }, 1500);
+            } else { throw new Error(data.error || 'Save failed'); }
+        } catch (e) {
+            statusEl.className = 'mb-3 p-3 bg-red-50 dark:bg-red-900 text-red-700 dark:text-red-200 rounded-lg text-sm';
+            statusEl.textContent = 'Error: ' + e.message;
+        }
+    }
+
+    async function deleteSchedule(id) {
+        if (!confirm('Delete this schedule?')) return;
+        await fetch(`/dashboard/reports/schedules/${id}`, { method: 'DELETE' });
+        loadSchedules();
+    }
+
+    async function runScheduleNow(id) {
+        if (!confirm('Run now and send email?')) return;
+        try {
+            const resp = await fetch(`/dashboard/reports/schedules/${id}/run`, { method: 'POST' });
+            const data = await resp.json();
+            alert(data.success ? '✓ Report sent successfully' : 'Failed: ' + (data.error || 'Unknown error'));
+            loadSchedules();
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    // Populate agent dropdowns for activity/schedule forms
+    function populateActivityAgentSelects() {
+        ['ar-agent', 'sch-agent'].forEach(id => {
+            const sel = document.getElementById(id);
+            if (!sel) return;
+            sel.innerHTML = '<option value="">-- Select Agent --</option>';
+            allAgents.forEach(a => {
+                const o = document.createElement('option');
+                o.value = a.agent_id;
+                o.textContent = `${a.hostname || 'Unknown'} (${a.agent_id.substring(0,8)}…)`;
+                sel.appendChild(o);
+            });
+        });
+    }
+
+    // Override showSection to trigger lazy loads
+    const _origShowSection = window.showSection;
+    window.showSection = function(section) {
+        // Call original function if it exists
+        if (typeof _origShowSection === 'function') {
+            _origShowSection(section);
+        } else {
+            document.querySelectorAll('[id^="section-"]').forEach(el => el.style.display = 'none');
+            const sectionEl = document.getElementById(`section-${section}`);
+            if (sectionEl) sectionEl.style.display = 'block';
+        }
+        if (section === 'schedules') loadSchedules();
+        if (section === 'activity') { populateActivityAgentSelects(); document.getElementById('section-job-history').style.display='block'; loadJobHistory(); }
+    }
+
+    // ── Unified async report generation ────────────────────────────────────
+    let _arJobId = null;
+    let _arPollInterval = null;
+    let _arResultHtml = null;
+
+    function generateActivityReport() {
+        const type = document.getElementById('ar-type').value;
+        const scope = document.getElementById('ar-scope').value;
+        const agentId = (document.getElementById('ar-agent') || {}).value || null;
+        const start = document.getElementById('ar-start').value;
+        const end = document.getElementById('ar-end').value;
+        if (!start || !end) { showArStatus('error', 'Please select start and end dates.'); return; }
+
+        document.getElementById('ar-generate-btn').disabled = true;
+        document.getElementById('ar-email-btn').style.display = 'none';
+        document.getElementById('ar-view-btn').style.display = 'none';
+        _arResultHtml = null;
+        showArStatus('info', '<i class="fas fa-spinner fa-spin mr-2"></i>Starting generation...');
+
+        fetch('/dashboard/reports/unified/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({report_type: type, scope: scope, agent_id: agentId, start_date: start, end_date: end})
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { showArStatus('error', data.error); document.getElementById('ar-generate-btn').disabled = false; return; }
+            _arJobId = data.job_id;
+            if (_arPollInterval) clearInterval(_arPollInterval);
+            _arPollInterval = setInterval(pollArJob, 2000);
+        })
+        .catch(e => { showArStatus('error', e.toString()); document.getElementById('ar-generate-btn').disabled = false; });
+    }
+
+    function pollArJob() {
+        if (!_arJobId) return;
+        fetch('/dashboard/reports/unified/jobs/' + _arJobId)
+        .then(r => r.json())
+        .then(job => {
+            if (job.status === 'running') {
+                const p = job.progress || {};
+                const msg = p.current_agent ? 'Processing ' + p.current + '/' + p.total + ': ' + p.current_agent : 'Running...';
+                showArStatus('info', '<i class="fas fa-spinner fa-spin mr-2"></i>' + msg);
+            } else if (job.status === 'completed') {
+                clearInterval(_arPollInterval);
+                _arResultHtml = job.result_html;
+                showArStatus('success', '✅ Report ready');
+                document.getElementById('ar-generate-btn').disabled = false;
+                document.getElementById('ar-view-btn').style.display = 'inline-flex';
+                document.getElementById('ar-email-btn').style.display = 'inline-flex';
+                loadJobHistory();
+            } else if (job.status === 'failed') {
+                clearInterval(_arPollInterval);
+                showArStatus('error', '❌ Failed: ' + (job.error_message || 'Unknown error'));
+                document.getElementById('ar-generate-btn').disabled = false;
+                loadJobHistory();
+            }
+        });
+    }
+
+    function viewActivityReport() {
+        if (!_arResultHtml) return;
+        const blob = new Blob([_arResultHtml], {type: 'text/html'});
+        window.open(URL.createObjectURL(blob), '_blank');
+    }
+
+    function emailActivityReport() {
+        const recipients = (document.getElementById('ar-recipients') || {}).value || '';
+        if (!recipients.trim()) { alert('Enter at least one recipient email.'); return; }
+        const rcptList = recipients.split(',').map(r => r.trim()).filter(Boolean);
+        if (_arJobId) {
+            // Use cached job HTML — avoids re-generating the report (BUG-010)
+            fetch(`/dashboard/reports/unified/jobs/${_arJobId}/email`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({recipients: rcptList, subject: 'SentinelEdge Report'})
+            }).then(r => r.json())
+              .then(d => { if (d.success) showArStatus('success', '✅ Email sent'); else showArStatus('error', d.error || 'Send failed'); });
+        } else {
+            // Fallback: no cached job, re-generate via legacy endpoint
+            const type = document.getElementById('ar-type').value;
+            const scope = document.getElementById('ar-scope').value;
+            const start = document.getElementById('ar-start').value;
+            const end = document.getElementById('ar-end').value;
+            fetch('/dashboard/reports/email', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({report_type: type, scope: scope, start_date: start, end_date: end, recipients: rcptList})
+            }).then(r => r.json())
+              .then(d => { if (d.success) showArStatus('success', '✅ Email sent'); else showArStatus('error', d.error || 'Send failed'); });
+        }
+    }
+
+    function showArStatus(type, msg) {
+        const el = document.getElementById('ar-status');
+        el.className = 'mb-4 p-3 rounded-lg text-sm';
+        if (type === 'info') el.classList.add('bg-blue-50', 'text-blue-700', 'dark:bg-blue-900', 'dark:text-blue-200');
+        else if (type === 'success') el.classList.add('bg-green-50', 'text-green-700', 'dark:bg-green-900', 'dark:text-green-200');
+        else el.classList.add('bg-red-50', 'text-red-700', 'dark:bg-red-900', 'dark:text-red-200');
+        el.innerHTML = msg;
+        el.classList.remove('hidden');
+    }
+
+    function loadJobHistory() {
+        fetch('/dashboard/reports/unified/jobs')
+        .then(r => r.json())
+        .then(jobs => {
+            const container = document.getElementById('job-history-table');
+            if (!container) return;
+            if (!jobs.length) { container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-sm">No jobs yet.</p>'; return; }
+            const badge = s => ({'pending':'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+                'running':'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200',
+                'completed':'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200',
+                'failed':'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200'}[s] || '');
+            container.innerHTML = '<table class="w-full text-sm"><thead><tr class="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">'
+                + '<th class="pb-2">Type</th><th class="pb-2">Scope</th><th class="pb-2">Status</th><th class="pb-2">Created</th></tr></thead><tbody>'
+                + jobs.map(j => '<tr class="border-b dark:border-gray-700"><td class="py-2">' + j.report_type + '</td>'
+                    + '<td class="py-2">' + j.scope + '</td>'
+                    + '<td class="py-2"><span class="px-2 py-0.5 rounded-full text-xs font-medium ' + badge(j.status) + '">' + j.status + '</span></td>'
+                    + '<td class="py-2 text-gray-500">' + (j.created_at ? j.created_at.slice(0,16).replace('T',' ') : '') + '</td></tr>').join('')
+                + '</tbody></table>';
+            if (jobs.some(j => j.status === 'running' || j.status === 'pending')) {
+                setTimeout(loadJobHistory, 5000);
+            }
+        }).catch(() => {});
+    }
+
+    // ── Unified Report Modal ────────────────────────────────────────────────
+    let _umMode = 'generate';
+    let _umJobId = null;
+    let _umPollInterval = null;
+    let _umResultHtml = null;
+    let _umDashboardUsers = [];
+
+    function openUnifiedModal() {
+        document.getElementById('unified-modal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        umReset();
+        umLoadUsers();
+        umLoadAgents();
+        umPreset('last_week');
+    }
+
+    function closeUnifiedModal() {
+        document.getElementById('unified-modal').classList.add('hidden');
+        document.body.style.overflow = '';
+        if (_umPollInterval) { clearInterval(_umPollInterval); _umPollInterval = null; }
+    }
+
+    function setUmMode(mode) {
+        _umMode = mode;
+        const isSchedule = mode === 'schedule';
+        document.getElementById('um-mode-generate').className = 'px-3 py-1.5 font-medium transition-colors ' + (isSchedule ? 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300' : 'bg-indigo-600 text-white');
+        document.getElementById('um-mode-schedule').className = 'px-3 py-1.5 font-medium transition-colors ' + (isSchedule ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300');
+        document.getElementById('um-schedule-opts').classList.toggle('hidden', !isSchedule);
+        document.getElementById('um-title').textContent = isSchedule ? 'Create Schedule' : 'Generate Report';
+        document.getElementById('um-submit-btn').textContent = isSchedule ? 'Save Schedule' : 'Generate';
+    }
+
+    function umTypeChanged() {
+        const type = document.querySelector('input[name="um-type"]:checked').value;
+        // Show/hide PDF option (only weekly team)
+        const scope = document.querySelector('input[name="um-scope"]:checked').value;
+        document.getElementById('um-pdf-wrap').classList.toggle('hidden', !(type === 'weekly' && scope === 'team'));
+        umPreset('last_' + (type === 'monthly' ? 'month' : 'week'));
+    }
+
+    function umScopeChanged() {
+        const scope = document.querySelector('input[name="um-scope"]:checked').value;
+        const type = document.querySelector('input[name="um-type"]:checked').value;
+        document.getElementById('um-agent-wrap').classList.toggle('hidden', scope !== 'individual');
+        document.getElementById('um-pdf-wrap').classList.toggle('hidden', !(type === 'weekly' && scope === 'team'));
+    }
+
+    function umPreset(preset) {
+        const now = new Date();
+        const ist = new Date(now.getTime() + (5.5 * 3600000));
+        const today = new Date(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate());
+        const fmt = d => d.toISOString().split('T')[0];
+        let s, e;
+        if (preset === 'last_week') {
+            const dow = today.getDay() || 7;
+            s = new Date(today); s.setDate(today.getDate() - dow - 6);
+            e = new Date(s); e.setDate(s.getDate() + 6);
+        } else if (preset === 'this_week') {
+            const dow = today.getDay() || 7;
+            s = new Date(today); s.setDate(today.getDate() - dow + 1);
+            e = new Date(s); e.setDate(s.getDate() + 6);
+        } else if (preset === 'last_month') {
+            s = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            e = new Date(today.getFullYear(), today.getMonth(), 0);
+        } else { return; }
+        document.getElementById('um-start').value = fmt(s);
+        document.getElementById('um-end').value = fmt(e);
+        document.getElementById('um-period-hint').textContent = fmt(s) + ' to ' + fmt(e);
+    }
+
+    function umLoadAgents() {
+        fetch('/dashboard/reports/agents').then(r => r.json()).then(agents => {
+            const sel = document.getElementById('um-agent');
+            sel.innerHTML = '<option value="">-- Select Agent --</option>';
+            agents.forEach(a => {
+                const o = document.createElement('option');
+                o.value = a.agent_id;
+                o.textContent = (a.username || a.hostname || a.agent_id.slice(0, 8));
+                sel.appendChild(o);
+            });
+        }).catch(() => {});
+    }
+
+    function umLoadUsers() {
+        fetch('/auth/users/list').then(r => r.json()).then(users => {
+            _umDashboardUsers = users || [];
+            umRenderRecipients(_umDashboardUsers);
+        }).catch(() => {
+            document.getElementById('um-recipients-list').innerHTML = '<p class="text-xs text-gray-400">Could not load users.</p>';
+        });
+    }
+
+    function umRenderRecipients(users) {
+        const container = document.getElementById('um-recipients-list');
+        if (!users.length) { container.innerHTML = '<p class="text-xs text-gray-400">No users found.</p>'; return; }
+        container.innerHTML = users.map(u => `
+            <label class="flex items-center gap-2 cursor-pointer py-1 px-1 rounded hover:bg-gray-50 dark:hover:bg-gray-700">
+                <input type="checkbox" class="um-rcpt-cb text-indigo-600 rounded" value="${u.email || ''}" data-username="${u.username || ''}">
+                <span class="text-xs text-gray-700 dark:text-gray-300">${u.username}</span>
+                <span class="text-xs text-gray-400">${u.email || ''}</span>
+                <span class="ml-auto text-xs px-1.5 py-0.5 rounded ${u.role === 'admin' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}">${u.role}</span>
+            </label>`).join('');
+    }
+
+    function umFilterRecipients() {
+        const q = document.getElementById('um-recipient-search').value.toLowerCase();
+        const filtered = _umDashboardUsers.filter(u =>
+            (u.username || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q));
+        umRenderRecipients(filtered);
+    }
+
+    function umSelectAllRecipients() {
+        document.querySelectorAll('.um-rcpt-cb').forEach(cb => cb.checked = true);
+    }
+
+    function umClearRecipients() {
+        document.querySelectorAll('.um-rcpt-cb').forEach(cb => cb.checked = false);
+        document.getElementById('um-manual-emails').value = '';
+    }
+
+    function umGetRecipients() {
+        const checked = [...document.querySelectorAll('.um-rcpt-cb:checked')].map(cb => cb.value).filter(Boolean);
+        const manual = (document.getElementById('um-manual-emails').value || '').split(',').map(s => s.trim()).filter(Boolean);
+        return [...new Set([...checked, ...manual])];
+    }
+
+    function umShowStep(step) {
+        ['config', 'generating', 'result'].forEach(s => {
+            document.getElementById('um-step-' + s).classList.toggle('hidden', s !== step);
+        });
+        document.getElementById('um-footer').classList.toggle('hidden', step !== 'config');
+    }
+
+    function umSetError(msg) {
+        const el = document.getElementById('um-footer-error');
+        if (msg) { el.textContent = msg; el.classList.remove('hidden'); }
+        else { el.classList.add('hidden'); }
+    }
+
+    async function umSubmit() {
+        umSetError('');
+        const type = document.querySelector('input[name="um-type"]:checked').value;
+        const scope = document.querySelector('input[name="um-scope"]:checked').value;
+        const agentId = scope === 'individual' ? document.getElementById('um-agent').value : null;
+        const start = document.getElementById('um-start').value;
+        const end = document.getElementById('um-end').value;
+        const includePdf = document.getElementById('um-include-pdf').checked;
+        const autoEmail = document.getElementById('um-auto-email').checked;
+        const recipients = umGetRecipients();
+
+        if (!start || !end) { umSetError('Please select a date range.'); return; }
+        if (scope === 'individual' && !agentId) { umSetError('Please select an agent.'); return; }
+
+        if (_umMode === 'schedule') {
+            const name = document.getElementById('um-sched-name').value.trim();
+            if (!name) { umSetError('Schedule name is required.'); return; }
+            if (!recipients.length) { umSetError('At least one recipient is required.'); return; }
+            const freq = document.getElementById('um-freq').value;
+            const sendHour = parseInt(document.getElementById('um-send-hour').value) || 9;
+            try {
+                const resp = await fetch('/dashboard/reports/unified/schedules', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name, report_type: type, scope, agent_id: agentId,
+                        recipients, frequency: freq, send_hour: sendHour,
+                        include_pdf: includePdf, auto_email: autoEmail})
+                });
+                const d = await resp.json();
+                if (d.success) {
+                    document.getElementById('um-result-icon').textContent = '\u2705';
+                    document.getElementById('um-result-msg').textContent = 'Schedule created successfully';
+                    document.getElementById('um-result-detail').textContent = 'Next run: ' + (d.next_run || '').replace('T', ' ').slice(0, 16);
+                    document.getElementById('um-btn-view').classList.add('hidden');
+                    document.getElementById('um-btn-email').classList.add('hidden');
+                    umShowStep('result');
+                } else { umSetError(d.error || 'Failed to create schedule'); }
+            } catch(e) { umSetError(e.toString()); }
+            return;
+        }
+
+        // Generate mode
+        umShowStep('generating');
+        document.getElementById('um-gen-status').textContent = 'Starting generation...';
+        document.getElementById('um-gen-detail').textContent = '';
+
+        try {
+            const resp = await fetch('/dashboard/reports/unified/generate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({report_type: type, scope, agent_id: agentId,
+                    start_date: start, end_date: end,
+                    include_pdf: includePdf, auto_email: autoEmail, recipients})
+            });
+            const d = await resp.json();
+            if (d.error) { umShowStep('config'); umSetError(d.error); return; }
+            _umJobId = d.job_id;
+            _umPollInterval = setInterval(umPollJob, 2000);
+        } catch(e) { umShowStep('config'); umSetError(e.toString()); }
+    }
+
+    function umPollJob() {
+        if (!_umJobId) return;
+        fetch('/dashboard/reports/unified/jobs/' + _umJobId)
+        .then(r => r.json())
+        .then(job => {
+            if (job.status === 'running') {
+                const p = job.progress || {};
+                document.getElementById('um-gen-status').textContent = p.current_agent
+                    ? 'Processing agent ' + p.current + ' of ' + p.total + '...'
+                    : 'Running...';
+                document.getElementById('um-gen-detail').textContent = p.current_agent || '';
+            } else if (job.status === 'completed') {
+                clearInterval(_umPollInterval);
+                _umResultHtml = job.result_html;
+                document.getElementById('um-result-icon').textContent = '\u2705';
+                document.getElementById('um-result-msg').textContent = 'Report generated successfully';
+                document.getElementById('um-result-detail').textContent = job.result_pdf_path ? 'HTML + PDF generated' : 'HTML report generated';
+                document.getElementById('um-btn-view').classList.remove('hidden');
+                document.getElementById('um-btn-email').classList.remove('hidden');
+                umShowStep('result');
+                loadJobHistory();
+            } else if (job.status === 'failed') {
+                clearInterval(_umPollInterval);
+                document.getElementById('um-result-icon').textContent = '\u274c';
+                document.getElementById('um-result-msg').textContent = 'Generation failed';
+                document.getElementById('um-result-detail').textContent = job.error_message || 'Unknown error';
+                document.getElementById('um-btn-view').classList.add('hidden');
+                document.getElementById('um-btn-email').classList.add('hidden');
+                umShowStep('result');
+                loadJobHistory();
+            }
+        }).catch(() => {});
+    }
+
+    function umViewReport() {
+        if (!_umResultHtml) return;
+        const blob = new Blob([_umResultHtml], {type: 'text/html'});
+        window.open(URL.createObjectURL(blob), '_blank');
+    }
+
+    function umSendEmail() {
+        const recipients = umGetRecipients();
+        if (!recipients.length) { alert('Select or enter at least one recipient.'); return; }
+        if (_umJobId) {
+            // Use cached job HTML — avoids re-generating the report (BUG-010)
+            fetch(`/dashboard/reports/unified/jobs/${_umJobId}/email`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({recipients, subject: 'SentinelEdge Report'})
+            }).then(r => r.json()).then(d => {
+                if (d.success) alert('\u2705 Email sent to ' + recipients.length + ' recipient(s)');
+                else alert('\u274c ' + (d.error || 'Send failed'));
+            });
+        } else {
+            // Fallback: no cached job, re-generate via legacy endpoint
+            const type = document.querySelector('input[name="um-type"]:checked').value;
+            const scope = document.querySelector('input[name="um-scope"]:checked').value;
+            const start = document.getElementById('um-start').value;
+            const end = document.getElementById('um-end').value;
+            fetch('/dashboard/reports/email', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({report_type: type, scope, start_date: start, end_date: end, recipients})
+            }).then(r => r.json()).then(d => {
+                if (d.success) alert('\u2705 Email sent to ' + recipients.length + ' recipient(s)');
+                else alert('\u274c ' + (d.error || 'Send failed'));
+            });
+        }
+    }
+
+    function umReset() {
+        _umJobId = null;
+        _umResultHtml = null;
+        if (_umPollInterval) { clearInterval(_umPollInterval); _umPollInterval = null; }
+        setUmMode('generate');
+        umShowStep('config');
+        umSetError('');
+        document.getElementById('um-btn-view').classList.remove('hidden');
+        document.getElementById('um-btn-email').classList.remove('hidden');
+        // Reset form
+        document.querySelectorAll('input[name="um-type"]')[0].checked = true;
+        document.querySelectorAll('input[name="um-scope"]')[0].checked = true;
+        document.getElementById('um-agent-wrap').classList.add('hidden');
+        document.getElementById('um-include-pdf').checked = false;
+        document.getElementById('um-auto-email').checked = false;
+        document.getElementById('um-manual-emails').value = '';
+        document.getElementById('um-recipient-search').value = '';
+        umTypeChanged();
+    }
+
+    // Keyboard close
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeUnifiedModal();
+    });
 </script>
 {% endblock %}

@@ -1,5 +1,9 @@
 let reportData = null;
 const USERNAME = window.USERNAME || 'User';
+let _lastTimelineArgs = null;
+new MutationObserver(() => {
+    if (_lastTimelineArgs) renderTimeline(..._lastTimelineArgs);
+}).observe(document.documentElement, { attributeFilter: ['class'] });
 
 function setGreeting() {
     const hour = new Date().getHours();
@@ -219,22 +223,6 @@ async function loadFullReport(isManual = false) {
     const st = data.screen_time || {};
     const activeSeconds = st.active_seconds || 0;
     const idleSeconds = st.idle_seconds || 0;
-    const lockedSeconds = st.locked_seconds || 0;
-    const awaySeconds = st.away_seconds || 0;
-    const totalTracked = activeSeconds + idleSeconds + lockedSeconds + awaySeconds;
-
-    document.getElementById('active-time').textContent = formatTime(activeSeconds);
-    document.getElementById('idle-time').textContent = formatTime(idleSeconds);
-    document.getElementById('locked-time').textContent = formatTime(lockedSeconds);
-    document.getElementById('away-time').textContent = formatTime(awaySeconds);
-    document.getElementById('total-time').textContent = formatTime(totalTracked);
-
-    if (totalTracked > 0) {
-        document.getElementById('active-pct').textContent = Math.round((activeSeconds / totalTracked) * 100) + '%';
-        document.getElementById('idle-pct').textContent = Math.round((idleSeconds / totalTracked) * 100) + '%';
-        document.getElementById('locked-pct').textContent = Math.round((lockedSeconds / totalTracked) * 100) + '%';
-        document.getElementById('away-pct').textContent = Math.round((awaySeconds / totalTracked) * 100) + '%';
-    }
 
     // Update Quick Stats
     const totalScreenSeconds = activeSeconds + idleSeconds;
@@ -242,6 +230,9 @@ async function loadFullReport(isManual = false) {
     document.getElementById('quick-apps-count').textContent = data.app_usage?.count || 0;
     document.getElementById('quick-domains-count').textContent = data.domain_usage?.count || 0;
     document.getElementById('quick-sessions-count').textContent = data.app_sessions?.count || 0;
+
+    // T012: Render flip cards
+    renderFlipCards(data.screen_time || {}, data.state_events || []);
 
     // Render tables
     renderAppUsage(data.app_usage, data.live_status);
@@ -1066,3 +1057,219 @@ document.addEventListener('visibilitychange', () => {
 
 const dateSelect = document.getElementById('global-date-select');
 if (dateSelect) dateSelect.addEventListener('change', loadFullReport);
+
+// ─── T010: renderFlipCards ────────────────────────────────────────────────────
+function renderFlipCards(st, stateEvents) {
+    const utilPct = st.utilization_percent ?? 0;
+    const availSec = st.available_seconds ?? 0;
+    const lockedCh = st.locked_ch ?? 0;
+    const awayCh = st.away_ch ?? 0;
+    const activeSec = st.active_seconds ?? 0;
+    const idleSec = st.idle_seconds ?? 0;
+    const coreStart = st.core_hours_start || '09:00';
+    const coreEnd = st.core_hours_end || '19:00';
+    const coreWindowSec = (() => {
+        const [sh, sm] = coreStart.split(':').map(Number);
+        const [eh, em] = coreEnd.split(':').map(Number);
+        return Math.max(0, (eh * 60 + em - sh * 60 - sm) * 60);
+    })();
+
+    // ── New shift-goal card (ea-*) ────────────────────────────────────────────
+    const productivePct = st.productive_pct ?? utilPct;
+    const productiveTimeStr = st.productive_time_str ?? formatTime(activeSec);
+    const awayPctNew = st.away_pct ?? (coreWindowSec > 0 ? Math.round(awayCh / coreWindowSec * 100) : 0);
+    const lockedPctNew = st.locked_pct ?? (coreWindowSec > 0 ? Math.round(lockedCh / coreWindowSec * 100) : 0);
+    const idlePct = st.idle_pct ?? 0;
+    const awayTimeStr = st.away_time_str ?? formatTime(awayCh);
+    const lockedTimeStr = st.locked_time_str ?? formatTime(lockedCh);
+    const idleTimeStr = st.idle_time_str ?? formatTime(idleSec);
+
+    const eaTime = document.getElementById('ea-productive-time');
+    const eaBar = document.getElementById('ea-progress-bar');
+    const eaCaption = document.getElementById('ea-caption');
+    const eaAway = document.getElementById('ea-away-stat');
+    const eaLocked = document.getElementById('ea-locked-stat');
+    const eaIdle = document.getElementById('ea-idle-stat');
+
+    if (eaTime) eaTime.textContent = productiveTimeStr;
+    if (eaBar) eaBar.style.width = productivePct + '%';
+    if (eaCaption) eaCaption.textContent = `${productivePct}% of standard shift was active.`;
+    if (eaAway) eaAway.textContent = `${awayTimeStr} (${awayPctNew}%)`;
+    if (eaLocked) eaLocked.textContent = `${lockedTimeStr} (${lockedPctNew}%)`;
+    if (eaIdle) eaIdle.textContent = `${idleTimeStr} (${idlePct}%)`;
+    const eaShiftLabel = document.getElementById('ea-shift-target-label');
+    if (eaShiftLabel && st.shift_target_label) eaShiftLabel.textContent = '/ ' + st.shift_target_label;
+
+    // ── Legacy hidden flip-card elements (backward-compat) ───────────────────
+    // Available sub-card
+    document.getElementById('fc-avail-pct').textContent = utilPct + '%';
+    document.getElementById('fc-avail-time').textContent = formatTime(availSec);
+    document.getElementById('fc-avail-sub').textContent =
+        'Active ' + formatTime(activeSec) + ' / Idle ' + formatTime(idleSec);
+
+    // Locked sub-card
+    const lockedPct = coreWindowSec > 0 ? Math.round(lockedCh / coreWindowSec * 100) : 0;
+    document.getElementById('fc-locked-pct').textContent = lockedPct + '%';
+    document.getElementById('fc-locked-time').textContent = formatTime(lockedCh);
+
+    // Away sub-card — always shown, greyed when 0
+    const awayPct = coreWindowSec > 0 ? Math.round(awayCh / coreWindowSec * 100) : 0;
+    document.getElementById('fc-away-pct').textContent = awayPct + '%';
+    document.getElementById('fc-away-time').textContent = formatTime(awayCh);
+    const awayFront = document.getElementById('fc-away-front');
+    if (awayFront) awayFront.style.opacity = awayCh === 0 ? '0.45' : '1';
+
+    // Wire flip on the single outer frame (idempotent)
+    const frame = document.getElementById('availability-frame');
+    if (frame) {
+        const newFrame = frame.cloneNode(true);
+        frame.parentNode.replaceChild(newFrame, frame);
+        newFrame.addEventListener('click', () => newFrame.classList.toggle('flipped'));
+    }
+
+    // One combined timeline for all states
+    _lastTimelineArgs = ['timeline-combined', stateEvents, ['active'], coreStart, coreEnd];
+    renderTimeline(..._lastTimelineArgs);
+}
+
+// ─── T011: renderTimeline ─────────────────────────────────────────────────────
+function renderTimeline(containerId, stateEvents, filterStates, coreStart, coreEnd) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+
+    const DAY_SEC = 86400;
+    const dark = document.documentElement.classList.contains('dark');
+
+    const segments = (stateEvents || []).filter(e => filterStates.includes(e.state));
+    if (segments.length === 0) {
+        container.innerHTML = `<div style="text-align:center;padding:20px 0;font-size:12px;color:${dark ? '#6b7280' : '#9ca3af'};">No timeline data available</div>`;
+        return;
+    }
+
+    const [csh] = coreStart.split(':').map(Number);
+    const [ceh] = coreEnd.split(':').map(Number);
+    const coreStartSec = csh * 3600;
+    const coreEndSec   = ceh * 3600;
+    const coreLeft  = (coreStartSec / DAY_SEC * 100).toFixed(3);
+    const coreWidth = ((coreEndSec - coreStartSec) / DAY_SEC * 100).toFixed(3);
+
+    function spanStartSec(isoStr) {
+        const m = isoStr.match(/([+-])(\d{2}):(\d{2})$/);
+        if (m) {
+            const sign = m[1] === '+' ? 1 : -1;
+            const offsetMs = sign * (parseInt(m[2]) * 3600 + parseInt(m[3]) * 60) * 1000;
+            const local = new Date(new Date(isoStr).getTime() + offsetMs);
+            return local.getUTCHours() * 3600 + local.getUTCMinutes() * 60 + local.getUTCSeconds();
+        }
+        const d = new Date(isoStr);
+        return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+    }
+
+    function fmtWall(isoStr) {
+        const m = isoStr.match(/([+-])(\d{2}):(\d{2})$/);
+        if (m) {
+            const sign = m[1] === '+' ? 1 : -1;
+            const offMs = sign * (parseInt(m[2]) * 3600 + parseInt(m[3]) * 60) * 1000;
+            const d = new Date(new Date(isoStr).getTime() + offMs);
+            return `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+        }
+        const d = new Date(isoStr);
+        return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    }
+
+    // ── Root ──────────────────────────────────────────────────────────────────
+    const root = document.createElement('div');
+    root.style.cssText = 'position:relative;padding-top:12px;padding-bottom:8px;';
+
+    // ── Bar area ──────────────────────────────────────────────────────────────
+    const barArea = document.createElement('div');
+    barArea.style.cssText = 'position:relative;height:56px;width:100%;';
+
+    // Bar background (offline = dark bg)
+    const bar = document.createElement('div');
+    bar.style.cssText = `position:absolute;inset:0;background:${dark ? '#030712' : '#f9fafb'};border-radius:6px;overflow:hidden;border:1px solid ${dark ? '#1f2937' : 'rgba(0,0,0,0.08)'};box-shadow:inset 0 1px 3px rgba(0,0,0,0.06);`;
+
+    // Active segments (green)
+    segments.forEach(ev => {
+        const startSec = spanStartSec(ev.start_time);
+        const dur = Math.min(ev.duration_seconds, DAY_SEC - startSec);
+        if (dur <= 0) return;
+        const left = (startSec / DAY_SEC * 100).toFixed(3);
+        const width = Math.max(dur / DAY_SEC * 100, 0.2).toFixed(3);
+        const seg = document.createElement('div');
+        seg.style.cssText = `position:absolute;top:0;bottom:0;left:${left}%;width:${width}%;background:#10b981;transition:filter 0.15s;`;
+        seg.onmouseenter = () => seg.style.filter = 'brightness(1.1)';
+        seg.onmouseleave = () => seg.style.filter = '';
+        seg.title = `ACTIVE  ${fmtWall(ev.start_time)} – ${fmtWall(ev.end_time)}  (${formatTime(ev.duration_seconds)})`;
+        bar.appendChild(seg);
+    });
+
+    // Tick lines
+    for (let h = 1; h < 24; h++) {
+        const tick = document.createElement('div');
+        const inCore = h >= csh && h <= ceh;
+        tick.style.cssText = `position:absolute;top:0;bottom:0;left:${(h/24*100).toFixed(3)}%;width:1px;background:${inCore ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'};`;
+        bar.appendChild(tick);
+    }
+    barArea.appendChild(bar);
+
+    // Core hours border frame
+    const frame = document.createElement('div');
+    frame.style.cssText = `position:absolute;top:-3px;bottom:-3px;left:${coreLeft}%;width:${coreWidth}%;border:3px solid #6366f1;border-radius:8px;pointer-events:none;z-index:10;opacity:0.9;`;
+    barArea.appendChild(frame);
+
+    root.appendChild(barArea);
+
+    // ── X-axis ────────────────────────────────────────────────────────────────
+    const axis = document.createElement('div');
+    axis.style.cssText = 'position:relative;height:28px;margin-top:8px;';
+
+    for (let h = 0; h <= 24; h++) {
+        const pos = (h / 24 * 100).toFixed(3);
+        const inCore = h >= csh && h <= ceh;
+        let transform = 'translateX(-50%)';
+        if (h === 0)  transform = 'translateX(0)';
+        if (h === 24) transform = 'translateX(-100%)';
+
+        const item = document.createElement('div');
+        item.style.cssText = `position:absolute;left:${pos}%;top:0;transform:${transform};display:flex;flex-direction:column;align-items:center;`;
+
+        const tickMark = document.createElement('div');
+        tickMark.style.cssText = `width:1px;height:6px;margin-bottom:2px;background:${inCore ? (dark ? '#6366f1' : '#818cf8') : (dark ? '#374151' : '#d1d5db')};`;
+        item.appendChild(tickMark);
+
+        const num = document.createElement('span');
+        num.style.cssText = `font-size:9px;font-family:monospace;line-height:1;color:${inCore ? (dark ? '#818cf8' : '#4f46e5') : (dark ? '#4b5563' : '#9ca3af')};font-weight:${inCore ? '700' : '400'};`;
+        num.textContent = h === 24 ? '0' : String(h);
+        item.appendChild(num);
+
+        axis.appendChild(item);
+    }
+    root.appendChild(axis);
+
+    // ── Legend footer ─────────────────────────────────────────────────────────
+    const footer = document.createElement('div');
+    footer.style.cssText = `display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid ${dark ? '#1f2937' : '#f1f5f9'};flex-wrap:wrap;gap:6px;`;
+
+    const legendLeft = document.createElement('div');
+    legendLeft.style.cssText = 'display:flex;align-items:center;gap:20px;flex-wrap:wrap;';
+
+    const textColor = dark ? '#9ca3af' : '#4b5563';
+    legendLeft.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:${textColor};font-weight:500;">
+            <div style="width:12px;height:12px;border-radius:3px;background:#10b981;flex-shrink:0;"></div>Active
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:${textColor};font-weight:500;">
+            <div style="width:12px;height:12px;border-radius:3px;background:${dark ? '#030712' : '#e5e7eb'};border:1px solid ${dark ? '#1f2937' : '#d1d5db'};flex-shrink:0;"></div>Offline
+        </div>`;
+    footer.appendChild(legendLeft);
+
+    const corePill = document.createElement('div');
+    corePill.style.cssText = `display:flex;align-items:center;gap:6px;background:${dark ? 'rgba(99,102,241,0.15)' : '#eef2ff'};color:${dark ? '#a5b4fc' : '#4338ca'};padding:4px 10px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:0.02em;white-space:nowrap;`;
+    corePill.innerHTML = `<div style="width:12px;height:3px;background:${dark ? '#818cf8' : '#6366f1'};border-radius:2px;flex-shrink:0;"></div>Core ${coreStart}–${coreEnd}`;
+    footer.appendChild(corePill);
+
+    root.appendChild(footer);
+    container.appendChild(root);
+}

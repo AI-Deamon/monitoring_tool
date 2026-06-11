@@ -52,6 +52,13 @@ class AssetIdentity:
 
 
 @dataclass
+class GPUInfo:
+    """Single GPU entry"""
+    name: str = ""
+    memory_gb: float = 0.0
+
+
+@dataclass
 class HardwareSpecs:
     """Hardware specifications"""
     cpu_name: str = ""
@@ -61,8 +68,7 @@ class HardwareSpecs:
     ram_total_gb: float = 0.0
     ram_slots_used: int = 0
     ram_slots_total: int = 0
-    gpu_name: str = ""
-    gpu_memory_gb: float = 0.0
+    gpus: List[GPUInfo] = field(default_factory=list)  # List of all GPUs
     disks: List[Dict] = field(default_factory=list)  # [{name, size_gb, type, interface}]
     motherboard: str = ""
 
@@ -138,10 +144,11 @@ class HardwareCollector:
         self.config = config
         self.last_collection_time: Optional[datetime] = None
         self.last_hash: str = ""
+        self.last_network_hash: str = ""
         self._state_file = self._get_state_file()
         self._load_state()
         
-        logger.info("[HARDWARE] HardwareCollector initialized (24-hour intervals)")
+        logger.info("[HARDWARE] HardwareCollector initialized (24h hardware, instant network)")
     
     def _get_state_file(self) -> Path:
         """Get path to state file for persistence"""
@@ -156,14 +163,15 @@ class HardwareCollector:
                 with open(self._state_file, 'r', encoding='utf-8') as f:
                     state = json.load(f)
                     self.last_hash = state.get('hash', '')
+                    self.last_network_hash = state.get('network_hash', '')
                     last_time = state.get('last_collection_time')
                     if last_time:
                         self.last_collection_time = datetime.fromisoformat(last_time)
-                    logger.debug(f"[HARDWARE] Loaded state: hash={self.last_hash[:8] if self.last_hash else 'none'}")
+                    logger.debug(f"[HARDWARE] Loaded state: hash={self.last_hash[:8] if self.last_hash else 'none'}, net={self.last_network_hash[:8] if self.last_network_hash else 'none'}")
         except Exception as e:
             logger.warning(f"[HARDWARE] Could not load state: {e}")
     
-    def _save_state(self, data_hash: str):
+    def _save_state(self, data_hash: str, network_hash: str = None):
         """Save collection state to disk"""
         try:
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -171,6 +179,10 @@ class HardwareCollector:
                 'hash': data_hash,
                 'last_collection_time': datetime.now(timezone.utc).isoformat()
             }
+            if network_hash is not None:
+                state['network_hash'] = network_hash
+            elif self.last_network_hash:
+                state['network_hash'] = self.last_network_hash
             with open(self._state_file, 'w', encoding='utf-8') as f:
                 json.dump(state, f, indent=2)
             logger.debug(f"[HARDWARE] State saved")
@@ -361,8 +373,13 @@ class HardwareCollector:
         $ram = Get-WmiObject Win32_PhysicalMemory
         $ramSlots = (Get-WmiObject Win32_PhysicalMemoryArray).MemoryDevices
         
-        # GPU
-        $gpu = Get-WmiObject Win32_VideoController | Where-Object { $_.AdapterRAM -gt 0 } | Select-Object -First 1
+        # GPU - Get ALL GPUs (not just first)
+        $gpus = Get-WmiObject Win32_VideoController | Where-Object { $_.AdapterRAM -gt 0 } | ForEach-Object {
+            @{
+                Name = $_.Name
+                MemoryGB = [math]::Round($_.AdapterRAM / 1GB, 2)
+            }
+        }
         
         # Disks
         $disks = Get-WmiObject Win32_DiskDrive | Select-Object Model, Size, MediaType, InterfaceType
@@ -378,14 +395,25 @@ class HardwareCollector:
             RAM_Total = ($ram | Measure-Object -Property Capacity -Sum).Sum
             RAM_SlotsUsed = ($ram | Measure-Object).Count
             RAM_SlotsTotal = $ramSlots
-            GPU_Name = $gpu.Name
-            GPU_Memory = $gpu.AdapterRAM
+            GPUs = $gpus
             Disks = $disks | ForEach-Object {
+                $diskName = $_.Model
+                $isVirtual = $false
+                
+                # Detect virtual disks
+                if ($diskName -match 'Virtual Disk|VMware|Virtual HD|Virtual DVD|CD-ROM|DVD|Mounted|ramdisk|ImDisk') {
+                    $isVirtual = $true
+                    if ($diskName -notmatch '^\[VD\]') {
+                        $diskName = "[VD] " + $diskName
+                    }
+                }
+                
                 @{
-                    Name = $_.Model
+                    Name = $diskName
                     SizeGB = [math]::Round($_.Size / 1GB, 2)
                     Type = $_.MediaType
                     Interface = $_.InterfaceType
+                    IsVirtual = $isVirtual
                 }
             }
             Motherboard = "$($mb.Manufacturer) $($mb.Product)"
@@ -406,9 +434,18 @@ class HardwareCollector:
                 hardware.ram_slots_used = int(data.get('RAM_SlotsUsed', 0) or 0)
                 hardware.ram_slots_total = int(data.get('RAM_SlotsTotal', 0) or 0)
                 
-                hardware.gpu_name = (data.get('GPU_Name', '') or '').strip()
-                gpu_bytes = data.get('GPU_Memory', 0) or 0
-                hardware.gpu_memory_gb = round(gpu_bytes / (1024**3), 2)
+                # Parse all GPUs
+                gpus_data = data.get('GPUs', [])
+                if gpus_data:
+                    if isinstance(gpus_data, dict):
+                        gpus_data = [gpus_data]
+                    hardware.gpus = [
+                        GPUInfo(
+                            name=g.get('Name', 'Unknown').strip(),
+                            memory_gb=float(g.get('MemoryGB', 0) or 0)
+                        )
+                        for g in gpus_data if g.get('Name')
+                    ]
                 
                 hardware.motherboard = (data.get('Motherboard', '') or '').strip()
                 
@@ -508,12 +545,6 @@ class HardwareCollector:
         """Collect security posture information"""
         security = SecurityInfo()
         
-        # OS info (Python)
-        security.os_name = platform.system()
-        security.os_version = platform.version()
-        security.os_build = platform.release()
-        security.os_architecture = platform.machine()
-        
         script = '''
         $ProgressPreference = 'SilentlyContinue'
         
@@ -560,6 +591,17 @@ class HardwareCollector:
         # Get SKU number for precise identification
         $osSku = $os.OperatingSystemSKU
         
+        # Get Windows version from registry (DisplayVersion like "23H2", "24H2", "25H2")
+        $regPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+        $displayVersion = ""
+        try {
+            $reg = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+            $displayVersion = $reg.DisplayVersion
+            if ([string]::IsNullOrEmpty($displayVersion)) {
+                $displayVersion = $reg.ReleaseId
+            }
+        } catch {}
+        
         @{
             Antivirus = $av
             FirewallEnabled = $fwEnabled
@@ -569,8 +611,10 @@ class HardwareCollector:
             OSCaption = $osCaption
             OSVersion = $os.Version
             OSBuild = $os.BuildNumber
+            OSArchitecture = $os.OSArchitecture
             OSEdition = $osEdition
             OSSKU = $osSku
+            DisplayVersion = $displayVersion
         } | ConvertTo-Json
         '''
         
@@ -584,13 +628,16 @@ class HardwareCollector:
                 security.windows_update_enabled = bool(data.get('WindowsUpdateEnabled', False))
                 security.bitlocker_status = data.get('BitLockerStatus', 'Unknown') or 'Unknown'
                 
-                # Override with more accurate OS info from WMI
-                if data.get('OSCaption'):
-                    security.os_name = data['OSCaption']
-                if data.get('OSVersion'):
-                    security.os_version = data['OSVersion']
-                if data.get('OSBuild'):
-                    security.os_build = str(data['OSBuild'])
+                # OS info from WMI (more accurate than platform module)
+                security.os_name = data.get('OSCaption') or security.os_name
+                # Use DisplayVersion from registry (e.g., "25H2") instead of raw build number
+                display_ver = data.get('DisplayVersion') or ''
+                if display_ver and display_ver.strip():
+                    security.os_version = display_ver.strip()
+                else:
+                    security.os_version = data.get('OSVersion') or security.os_version
+                security.os_build = str(data.get('OSBuild') or security.os_build)
+                security.os_architecture = data.get('OSArchitecture') or security.os_architecture
                 
                 # Windows edition and SKU for EOL matching
                 if data.get('OSEdition'):
@@ -613,5 +660,85 @@ class HardwareCollector:
         return {
             'status': 'collected',
             'hash': self.last_hash,
+            'network_hash': self.last_network_hash,
             'last_collection': self.last_collection_time.isoformat() if self.last_collection_time else None
+        }
+    
+    def check_network_changed(self) -> bool:
+        """
+        Check if network adapters have changed since last collection.
+        Call this periodically or on network event to detect changes.
+        
+        Returns:
+            True if network has changed, False otherwise
+        """
+        network = self._collect_network()
+        
+        # Create hash from network data only
+        network_hash_data = {
+            'all_macs': network.all_macs,
+            'all_ips': network.all_ips,
+            'dns_servers': network.dns_servers,
+            'domain_joined': network.domain_joined,
+            'domain_name': network.domain_name
+        }
+        current_network_hash = hashlib.sha256(
+            json.dumps(network_hash_data, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        
+        changed = current_network_hash != self.last_network_hash
+        
+        if changed:
+            logger.info(f"[HARDWARE] Network changed: {self.last_network_hash[:8] if self.last_network_hash else 'none'} -> {current_network_hash}")
+        else:
+            logger.debug(f"[HARDWARE] Network unchanged")
+        
+        return changed
+    
+    def collect_network_partial(self) -> Optional[Dict]:
+        """
+        Collect and send ONLY network data when change is detected.
+        This is lightweight and can be called on network events.
+        
+        Returns:
+            Dict with network data, or None if no changes
+        """
+        network = self._collect_network()
+        
+        # Create hash from network data only
+        network_hash_data = {
+            'all_macs': network.all_macs,
+            'all_ips': network.all_ips,
+            'dns_servers': network.dns_servers,
+            'domain_joined': network.domain_joined,
+            'domain_name': network.domain_name
+        }
+        current_network_hash = hashlib.sha256(
+            json.dumps(network_hash_data, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        
+        # Check for actual change
+        if current_network_hash == self.last_network_hash:
+            logger.debug("[HARDWARE] Network unchanged, skipping partial upload")
+            return None
+        
+        # Update state
+        self.last_network_hash = current_network_hash
+        self._save_state(self.last_hash, current_network_hash)
+        
+        logger.info(f"[HARDWARE] Network partial collected: {current_network_hash}")
+        
+        return {
+            'agent_id': getattr(self.config, 'agent_id', '') if self.config else '',
+            'network': asdict(network),
+            'collected_at': datetime.now(timezone.utc).isoformat(),
+            'collection_hash': current_network_hash,
+            'update_type': 'network_partial'
+        }
+    
+    def get_network_state(self) -> Dict:
+        """Get current network state info for external monitoring"""
+        return {
+            'last_network_hash': self.last_network_hash,
+            'has_baseline': bool(self.last_network_hash)
         }

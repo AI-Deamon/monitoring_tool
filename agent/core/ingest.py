@@ -113,17 +113,34 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
         The helper sends requests with an X-HMAC-Signature header containing
         HMAC-SHA256(raw_body, shared_secret) as hex.
 
-        If no shared secret is configured, falls back to allowing the request
-        with a warning log for backward compatibility with older agents.
+        Shared secret resolution order:
+        1) HELPER_SHARED_SECRET environment variable (explicit override)
+        2) Core local_agent_key from shared config
+
+        If no shared secret is available, falls back to allowing the request
+        for backward compatibility with legacy deployments.
         """
-        # Read shared secret from config or environment
-        shared_secret = os.environ.get("HELPER_SHARED_SECRET", "")
+        # 1) Explicit environment override
+        shared_secret = (os.environ.get("HELPER_SHARED_SECRET", "") or "").strip()
+
+        # 2) Shared config secret (local_agent_key)
+        if not shared_secret:
+            try:
+                config_key = self.server.config.get_hmac_key()
+                if config_key:
+                    shared_secret = config_key.decode("utf-8").strip()
+            except Exception as e:
+                logger.debug(f"[_verify_auth] Could not read config HMAC key: {e}")
 
         if not shared_secret:
-            logger.warning(
-                "[_verify_auth] HELPER_SHARED_SECRET not configured, "
-                "allowing request for backward compatibility"
-            )
+            # Avoid high-volume warning spam on every heartbeat.
+            if not getattr(self.server, "_helper_auth_fallback_warned", False):
+                logger.warning(
+                    "[_verify_auth] No helper HMAC secret configured "
+                    "(HELPER_SHARED_SECRET/local_agent_key missing); "
+                    "allowing request for backward compatibility"
+                )
+                self.server._helper_auth_fallback_warned = True
             return True
 
         # Get the HMAC signature from the request header
@@ -613,6 +630,9 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
             elif self.path == "/hardware":
                 return self._handle_hardware(data)
 
+            elif self.path == "/hardware/network":
+                return self._handle_hardware_network(data)
+
             elif self.path == "/telemetry/state-change":
                 return self._handle_state_change(data)
 
@@ -739,6 +759,15 @@ class HelperRequestHandler(BaseHTTPRequestHandler):
             logger.error(f"Hardware storage error: {e}")
             self._send_error("Storage failed", 500)
 
+    def _handle_hardware_network(self, data):
+        """Handle partial network update from Helper (when adapter changes)"""
+        try:
+            row_id = self.server.buffer.store_network_partial(data)
+            self._send_json({"status": "ok", "id": row_id})
+        except Exception as e:
+            logger.error(f"Network partial storage error: {e}")
+            self._send_error("Storage failed", 500)
+    
     def _handle_state_change(self, data):
         """
         Handle immediate state-change telemetry from Helper.

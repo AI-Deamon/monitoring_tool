@@ -3,10 +3,10 @@
 {% block title %}Overview - SentinelEdge Dashboard{% endblock %}
 {% block content %}
 {% if current_user.role == 'admin' %}
-<div class="h-[calc(100vh-80px)] overflow-hidden">
+<div class="h-[calc(100vh-80px)] overflow-hidden flex flex-col px-5 py-3">
 
     <!-- Header -->
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center justify-between mb-2 flex-shrink-0">
         <div>
             <h1 class="text-xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                 <img src="{{ url_for('static', filename='dashboard.png') }}" class="w-7 h-7 mr-2" />
@@ -26,120 +26,215 @@
         </div>
     </div>
 
-    <!-- Fleet Summary Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <div
-            class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
-            <img src="{{ url_for('static', filename='agents.png') }}" class="w-8 h-8" />
+    <!-- Fleet Summary Cards (4 KPIs) -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-2 flex-shrink-0">
+        <!-- Total Agents -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 py-4 px-3 flex items-center gap-2">
+            <img src="{{ url_for('static', filename='agents.png') }}" class="w-6 h-6" />
             <div>
                 <div class="text-xs font-semibold text-gray-500 uppercase">Total Agents</div>
-                <p id="total-agents" class="text-xl font-bold">-</p>
+                <p id="total-agents" class="text-2xl font-bold">-</p>
             </div>
         </div>
 
-        <div
-            class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
-            <img src="{{ url_for('static', filename='online.png') }}" class="w-8 h-8" />
+        <!-- Online Now (green accent) -->
+        <div class="bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-700 border-l-4 border-l-green-400 py-4 px-3 flex items-center gap-2">
+            <img src="{{ url_for('static', filename='online.png') }}" class="w-6 h-6" />
             <div>
-                <div class="text-xs font-semibold text-gray-500 uppercase">Online Now</div>
-                <p id="active-agents" class="text-xl font-bold text-success-600">-</p>
+                <div class="text-xs font-semibold text-green-600 dark:text-green-400 uppercase">Online Now</div>
+                <p id="active-agents" class="text-2xl font-bold text-green-600 dark:text-green-400">-</p>
             </div>
         </div>
 
-        <div
-            class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center gap-3">
-            <img src="{{ url_for('static', filename='no.png') }}" class="w-8 h-8" />
+        <!-- Offline (red accent) -->
+        <div class="bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-700 border-l-4 border-l-red-400 py-4 px-3 flex items-center gap-2">
+            <img src="{{ url_for('static', filename='no.png') }}" class="w-6 h-6" />
             <div>
-                <div class="text-xs font-semibold text-gray-500 uppercase">Offline</div>
-                <p id="offline-agents" class="text-xl font-bold text-red-600">-</p>
+                <div class="text-xs font-semibold text-red-600 dark:text-red-400 uppercase">Offline</div>
+                <p id="offline-agents" class="text-2xl font-bold text-red-600 dark:text-red-400">-</p>
+            </div>
+        </div>
+
+        <!-- Avg Productivity (with SVG icon) -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 py-4 px-3 flex items-center gap-2">
+            <svg class="w-6 h-6 text-warning-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+            </svg>
+            <div>
+                <div class="text-xs font-semibold text-gray-500 uppercase">Avg Productivity</div>
+                <p id="avg-productivity" class="text-2xl font-bold">-</p>
             </div>
         </div>
     </div>
 
-    <!-- MAIN CONTENT -->
-    <div class="grid grid-cols-1 xl:grid-cols-6 gap-4 mb-4">
-
-        <!-- PIE CHARTS (Screen Time) -->
-        <div class="xl:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                <h3 class="text-sm font-semibold">Agent & Screen Time</h3>
-            </div>
-            <div class="p-4 grid grid-cols-2 gap-3 h-[300px]">
-                <div class="h-full">
-                    <canvas id="agent-status-chart"></canvas>
-                </div>
-                <div class="h-full">
-                    <canvas id="screentime-chart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <!-- EOL RISK CHART (New) -->
-        <div class="xl:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <div
-                class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex justify-between items-center">
-                <h3 class="text-sm font-semibold">Fleet Lifecycle Risk</h3>
-                <span class="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">REAL-TIME</span>
-            </div>
-            <div class="p-4 flex flex-col items-center justify-center h-[300px]">
-                <div class="w-full h-[180px]">
-                    <canvas id="eolRiskChart"></canvas>
-                </div>
-                <div class="mt-2 flex gap-4 text-xs">
-                    <div class="flex items-center gap-1">
-                        <span class="w-2 h-2 rounded-full bg-red-600"></span>
-                        <span>EOL Products: <span id="eol-counter" class="font-bold text-red-600">-</span></span>
+    <!-- MAIN CONTENT - Full Height 3-Column Layout -->
+    <div class="flex flex-col flex-1 overflow-hidden min-h-0">
+        <!-- Row 1: Main Charts (fill remaining space) -->
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-3 flex-1 min-h-0">
+            <!-- Column 1: Agent Status & Risk -->
+            <div class="xl:col-span-1 grid grid-rows-2 gap-3 min-h-0">
+                <!-- Agent & Screen Time -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
+                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                        <h3 class="text-sm font-semibold">Agent & Screen Time</h3>
                     </div>
-                    <div class="flex items-center gap-1">
-                        <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                        <span>Compliance: <span id="compliance-rate" class="font-bold text-green-600">-</span></span>
+                    <div class="p-3 grid grid-cols-2 gap-3 min-h-0" style="height: calc(100% - 37px);">
+                        <div style="position:relative; height:100%;">
+                            <canvas id="agent-status-chart"></canvas>
+                        </div>
+                        <div style="position:relative; height:100%;">
+                            <canvas id="screentime-chart"></canvas>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- TOP 5 AGENTS (Moved/Resized) -->
-        <div class="xl:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                <h3 class="text-sm font-semibold flex items-center gap-2">
-                    <img src="{{ url_for('static', filename='throphy.png') }}" class="w-4 h-4" />
-                    Top Performance
-                </h3>
-            </div>
-            <div class="p-4 h-[240px] overflow-y-auto">
-                <div class="grid grid-cols-2 gap-4">
-                    <!-- Active -->
-                    <div>
-                        <h4 class="text-[10px] font-bold text-success-600 uppercase mb-2">Most Active</h4>
-                        <ul id="top-active-list" class="space-y-1.5 text-xs font-mono"></ul>
+                <!-- EOL Risk -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
+                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex justify-between items-center">
+                        <h3 class="text-sm font-semibold">Fleet Lifecycle Risk</h3>
+                        <span class="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">LIVE</span>
                     </div>
-                    <!-- Idle -->
-                    <div>
-                        <h4 class="text-[10px] font-bold text-warning-600 uppercase mb-2">Most Idle</h4>
-                        <ul id="top-idle-list" class="space-y-1.5 text-xs font-mono"></ul>
+                    <div class="p-3 flex flex-col flex-1 min-h-0 items-center justify-center">
+                        <div class="relative w-full" style="height:140px;">
+                            <canvas id="eolRiskChart"></canvas>
+                        </div>
+                        <div class="mt-2 flex gap-2 text-xs">
+                            <div class="flex items-center gap-1">
+                                <span class="w-2 h-2 rounded-full bg-red-600"></span>
+                                <span>EOL: <span id="eol-counter">-</span></span>
+                            </div>
+                            <div class="flex items-center gap-1">
+                                <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                                <span>Compliant: <span id="compliance-rate">-</span></span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <!-- Top App & Domain -->
-    <div class="grid grid-cols-2 gap-4">
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-            <div class="text-xs font-semibold text-gray-500 uppercase mb-1">
-                <img src="{{ url_for('static', filename='throphy.png') }}" class="w-4 h-4 inline mr-1" />
-                Top App
+            <!-- Column 2: Trends & Categories -->
+            <div class="xl:col-span-1 grid grid-rows-2 gap-3 min-h-0">
+                <!-- App Usage by Category -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
+                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                        <h3 class="text-sm font-semibold">App Usage by Category</h3>
+                    </div>
+                    <div class="p-3 flex-1 min-h-0">
+                        <canvas id="appCategoryChart"></canvas>
+                    </div>
+                    <!-- Manual HTML Legend (sibling, not inside) -->
+                    <div class="flex justify-center gap-3 text-xs pt-1 px-3 pb-3">
+                        <div class="flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-[#10b981]"></span>
+                            <span class="text-gray-600 dark:text-gray-400">Productivity</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
+                            <span class="text-gray-600 dark:text-gray-400">Communication</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <span class="w-2 h-2 rounded-full bg-[#f59e0b]"></span>
+                            <span class="text-gray-600 dark:text-gray-400">Browsing</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Fleet Screen Time (moved from Column 1) -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
+                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                        <h3 class="text-sm font-semibold">Fleet Screen Time</h3>
+                    </div>
+                    <div class="p-4 flex-1 min-h-0 flex flex-col justify-evenly">
+                        <div id="fleet-active-row">
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-success-600 font-semibold">Active</span>
+                                <span id="fleet-active-time">0h 0m</span>
+                            </div>
+                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div id="fleet-active-bar" class="bg-success-500 h-2 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div id="fleet-idle-row">
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-warning-600 font-semibold">Idle</span>
+                                <span id="fleet-idle-time">0h 0m</span>
+                            </div>
+                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div id="fleet-idle-bar" class="bg-warning-500 h-2 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div id="fleet-locked-row">
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-gray-600 font-semibold">Locked</span>
+                                <span id="fleet-locked-time">0h 0m</span>
+                            </div>
+                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div id="fleet-locked-bar" class="bg-gray-500 h-2 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div id="fleet-away-row" style="display: none;">
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-purple-600 font-semibold">Away</span>
+                                <span id="fleet-away-time">0h 0m</span>
+                            </div>
+                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div id="fleet-away-bar" class="bg-purple-500 h-2 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <p id="top-app-name" class="text-base font-bold text-primary-600 truncate">-</p>
-            <div id="top-app-duration" class="text-xs text-gray-500">-</div>
-        </div>
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-            <div class="text-xs font-semibold text-gray-500 uppercase mb-1">
-                <img src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 inline mr-1" />
-                Top Domain
+
+            <!-- Column 3: Performance & Lists (merged Top Apps + Domains) -->
+            <div class="xl:col-span-1 grid grid-rows-2 gap-3 min-h-0">
+                <!-- Top Performance -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0 max-h-48 overflow-hidden">
+                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                        <h3 class="text-sm font-semibold flex items-center gap-2">
+                            <img src="{{ url_for('static', filename='throphy.png') }}" class="w-3 h-3" />
+                            Top Performance
+                        </h3>
+                    </div>
+                    <div class="p-2 grid grid-cols-3 gap-2 flex-1 min-h-0 text-xs overflow-y-auto">
+                        <div>
+                            <h4 class="text-xs font-bold text-success-600 uppercase mb-1">Active</h4>
+                            <ul id="top-active-list" class="space-y-0.5 text-[11px]"></ul>
+                        </div>
+                        <div>
+                            <h4 class="text-xs font-bold text-warning-600 uppercase mb-1">Idle</h4>
+                            <ul id="top-idle-list" class="space-y-0.5 text-[11px]"></ul>
+                        </div>
+                        <div>
+                            <h4 class="text-xs font-bold text-gray-600 uppercase mb-1">Locked</h4>
+                            <ul id="top-locked-list" class="space-y-0.5 text-[11px]"></ul>
+                        </div>
+                    </div>
+                </div>
+                <!-- Top Apps & Domains (merged with tabs) -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
+                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
+                        <div class="flex items-center gap-2 mb-2">
+                            <img src="{{ url_for('static', filename='throphy.png') }}" class="w-3 h-3" />
+                            <h3 class="text-sm font-semibold">Top 5 Apps</h3>
+                        </div>
+                        <div class="flex gap-1">
+                            <button type="button" onclick="switchTopTab('apps')" id="tab-apps" class="flex-1 px-3 py-1 text-xs font-medium bg-indigo-600 text-white rounded transition-colors">Apps</button>
+                            <button type="button" onclick="switchTopTab('domains')" id="tab-domains" class="flex-1 px-3 py-1 text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors">Domains</button>
+                        </div>
+                    </div>
+                    <div class="overflow-y-auto flex-1 min-h-0">
+                        <table class="min-w-full text-xs" id="top-apps-table">
+                            <tbody id="top-apps-list" class="divide-y divide-gray-200 dark:divide-gray-700">
+                                <tr><td class="px-2 py-1 text-center text-gray-500">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                        <div class="px-3 py-2 text-xs text-indigo-600 dark:text-indigo-400 border-t border-gray-100 dark:border-gray-700 cursor-pointer hover:underline">View all in Reports →</div>
+                        <table class="min-w-full text-xs hidden" id="top-domains-table">
+                            <tbody id="top-domains-list" class="divide-y divide-gray-200 dark:divide-gray-700">
+                                <tr><td class="px-2 py-1 text-center text-gray-500">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
-            <p id="top-domain-name" class="text-base font-bold text-primary-600 truncate">-</p>
-            <div id="top-domain-duration" class="text-xs text-gray-500">-</div>
         </div>
     </div>
 </div>
@@ -161,4 +256,160 @@
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/overview.js') }}"></script>
 <script src="{{ url_for('static', filename='js/eol-dashboard.js') }}"></script>
+<script>
+// Color schemes for charts
+const CATEGORY_COLORS = {
+    'productivity': '#10b981',
+    'communication': '#3b82f6',
+    'browsing': '#f59e0b',
+    'development': '#8b5cf6',
+    'other': '#9ca3af'
+};
+
+// Initialize new analytics charts
+document.addEventListener('DOMContentLoaded', function () {
+    loadAnalyticsCharts();
+    loadAnalyticsTables();
+});
+
+// Store chart instances for resize handling
+const chartInstances = {};
+
+// Tab switching for merged Top Apps/Domains
+window.switchTopTab = function(tab) {
+    const appsTable = document.getElementById('top-apps-table');
+    const domainsTable = document.getElementById('top-domains-table');
+    const tabApps = document.getElementById('tab-apps');
+    const tabDomains = document.getElementById('tab-domains');
+    
+    if (tab === 'apps') {
+        appsTable.classList.remove('hidden');
+        domainsTable.classList.add('hidden');
+        tabApps.className = 'flex-1 px-3 py-1 text-xs font-medium bg-indigo-600 text-white rounded transition-colors';
+        tabDomains.className = 'flex-1 px-3 py-1 text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors';
+    } else {
+        appsTable.classList.add('hidden');
+        domainsTable.classList.remove('hidden');
+        tabApps.className = 'flex-1 px-3 py-1 text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors';
+        tabDomains.className = 'flex-1 px-3 py-1 text-xs font-medium bg-indigo-600 text-white rounded transition-colors';
+    }
+};
+
+async function loadAnalyticsCharts() {
+    try {
+        // Load productivity metrics for Avg Productivity KPI
+        const prodResp = await fetch('/dashboard/api/overview/productivity-metrics?days=7');
+        const prodData = await prodResp.json();
+        if (prodData.summary) {
+            document.getElementById('avg-productivity').textContent = 
+                (prodData.summary.fleet_avg_score || 0).toFixed(1) + '%';
+        }
+
+        // App Category Chart
+        const ctx1 = document.getElementById('appCategoryChart');
+        if (ctx1) {
+            if (chartInstances.appCategory) chartInstances.appCategory.destroy();
+            chartInstances.appCategory = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+                    datasets: [
+                        { label: 'Productivity', data: [120, 140, 130, 150, 160], backgroundColor: CATEGORY_COLORS.productivity },
+                        { label: 'Communication', data: [80, 90, 100, 85, 95], backgroundColor: CATEGORY_COLORS.communication },
+                        { label: 'Browsing', data: [60, 70, 65, 80, 75], backgroundColor: CATEGORY_COLORS.browsing }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { x: { stacked: true }, y: { stacked: true } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        // Setup ResizeObserver for zoom responsiveness
+        setupChartResizeHandling();
+    } catch (error) {
+        console.error('Analytics charts error:', error);
+    }
+}
+
+async function loadAnalyticsTables() {
+    try {
+        // Top Apps
+        const appsResp = await fetch('/dashboard/api/overview/top-apps?limit=10&days=7');
+        const apps = await appsResp.json();
+        
+        // Populate Top 5 Apps
+        const appsList = document.getElementById('top-apps-list');
+        if (appsList) {
+            if (Array.isArray(apps) && apps.length > 0) {
+                appsList.innerHTML = apps.slice(0, 5).map((a, i) => 
+                    `<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <td class="px-2 py-2"><span class="font-bold text-gray-900 dark:text-gray-100">${i+1}.</span></td>
+                        <td class="px-2 py-2 text-gray-900 dark:text-gray-100 truncate">${a.app}</td>
+                    </tr>`
+                ).join('');
+            } else {
+                appsList.innerHTML = '<tr><td colspan="2" class="px-2 py-2 text-center text-gray-500">No data</td></tr>';
+            }
+        }
+
+        // Top Domains
+        const domsResp = await fetch('/dashboard/api/overview/top-domains?limit=10&days=7');
+        const doms = await domsResp.json();
+        
+        // Populate Top 5 Domains
+        const domsList = document.getElementById('top-domains-list');
+        if (domsList) {
+            if (Array.isArray(doms) && doms.length > 0) {
+                domsList.innerHTML = doms.slice(0, 5).map((d, i) => 
+                    `<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <td class="px-2 py-2"><span class="font-bold text-gray-900 dark:text-gray-100">${i+1}.</span></td>
+                        <td class="px-2 py-2 text-gray-900 dark:text-gray-100 truncate">${d.domain}</td>
+                    </tr>`
+                ).join('');
+            } else {
+                domsList.innerHTML = '<tr><td colspan="2" class="px-2 py-2 text-center text-gray-500">No data</td></tr>';
+            }
+        }
+
+    } catch (error) {
+        console.error('Analytics tables error:', error);
+    }
+}
+
+// Override renderCharts to populate Fleet Screen Time bars from overview data
+const _origRenderCharts = window.renderCharts;
+window.renderCharts = function(data) {
+    if (_origRenderCharts) _origRenderCharts(data);
+    if (!data || !data.screen_time) return;
+    const st = data.screen_time;
+    const fmt = s => `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+    const total = (st.active||0)+(st.idle||0)+(st.locked||0)+(st.away||0) || 1;
+    const pct = v => Math.min(100, Math.max(0, (v/total)*100)).toFixed(1)+'%';
+    document.getElementById('fleet-active-time').textContent = fmt(st.active||0);
+    document.getElementById('fleet-idle-time').textContent   = fmt(st.idle||0);
+    document.getElementById('fleet-locked-time').textContent = fmt(st.locked||0);
+    document.getElementById('fleet-away-time').textContent   = fmt(st.away||0);
+    document.getElementById('fleet-active-bar').style.width  = pct(st.active||0);
+    document.getElementById('fleet-idle-bar').style.width    = pct(st.idle||0);
+    document.getElementById('fleet-locked-bar').style.width  = pct(st.locked||0);
+    document.getElementById('fleet-away-bar').style.width    = pct(st.away||0);
+    
+    // Hide Away row if zero
+    const awayRow = document.getElementById('fleet-away-row');
+    if (awayRow) {
+        awayRow.style.display = (st.away||0) > 0 ? '' : 'none';
+    }
+    
+    // Update screentime summary
+    const summary = document.getElementById('screentime-summary');
+    if (summary) {
+        const active = Math.floor((st.active||0)/3600);
+        summary.textContent = `Active: ${active}h`;
+    }
+};
+</script>
 {% endblock %}

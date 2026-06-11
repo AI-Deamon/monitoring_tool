@@ -55,14 +55,7 @@
         document.getElementById('active-agents').textContent = data.active_agents;
         document.getElementById('offline-agents').textContent = data.offline_agents;
 
-        // Update Highlights
-        document.getElementById('top-app-name').textContent = data.top_app.name;
-        document.getElementById('top-app-duration').textContent = formatTime(data.top_app.duration);
-
-        document.getElementById('top-domain-name').textContent = data.top_domain.name;
-        document.getElementById('top-domain-duration').textContent = formatTime(data.top_domain.duration);
-
-        // Update Top 5 Agents
+        // Update Top 5 Agents (Top Performance cards)
         renderTop5Agents(data);
 
         // Update Last Updated
@@ -189,37 +182,46 @@
         const idleList = document.getElementById('top-idle-list');
         if (idleList) {
             if (data.top_idle_agents && data.top_idle_agents.length > 0) {
-                idleList.innerHTML = data.top_idle_agents.map((agent, index) => `
-                    <li class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
-                        <span class="text-sm text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname}</span>
-                        <span class="font-mono text-sm text-warning-600 dark:text-warning-400">${formatTime(agent.idle_seconds)}</span>
+                idleList.innerHTML = data.top_idle_agents.slice(0, 3).map((agent, index) => `
+                    <li class="flex justify-between items-center gap-1 text-xs">
+                        <span class="text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname.substring(0, 8)}</span>
+                        <span class="font-mono text-warning-600 dark:text-warning-400 text-[11px]">${formatTime(agent.idle_seconds)}</span>
                     </li>
                 `).join('');
             } else {
-                idleList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-sm">No data</li>';
+                idleList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-xs">No data</li>';
             }
-        } else {
-            console.warn('top-idle-list element not found');
         }
 
         // Render Top Active Agents
         const activeList = document.getElementById('top-active-list');
         if (activeList) {
             if (data.top_active_agents && data.top_active_agents.length > 0) {
-                activeList.innerHTML = data.top_active_agents.map((agent, index) => `
-                    <li class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
-                        <span class="text-sm text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname}</span>
-                        <span class="font-mono text-sm text-success-600 dark:text-success-400">${formatTime(agent.active_seconds)}</span>
+                activeList.innerHTML = data.top_active_agents.slice(0, 3).map((agent, index) => `
+                    <li class="flex justify-between items-center gap-1 text-xs">
+                        <span class="text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname.substring(0, 8)}</span>
+                        <span class="font-mono text-success-600 dark:text-success-400 text-[11px]">${formatTime(agent.active_seconds)}</span>
                     </li>
                 `).join('');
             } else {
-                activeList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-sm">No data</li>';
+                activeList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-xs">No data</li>';
             }
-        } else {
-            console.warn('top-active-list element not found');
         }
 
-
+        // Render Top Locked Agents
+        const lockedList = document.getElementById('top-locked-list');
+        if (lockedList) {
+            if (data.top_locked_agents && data.top_locked_agents.length > 0) {
+                lockedList.innerHTML = data.top_locked_agents.slice(0, 3).map((agent, index) => `
+                    <li class="flex justify-between items-center gap-1 text-xs">
+                        <span class="text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname.substring(0, 8)}</span>
+                        <span class="font-mono text-gray-600 dark:text-gray-400 text-[11px]">${formatTime(agent.locked_seconds)}</span>
+                    </li>
+                `).join('');
+            } else {
+                lockedList.innerHTML = '<li class="text-gray-500 dark:text-gray-400 text-xs">No data</li>';
+            }
+        }
     }
 
     // Initial Load
@@ -240,6 +242,70 @@
         
         loadOverview();
     });
+
+    // Setup responsive chart handling for zoom and resize
+    function setupResponsiveCharts() {
+        const chartContainers = document.querySelectorAll('canvas[id$="-chart"]');
+        
+        if (chartContainers.length === 0) {
+            console.log('No chart containers found for responsive setup');
+            return;
+        }
+
+        // ResizeObserver to handle zoom and window resize
+        const resizeObserver = new ResizeObserver(() => {
+            // Throttle resize updates to prevent excessive redraws
+            clearTimeout(window.chartResizeTimeout);
+            window.chartResizeTimeout = setTimeout(() => {
+                const charts = [window.statusChart, window.screenChart];
+                charts.forEach(chart => {
+                    if (chart && typeof chart.resize === 'function') {
+                        try {
+                            chart.resize();
+                        } catch (e) {
+                            console.warn('Error resizing chart:', e);
+                        }
+                    }
+                });
+            }, 100);
+        });
+
+        // Observe all chart parents (not the canvas itself)
+        chartContainers.forEach(canvas => {
+            const parent = canvas.parentElement;
+            if (parent) {
+                resizeObserver.observe(parent);
+            }
+        });
+
+        // Also listen to window resize events
+        window.addEventListener('resize', () => {
+            clearTimeout(window.chartResizeTimeout);
+            window.chartResizeTimeout = setTimeout(() => {
+                const charts = [window.statusChart, window.screenChart];
+                charts.forEach(chart => {
+                    if (chart && typeof chart.resize === 'function') {
+                        try {
+                            chart.resize();
+                        } catch (e) {
+                            console.warn('Error resizing chart on window resize:', e);
+                        }
+                    }
+                });
+            }, 100);
+        });
+
+        console.log('Responsive chart handling initialized');
+    }
+
+    // Call setup after charts are rendered
+    const originalLoadOverview = window.loadOverview;
+    if (typeof originalLoadOverview === 'function') {
+        window.loadOverview = function() {
+            originalLoadOverview.call(this);
+            setTimeout(() => setupResponsiveCharts(), 500);
+        };
+    }
 
     // Refresh every 30s for more real-time data
     setInterval(() => {
