@@ -12,7 +12,7 @@ import json
 import logging
 from threading import Thread
 from datetime import timedelta, date, datetime, timezone
-from flask import Blueprint, request, jsonify, Response, session
+from flask import Blueprint, request, jsonify, Response, session, g
 from extensions import db
 from sqlalchemy import text
 from auth import login_required, admin_required
@@ -160,12 +160,32 @@ def generate_report():
     except ValueError:
         return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
 
+    # Access control: this endpoint is only @login_required, so a non-admin
+    # could otherwise pull a team report covering EVERY agent, or an
+    # individual report for any agent_id they guessed.
+    from auth import can_view_agent
+    is_admin = getattr(g.current_user, 'role', None) == 'admin'
+
     try:
         if scope == 'team':
+            if not is_admin:
+                logger.warning(
+                    "[REPORTS] Non-admin %s denied team report",
+                    getattr(g.current_user, 'username', '?'),
+                )
+                return jsonify({
+                    'error': 'Team reports require administrator access'
+                }), 403
             ctx = build_team_report(db, start, end)
         else:
             if not agent_id:
                 return jsonify({'error': 'agent_id required for individual report'}), 400
+            if not can_view_agent(agent_id):
+                logger.warning(
+                    "[REPORTS] User %s denied report for agent %s",
+                    getattr(g.current_user, 'username', '?'), agent_id,
+                )
+                return jsonify({'error': 'Access denied for this agent'}), 403
             ctx = build_individual_report(db, agent_id, start, end)
 
         if not ctx:
@@ -227,6 +247,7 @@ def email_report():
 
 @reports_bp.route('/dashboard/reports/schedules', methods=['GET'])
 @login_required
+@admin_required  # schedules carry recipient email lists; creation/deletion is already admin-only
 def list_schedules():
     try:
         return jsonify(_get_schedules())
@@ -320,6 +341,25 @@ def unified_generate():
     if scope == 'individual' and not agent_id:
         return jsonify({'error': 'agent_id required for individual report'}), 400
 
+    # Same access control as /reports/generate: without it any logged-in user
+    # could queue a team report over every agent, or one for an agent they
+    # have no access to - and have it emailed to an address they choose.
+    from auth import can_view_agent
+    is_admin = getattr(g.current_user, 'role', None) == 'admin'
+    if scope == 'team':
+        if not is_admin:
+            return jsonify({
+                'error': 'Team reports require administrator access'
+            }), 403
+    elif not can_view_agent(agent_id):
+        return jsonify({'error': 'Access denied for this agent'}), 403
+
+    # Emailing a report to arbitrary recipients is an admin action.
+    if auto_email and not is_admin:
+        return jsonify({
+            'error': 'Emailing reports requires administrator access'
+        }), 403
+
     job_id = create_job(db, report_type, scope, agent_id, start, end, created_by=session.get('username'))
 
     from flask import current_app
@@ -337,9 +377,21 @@ def unified_generate():
 @login_required
 def get_job_status(job_id):
     from report_engine import get_job
+    from server_models import ReportGenerationJob
+
     job = get_job(db, job_id)
     if not job:
         return jsonify({'error': 'Job not found'}), 404
+
+    # The payload includes result_html - the whole rendered report. Without
+    # an owner check any logged-in user could poll job ids and read reports
+    # (including admin team reports) that were never theirs.
+    if getattr(g.current_user, 'role', None) != 'admin':
+        row = ReportGenerationJob.query.filter_by(id=job_id).first()
+        owner = getattr(row, 'created_by', None)
+        if owner != getattr(g.current_user, 'username', None):
+            return jsonify({'error': 'Job not found'}), 404
+
     return jsonify(job)
 
 
@@ -347,7 +399,14 @@ def get_job_status(job_id):
 @login_required
 def list_jobs():
     from server_models import ReportGenerationJob
-    jobs = ReportGenerationJob.query.order_by(ReportGenerationJob.created_at.desc()).limit(20).all()
+    query = ReportGenerationJob.query
+    # Non-admins only see their own jobs.
+    if getattr(g.current_user, 'role', None) != 'admin':
+        query = query.filter(
+            ReportGenerationJob.created_by == getattr(
+                g.current_user, 'username', None)
+        )
+    jobs = query.order_by(ReportGenerationJob.created_at.desc()).limit(20).all()
     return jsonify([{
         'job_id': j.id,
         'report_type': j.report_type,
@@ -362,13 +421,28 @@ def list_jobs():
 @login_required
 def list_report_agents():
     from report_engine import _query
-    agents = _query(db, """
-        SELECT a.agent_id::text, a.hostname, acs.username
-        FROM agents a
-        JOIN agent_current_status acs ON a.agent_id = acs.agent_id
-        WHERE a.status = 'active' AND acs.username IS NOT NULL
-        ORDER BY acs.username
-    """, {})
+    from auth import get_user_filter
+
+    # Non-admins must not receive the full agent/username roster: scope the
+    # list to the agents they are linked to (get_user_filter fails closed).
+    user_filter = get_user_filter()
+    if user_filter:
+        agents = _query(db, """
+            SELECT a.agent_id::text, a.hostname, acs.username
+            FROM agents a
+            JOIN agent_current_status acs ON a.agent_id = acs.agent_id
+            WHERE a.status = 'active' AND acs.username IS NOT NULL
+              AND (acs.username = :u OR acs.username ILIKE :suffix)
+            ORDER BY acs.username
+        """, {'u': user_filter, 'suffix': f'%\\{user_filter}'})
+    else:
+        agents = _query(db, """
+            SELECT a.agent_id::text, a.hostname, acs.username
+            FROM agents a
+            JOIN agent_current_status acs ON a.agent_id = acs.agent_id
+            WHERE a.status = 'active' AND acs.username IS NOT NULL
+            ORDER BY acs.username
+        """, {})
     return jsonify(agents)
 
 

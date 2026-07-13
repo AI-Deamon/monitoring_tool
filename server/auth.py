@@ -22,12 +22,16 @@ from flask import (
     jsonify,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy.exc import IntegrityError
 from extensions import db
 import logging
 import os
 import secrets
 import re
 import time
+import hmac
+import hashlib
+import base64
 
 logger = logging.getLogger(__name__)
 
@@ -117,29 +121,79 @@ def ratelimit_handler(e):
 
 
 def generate_csrf_token():
-    """Generate CSRF token for forms"""
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_hex(32)
-    return session["csrf_token"]
+    """Generate HMAC-based CSRF token, bound to the current session.
+
+    Uses URL-safe base64 (no +/ or padding issues in form POST).
+    The token is self-validating: timestamp:nonce:session_seed:HMAC_signature.
+    Binding to session["user_id"] prevents an anonymously-harvested token from
+    being replayed against a logged-in victim. Pre-login routes share the
+    "anon" seed, which is fine since there is no victim session to protect.
+    """
+    from flask import current_app
+    secret = current_app.config["SECRET_KEY"]
+    expires = int(time.time()) + 3600  # 1 hour expiry
+    nonce = secrets.token_hex(16)
+    session_seed = str(session.get("user_id", "anon"))
+    payload = f"{expires}:{nonce}:{session_seed}"
+    sig = hmac.new(
+        secret.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    raw = f"{payload}:{sig}"
+    token = base64.urlsafe_b64encode(raw.encode()).rstrip(b"=").decode()
+    return token
 
 
 def validate_csrf_token():
-    """Validate CSRF token from form submission"""
+    """Validate HMAC-based CSRF token and that it belongs to this session."""
+    from flask import current_app
     form_token = request.form.get("csrf_token", "")
-    session_token = session.get("csrf_token", "")
 
-    if not form_token or not session_token:
-        logger.warning(
-            f"[CSRF] Missing token - Form: {bool(form_token)}, Session: {bool(session_token)}"
-        )
+    if not form_token:
+        logger.warning("[CSRF] Missing token in form")
         return False
 
-    # Use constant-time comparison
-    if secrets.compare_digest(form_token, session_token):
-        return True
+    try:
+        # Restore padding before decoding
+        padded = form_token
+        pad = len(padded) % 4
+        if pad:
+            padded += "=" * (4 - pad)
+        decoded = base64.urlsafe_b64decode(padded).decode()
+        parts = decoded.split(":")
+        if len(parts) < 4:
+            return False
 
-    logger.warning(f"[CSRF] Token mismatch from {request.remote_addr}")
-    return False
+        expires = int(parts[0])
+        nonce = parts[1]
+        token_seed = parts[2]
+        sig = parts[3]
+        payload = f"{expires}:{nonce}:{token_seed}"
+
+        # Verify HMAC signature
+        secret = current_app.config["SECRET_KEY"]
+        expected_sig = hmac.new(
+            secret.encode(), payload.encode(), hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            logger.warning(f"[CSRF] Token signature mismatch from {request.remote_addr}")
+            return False
+
+        # Token must have been minted for this session, otherwise an
+        # anonymously-harvested token could be replayed against a victim.
+        current_seed = str(session.get("user_id", "anon"))
+        if not hmac.compare_digest(token_seed, current_seed):
+            logger.warning(f"[CSRF] Token/session mismatch from {request.remote_addr}")
+            return False
+
+        # Check expiry
+        if time.time() > expires:
+            logger.warning("[CSRF] Token expired")
+            return False
+
+        return True
+    except Exception as e:
+        logger.warning(f"[CSRF] Token validation error: {e}")
+        return False
 
 
 def csrf_protect(f):
@@ -258,7 +312,9 @@ def to_dict(self):
 
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_DURATION_MINUTES = 30
-SESSION_LIFETIME_HOURS = 8
+# NOTE: session lifetime is configured in server_app.py via
+# PERMANENT_SESSION_LIFETIME (8 hours). Do not reintroduce a duplicate constant
+# here - it drifts from the real setting.
 
 
 # ============================================================================
@@ -348,8 +404,10 @@ def can_view_agent(agent_id: str, username: str = None) -> bool:
                     server_models.AgentCurrentStatus.username.ilike(
                         f"%\\{linked_username}"
                     ),
+                    # UPN form (user@domain) only - NOT an open "{name}%" prefix,
+                    # which would leak e.g. "johnson"/"john.doe" data to "john".
                     server_models.AgentCurrentStatus.username.ilike(
-                        f"{linked_username}%"
+                        f"{linked_username}@%"
                     ),
                 )
             )
@@ -369,7 +427,8 @@ def can_view_agent(agent_id: str, username: str = None) -> bool:
                     server_models.ScreenTime.username == linked_username,
                     server_models.ScreenTime.username.ilike(linked_username),
                     server_models.ScreenTime.username.ilike(f"%\\{linked_username}"),
-                    server_models.ScreenTime.username.ilike(f"{linked_username}%"),
+                    # UPN form only - see can_view_agent note above (no open prefix).
+                    server_models.ScreenTime.username.ilike(f"{linked_username}@%"),
                 )
             )
             .first()
@@ -380,16 +439,32 @@ def can_view_agent(agent_id: str, username: str = None) -> bool:
     return False
 
 
+# Sentinel username that can never match a real Windows account. Callers
+# treat a falsy filter as "admin - show everything", so a non-admin who has
+# no linked_username (or a missing session) MUST still get a truthy filter,
+# otherwise they would see every agent's data. Returning this value keeps
+# every existing `if user_filter:` call site correct and fails closed: the
+# query runs, but matches nothing.
+NO_ACCESS_USERNAME = "__no_linked_user__"
+
+
 def get_user_filter():
-    """Get filter for queries based on user role"""
+    """Get filter for queries based on user role.
+
+    Returns:
+        None                  -> admin: no filtering, sees all agents
+        <linked_username>     -> user: scoped to their own agent data
+        NO_ACCESS_USERNAME    -> user without a linked account, or no session:
+                                 scoped to nothing (fail closed)
+    """
     if not hasattr(g, "current_user") or not g.current_user:
-        return None
+        return NO_ACCESS_USERNAME
 
     if g.current_user.role == "admin":
         return None  # No filter for admin
 
-    # User: filter by linked username
-    return g.current_user.linked_username
+    # User: filter by linked username. Never fall through to "no filter".
+    return g.current_user.linked_username or NO_ACCESS_USERNAME
 
 
 # ============================================================================
@@ -628,12 +703,13 @@ def login():
                             _log_login_attempt(user.id, username, "ad", request, False, "Invalid password")
                     else:
                         _log_login_attempt(user.id, username, "ad", request, False, "AD auth failed")
-                        flash("Invalid username or password.", "danger")
                         logger.warning(
                             f"[AUTH] AD login failed, no local fallback: {username}"
                         )
                         time.sleep(0.5)  # Constant-time delay
-                        return render_template("auth/login.html")
+                        # Do NOT return early: fall through to the shared lockout
+                        # handling below (ad_auth_success stays False) so AD-only
+                        # accounts accrue failed_login_count and can be locked out.
             else:
                 # Local authentication
                 ad_auth_success = user.check_password(password)
@@ -718,6 +794,7 @@ def login():
         else:
             # User doesn't exist - don't reveal this
             logger.warning(f"[AUTH] Login attempt for non-existent user: {username}")
+            time.sleep(0.5)  # Constant-time delay, matches other failure branches (no enumeration)
             flash("Invalid username or password.", "danger")
 
         return render_template("auth/login.html")
@@ -921,7 +998,16 @@ def add_user():
             user.set_password(password)
 
         db.session.add(user)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("This Windows username is already linked to another user.", "danger")
+            return render_template(
+                "auth/add_user.html",
+                available_usernames=available_usernames,
+                available_login_usernames=available_login_usernames,
+            )
 
         logger.info(
             f"[AUTH] User created by {g.current_user.username}: {username} (role: {role})"
@@ -980,6 +1066,9 @@ def edit_user(user_id):
                 flash("Password must be at least 8 characters.", "danger")
                 return render_template("auth/edit_user.html", user=user)
             user.set_password(new_password)
+            # Invalidate any existing sessions for this user - an admin-driven
+            # reset must not leave a previously-hijacked session valid.
+            user.session_version = (user.session_version or 1) + 1
             logger.info(f"[AUTH] Password reset by admin for: {user.username}")
 
         # Unlock if locked
@@ -989,7 +1078,12 @@ def edit_user(user_id):
             user.locked_until = None
             logger.info(f"[AUTH] Account unlocked by admin: {user.username}")
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("This Windows username is already linked to another user.", "danger")
+            return render_template("auth/edit_user.html", user=user)
 
         logger.info(
             f"[AUTH] User updated by {g.current_user.username}: {user.username}"
@@ -1073,18 +1167,5 @@ def create_default_admin():
     return True
 
 
-def init_auth(app):
-    """Initialize authentication module"""
-    # Set session configuration
-    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=SESSION_LIFETIME_HOURS)
-    app.config["SESSION_COOKIE_SECURE"] = False  # Set to True when using HTTPS
-    app.config["SESSION_COOKIE_HTTPONLY"] = True
-    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-
-    # Register blueprint
-    app.register_blueprint(auth_bp)
-
-    # Note: Schema now managed exclusively via Alembic migrations.
-    # db.create_all() removed.
-    with app.app_context():
-        create_default_admin()
+# C-09 FIX: Removed init_auth() function that was overriding SESSION_COOKIE_SECURE
+# Cookie security is now properly configured in server_app.py based on config.USE_TLS

@@ -3,6 +3,7 @@ import json
 import os
 import re
 import uuid
+import sqlalchemy as sa
 from datetime import datetime, date, timezone, timedelta
 from flask import Blueprint, request, jsonify, current_app
 from extensions import db
@@ -13,7 +14,6 @@ from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('api', __name__)
-telemetry_bp = Blueprint('telemetry_api', __name__)
 
 
 # =============================================================================
@@ -57,6 +57,37 @@ def validate_agent_id(agent_id: str) -> bool:
         return True
     except (ValueError, AttributeError):
         return False
+
+
+# H-11 FIX: Input validation helper
+def validate_request_payload(required_fields=None, max_size_kb=1024):
+    """
+    Validate basic request payload requirements.
+    
+    Args:
+        required_fields: List of required field names
+        max_size_kb: Maximum payload size in KB
+    
+    Returns:
+        (data, error_response) tuple. error_response is None if valid.
+    """
+    # Check content type
+    if not request.is_json:
+        return None, (jsonify({'error': 'Content-Type must be application/json'}), 415)
+    
+    # Check payload size
+    if request.content_length and request.content_length > max_size_kb * 1024:
+        return None, (jsonify({'error': f'Payload too large (max {max_size_kb}KB)'}), 413)
+    
+    data = request.get_json() or {}
+    
+    # Check required fields
+    if required_fields:
+        missing = [f for f in required_fields if f not in data]
+        if missing:
+            return None, (jsonify({'error': 'Missing required fields', 'fields': missing}), 400)
+    
+    return data, None
 
 
 if REGISTRATION_SECRET:
@@ -176,9 +207,10 @@ def register():
     # BUG-008 Fix: Enforce registration secret in production
     # ========================================================================
     if REGISTRATION_SECRET:
-        # Secret is configured - verify it
-        provided_secret = request.headers.get('X-Registration-Secret')
-        if provided_secret != REGISTRATION_SECRET:
+        # Secret is configured - verify it (constant-time compare)
+        import hmac as _hmac
+        provided_secret = request.headers.get('X-Registration-Secret') or ''
+        if not _hmac.compare_digest(provided_secret, REGISTRATION_SECRET):
             logger.warning(f"[REGISTER] Invalid or missing registration secret from {request.remote_addr}")
             return jsonify({'error': 'Invalid registration secret'}), 403
     elif not _is_dev_mode:
@@ -242,12 +274,19 @@ def register():
         stored_key = existing.local_agent_key
         provided_key = payload.local_agent_key
         
-        if stored_key and provided_key:
+        # SECURITY: if this agent identity already has a local_agent_key on
+        # record, a re-registration MUST prove possession of it. Otherwise
+        # anyone who can reach /register and knows a hostname/agent_id could
+        # take over the existing identity and be issued fresh credentials.
+        if stored_key:
             import hmac
-            if hmac.compare_digest(str(stored_key), str(provided_key)):
-                logger.info(f"[REGISTER] Agent {agent_id} key verified ✓")
-            else:
-                logger.warning(f"[REGISTER] Agent {agent_id} key changed (re-install assumed)")
+            if not provided_key:
+                logger.warning(f"[REGISTER] Agent {agent_id} re-registration missing local_agent_key - rejecting")
+                return jsonify({'error': 'local_agent_key required for re-registration'}), 403
+            if not hmac.compare_digest(str(stored_key), str(provided_key)):
+                logger.warning(f"[REGISTER] Agent {agent_id} local_agent_key mismatch - rejecting")
+                return jsonify({'error': 'local_agent_key mismatch'}), 403
+            logger.info(f"[REGISTER] Agent {agent_id} key verified ✓")
         elif provided_key:
             logger.info(f"[REGISTER] Agent {agent_id} providing key for first time")
         else:
@@ -315,6 +354,50 @@ def register():
             }
         }), 201
         
+    except sa.exc.IntegrityError as e:
+        # C-07 FIX: Handle TOCTOU race - another request won the race
+        db.session.rollback()
+        logger.warning(f"[REGISTER] Race condition detected for {agent_id}, retrying as update")
+        
+        # Fetch the agent that was created by the parallel request
+        existing = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if existing:
+            # Update it with our credentials
+            existing.api_key = api_key_hashed
+            existing.api_token = api_token
+            existing.agent_name = agent_name
+            existing.hostname = hostname
+            existing.os = os_version
+            existing.os_build = os_build
+            existing.windows_edition = windows_edition
+            existing.architecture = architecture
+            existing.version = agent_version
+            if payload.local_agent_key:
+                existing.local_agent_key = payload.local_agent_key
+            existing.status = 'active'
+            existing.last_seen = datetime.utcnow()
+            
+            try:
+                db.session.commit()
+                logger.info(f"[REGISTER] Race resolved - updated existing agent {agent_id}")
+                return jsonify({
+                    'message': 'Agent registered successfully',
+                    'api_key': api_token,
+                    'agent': {
+                        'agent_id': agent_id,
+                        'hostname': hostname,
+                        'status': 'active',
+                        'last_seen': datetime.now(timezone.utc).isoformat() + 'Z'
+                    }
+                }), 201
+            except Exception as retry_error:
+                db.session.rollback()
+                logger.error(f"[REGISTER] Retry failed: {retry_error}")
+                return jsonify({'error': 'Registration failed after retry', 'message': str(retry_error)}), 500
+        else:
+            logger.error(f"[REGISTER] Race condition but agent not found: {agent_id}")
+            return jsonify({'error': 'Registration conflict'}), 409
+            
     except Exception as e:
         db.session.rollback()
         logger.error(f"[REGISTER] ERROR: {e}")
@@ -328,7 +411,11 @@ def inventory():
     Update application inventory - Full Sync "Replace All" model.
     """
     from flask import g
-    data = request.get_json() or {}
+    
+    # H-11 FIX: Validate request payload
+    data, error = validate_request_payload(required_fields=['agent_id'], max_size_kb=2048)
+    if error:
+        return error
 
     auth_agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     payload_agent_id = data.get('agent_id')
@@ -525,9 +612,7 @@ def domain_usage():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         logger.warning(f"Domain usage: Missing agent_id in request or JWT")
@@ -590,9 +675,12 @@ def domain_usage():
 def heartbeat():
     """Heartbeat health check."""
     from flask import g
+    payload = None
     try:
         payload = HeartbeatSchema.parse_obj(request.get_json() or {'agent_id': request.headers.get('X-Agent-ID'), 'timestamp': ''})
     except ValidationError as e:
+        # A non-dict/malformed body raises before payload is assigned; keep it
+        # None so the later `if payload:` checks don't hit UnboundLocalError.
         logger.debug(f"Heartbeat validation: {e}")
     
     agent_id = str(g.current_agent.agent_id) if g.current_agent else "unknown"
@@ -668,7 +756,7 @@ def update_agent_status():
         if not data:
             return jsonify({"error": "No data provided"}), 400
         
-        agent_id = data.get('agent_id')
+        agent_id = _resolve_agent_id_from_request(data)
         operational_status = data.get('operational_status', 'UNKNOWN')
         status_reason = data.get('status_reason', '')
         diagnostics = data.get('diagnostics', {})
@@ -752,11 +840,8 @@ def app_usage():
     """Handle app usage at /api/v1/app-usage (agent compatibility)."""
     from flask import g
     data = request.get_json() or {}
-    agent_id = data.get('agent_id')
-    
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
-    
+    agent_id = _resolve_agent_id_from_request(data)
+
     if not agent_id:
         logger.warning("App usage: Missing agent_id")
         return jsonify({'status': 'error', 'message': 'Missing agent_id'}), 400
@@ -863,28 +948,6 @@ def app_active():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@telemetry_bp.route("/event", methods=["POST"])
-@require_auth
-def telemetry_event():
-    """
-    Gateway for all authoritative telemetry events.
-    Matches Step 367 Refined Plan.
-    """
-    from server_telemetry import process_state_duration_event
-    payload = request.get_json(force=True)
-    agent_id = str(g.current_agent.agent_id) if g.current_agent else None
-    
-    if not agent_id:
-        return jsonify({"error": "Missing agent authentication"}), 401
-
-    if payload.get("event") == "state_duration":
-        # Inject agent_id for the processor
-        payload["agent_id"] = agent_id
-        return process_state_duration_event(payload)
-
-    return jsonify({"status": "ignored"}), 200
-
-
 @bp.route('/app-switch', methods=['POST'])
 @require_auth
 def app_switch():
@@ -918,6 +981,20 @@ def app_switch():
         duration = (end_time - start_time).total_seconds()
     
     try:
+        # IDEMPOTENCY: a retried/duplicated delivery (common after a network
+        # blip or buffered replay) must not double-count into AppUsage. The
+        # canonical /api/v1/telemetry/app-switch path already skips duplicates;
+        # mirror that here for this legacy alias.
+        existing_session = server_models.AppSession.query.filter_by(
+            agent_id=agent_id,
+            app=app_name,
+            start_time=start_time,
+            end_time=end_time
+        ).first()
+        if existing_session:
+            logger.info(f"[AGENT {agent_id}] app-switch duplicate ignored: {app_name}")
+            return jsonify({'status': 'skipped', 'message': 'duplicate session'}), 200
+
         session = server_models.AppSession(
             agent_id=agent_id,
             username=data.get('username'),
@@ -928,7 +1005,7 @@ def app_switch():
             duration_seconds=duration
         )
         db.session.add(session)
-        
+
         session_date = start_time.date()
         app_usage_rec = server_models.AppUsage.query.filter_by(
             agent_id=agent_id,
@@ -970,9 +1047,7 @@ def domain_active_batch():
     """
     from flask import g
     data = request.get_json() or {}
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     if not agent_id:
         logger.warning("Domain active: Missing agent_id")
         return jsonify({'status': 'error', 'message': 'Missing agent_id'}), 400
@@ -1023,8 +1098,9 @@ def domain_active_batch():
                 domain=domain,
                 start_time=start_naive
             ).first()
-            
-            if not domain_rec:
+            is_new_session = domain_rec is None
+
+            if is_new_session:
                 end_naive = None
                 if end_str:
                     try:
@@ -1032,7 +1108,7 @@ def domain_active_batch():
                         end_naive = end_ts.replace(tzinfo=None) if end_ts.tzinfo else end_ts
                     except:
                         pass
-                
+
                 domain_rec = server_models.DomainSession(
                     agent_id=agent_id,
                     domain=domain,
@@ -1046,7 +1122,13 @@ def domain_active_batch():
                 )
                 db.session.add(domain_rec)
                 logger.debug(f"Created DomainSession: {domain} ({duration}s)")
-            
+            else:
+                # IDEMPOTENCY: this exact session was already ingested (e.g. a
+                # buffered/retried batch after an outage). The daily aggregate
+                # already includes it - skip STEP 2 to avoid double-counting.
+                logger.debug(f"Duplicate DomainSession ignored: {domain} @ {start_naive}")
+                continue
+
             # ================================================================
             # STEP 2: Aggregate into domain_usage table (DASHBOARD SOURCE!)
             # ================================================================
@@ -1299,9 +1381,7 @@ def asset_hardware():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -1421,9 +1501,7 @@ def asset_hardware_network():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -1470,17 +1548,29 @@ def asset_hardware_network():
 # =============================================================================
 
 def _resolve_agent_id_from_request(data):
-    """Resolve agent_id from payload first, then authenticated agent context."""
+    """Resolve agent_id, always preferring the authenticated agent identity.
+
+    SECURITY: never let a client-supplied payload agent_id override the agent
+    authenticated by require_auth - otherwise a valid agent could write data
+    under another agent's UUID (cross-agent spoofing). The payload value is only
+    used as a fallback when there is no authenticated agent context, and a
+    mismatch between the two is logged and ignored.
+    """
     from flask import g
 
-    agent_id = None
+    auth_agent_id = str(g.current_agent.agent_id) if getattr(g, 'current_agent', None) else None
+
+    payload_agent_id = None
     if isinstance(data, dict):
-        agent_id = data.get('agent_id')
+        payload_agent_id = data.get('agent_id')
 
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if getattr(g, 'current_agent', None) else None
+    if payload_agent_id and auth_agent_id and payload_agent_id != auth_agent_id:
+        logger.warning(
+            f"Payload agent_id mismatch (payload={payload_agent_id}, auth={auth_agent_id}); "
+            f"using authenticated agent_id"
+        )
 
-    return agent_id
+    return auth_agent_id or payload_agent_id
 
 
 def _normalize_inventory_items(data, category_key):
@@ -1546,7 +1636,15 @@ def _process_inventory_category_upload(category_key, upsert_func):
         if items:
             result = upsert_func(agent_id, items)
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except sa.exc.IntegrityError:
+            # Concurrent request for the same agent_id raced us and inserted first.
+            # Retry as update instead of losing the entire batch.
+            db.session.rollback()
+            if items:
+                result = upsert_func(agent_id, items)
+            db.session.commit()
 
         # Keep lifecycle risk model current for categories that can impact lifecycle views.
         if items:
@@ -1579,9 +1677,7 @@ def extended_inventory():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -1706,9 +1802,7 @@ def security_indicators():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -1790,9 +1884,7 @@ def system_visibility():
     from flask import g
     data = request.get_json() or {}
 
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
 
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -2084,9 +2176,7 @@ def eol_data():
     from flask import g
     data = request.get_json() or {}
 
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
 
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -2323,13 +2413,8 @@ def register_root_endpoint(app):
     @app.route('/domains', methods=['POST'])
     @require_auth
     def domains_root():
-        """Handle domains data (agent-specific endpoint)."""
-        from flask import g
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else "unknown"
-        data = request.get_json() or {}
-        domain_count = len(data.get('domains', []))
-        logger.info(f"[AGENT {agent_id}] Domains root endpoint from {request.remote_addr}: {domain_count} domains")
-        return jsonify({'status': 'ok'}), 200
+        """Legacy root alias - forward to the real handler so data is persisted."""
+        return domains()
 
     @app.route('/asset-hardware', methods=['POST'])
     @require_auth

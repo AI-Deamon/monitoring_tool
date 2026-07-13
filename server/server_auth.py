@@ -9,6 +9,7 @@ The X-API-Key method is now the primary authentication method.
 """
 
 import jwt
+import hmac
 import secrets
 import hashlib
 import logging
@@ -192,7 +193,15 @@ def require_auth(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         agent_id = request.headers.get('X-Agent-ID')
-        logger.debug(f"[AUTH] Request headers - X-Agent-ID: {agent_id}, X-API-Key: {request.headers.get('X-API-Key', 'None')}, Authorization: {request.headers.get('Authorization', 'None')[:50]}...")
+        # Never log credential material: this previously wrote the full
+        # X-API-Key and a 50-char slice of the Bearer token into the debug
+        # log, defeating the hashed-at-rest storage of those same keys.
+        logger.debug(
+            "[AUTH] Request - X-Agent-ID: %s, X-API-Key: %s, Authorization: %s",
+            agent_id,
+            'present' if request.headers.get('X-API-Key') else 'absent',
+            'present' if request.headers.get('Authorization') else 'absent',
+        )
         
         # ============================================================
         # Method 1: X-API-Key header (New, Preferred)
@@ -235,13 +244,17 @@ def require_auth(fn):
             token = auth.split(' ', 1)[1]
             payload = verify_jwt_token(token)
             
-            # If JWT verification succeeds, extract agent_id from token if not provided in header
+            # If JWT verification succeeds, use the token's own signed agent_id
             if payload:
                 token_agent_id = payload.get('agent_id')
-                # Use agent_id from header if available, otherwise from token
-                final_agent_id = agent_id or token_agent_id
+                # SECURITY: the client-supplied X-Agent-ID header must not override
+                # the token's own signed subject - only allow it when they agree.
+                if agent_id and agent_id != token_agent_id:
+                    logger.warning(f"[AUTH] Agent ID mismatch: header={agent_id}, token={token_agent_id}")
+                    return jsonify({'status': 'error', 'message': 'Invalid agent_id'}), 401
+                final_agent_id = token_agent_id
                 logger.debug(f"[AUTH] JWT verified, using agent_id: {final_agent_id}")
-                
+
                 agent = server_models.Agent.query.filter_by(agent_id=final_agent_id).first()
                 if agent:
                     # Update last_seen
@@ -256,12 +269,16 @@ def require_auth(fn):
                 else:
                     logger.warning(f"[AUTH] Agent not found: {final_agent_id}")
                     return jsonify({'error': 'Agent not found'}), 401
-            
+
             # If JWT verification fails, try matching token directly against stored api_token
             if not payload and agent_id:
                 logger.debug(f"[AUTH] JWT verification failed, trying direct token match for agent: {agent_id}")
                 agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
-                if agent and agent.api_token == token:
+                # Constant-time compare: a plain == leaks the stored token
+                # one byte at a time through response timing.
+                if agent and agent.api_token and hmac.compare_digest(
+                    str(agent.api_token), str(token)
+                ):
                     logger.info(f"[AUTH] Direct token match successful for agent: {agent_id}")
                     # Update last_seen
                     try:
@@ -272,34 +289,19 @@ def require_auth(fn):
                         db.session.rollback()
                     g.current_agent = agent
                     return fn(*args, **kwargs)
-            
-            if not payload:
-                logger.debug("[AUTH] JWT verification failed, no fallback match")
-                return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
-            
-            if not agent_id or agent_id != payload.get('agent_id'):
-                logger.warning(f"[AUTH] Agent ID mismatch: header={agent_id}, token={payload.get('agent_id')}")
-                return jsonify({'status': 'error', 'message': 'Invalid agent_id'}), 401
-            
-            # Update last_seen
-            try:
-                agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
-                if agent:
-                    agent.last_seen = datetime.utcnow()
-                    db.session.commit()
-            except Exception as e:
-                logger.error(f"[AUTH] Failed to update last_seen: {e}")
-                db.session.rollback()
-            
-            # Store authenticated agent in Flask's g context
-            g.current_agent = agent
-            return fn(*args, **kwargs)
+
+            # JWT verification failed and no direct token match succeeded.
+            logger.debug("[AUTH] JWT verification failed, no fallback match")
+            return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
         
         # ============================================================
         # No valid authentication provided
         # ============================================================
         logger.warning("[AUTH] No valid authentication provided")
-        logger.debug(f"[AUTH] Headers received: {dict(request.headers)}")
+        # Header names only - dumping dict(request.headers) leaked API keys
+        # and Bearer tokens into the log on every failed request.
+        logger.debug("[AUTH] Header names received: %s",
+                     sorted(request.headers.keys()))
         return jsonify({'error': 'Missing authentication. Use X-API-Key or Authorization header.'}), 401
     
     return wrapper
