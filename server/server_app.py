@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, send_file
+from flask import Flask, jsonify, send_file, request
 from extensions import db
 from server_config import get_config
 import logging
@@ -75,7 +75,50 @@ def create_app():
     
     app.config['MAX_CONTENT_LENGTH'] = config.MAX_REQUEST_SIZE
     app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False
-    
+
+    # ================================================================
+    # RESPONSE COMPRESSION (dependency-free gzip)
+    # ================================================================
+    # The dashboard JSON (overview bundle, top apps/domains, telemetry) is
+    # highly repetitive and compresses ~80%. Done as an after_request hook
+    # rather than a new dependency: gzip only text/JSON responses above a
+    # size floor, only when the client advertises support, and never a
+    # streamed or already-encoded response.
+    import gzip as _gzip
+
+    _COMPRESS_MIN_BYTES = 1024
+    _COMPRESS_TYPES = ('application/json', 'text/html', 'text/css',
+                       'application/javascript', 'text/javascript',
+                       'text/plain', 'image/svg+xml')
+
+    @app.after_request
+    def _compress_response(response):
+        try:
+            accept = request.headers.get('Accept-Encoding', '')
+            if 'gzip' not in accept.lower():
+                return response
+            if response.direct_passthrough or response.status_code < 200 \
+                    or response.status_code >= 300:
+                return response
+            if response.headers.get('Content-Encoding'):
+                return response
+            ctype = (response.content_type or '').split(';')[0].strip()
+            if ctype not in _COMPRESS_TYPES:
+                return response
+            data = response.get_data()
+            if len(data) < _COMPRESS_MIN_BYTES:
+                return response
+            compressed = _gzip.compress(data, compresslevel=6)
+            response.set_data(compressed)
+            response.headers['Content-Encoding'] = 'gzip'
+            response.headers['Content-Length'] = len(compressed)
+            response.headers.add('Vary', 'Accept-Encoding')
+            return response
+        except Exception as e:
+            logger.warning(f"[COMPRESS] Skipped compression: {e}")
+            return response
+
+
     # ================================================================
     # SESSION CONFIGURATION (for dashboard auth)
     # ================================================================
