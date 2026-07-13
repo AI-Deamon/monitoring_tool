@@ -266,10 +266,43 @@ const CATEGORY_COLORS = {
     'other': '#9ca3af'
 };
 
-// Initialize new analytics charts
-document.addEventListener('DOMContentLoaded', function () {
+// Initialize new analytics charts.
+// overview.js refreshes the KPI block every 30s, but these analytics charts
+// and tables only ever loaded once, so the lower half of the page went stale
+// while the top half kept updating. Refresh them on the same cadence, and
+// pause while the tab is hidden so a backgrounded dashboard stops polling.
+const ANALYTICS_REFRESH_MS = 30000;
+let analyticsRefreshTimer = null;
+
+function loadAnalytics() {
     loadAnalyticsCharts();
     loadAnalyticsTables();
+}
+
+function startAnalyticsRefresh() {
+    stopAnalyticsRefresh();
+    analyticsRefreshTimer = setInterval(loadAnalytics, ANALYTICS_REFRESH_MS);
+}
+
+function stopAnalyticsRefresh() {
+    if (analyticsRefreshTimer) {
+        clearInterval(analyticsRefreshTimer);
+        analyticsRefreshTimer = null;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    loadAnalytics();
+    startAnalyticsRefresh();
+});
+
+document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+        stopAnalyticsRefresh();
+    } else {
+        loadAnalytics();
+        startAnalyticsRefresh();
+    }
 });
 
 // Store chart instances for resize handling
@@ -328,8 +361,13 @@ async function loadAnalyticsCharts() {
             });
         }
 
-        // Setup ResizeObserver for zoom responsiveness
-        setupChartResizeHandling();
+        // Setup ResizeObserver for zoom responsiveness.
+        // The function lives in overview.js and is named setupResponsiveCharts;
+        // calling the old name threw a ReferenceError that aborted this
+        // function every run (caught below, so it only showed in the console).
+        if (typeof setupResponsiveCharts === 'function') {
+            setupResponsiveCharts();
+        }
     } catch (error) {
         console.error('Analytics charts error:', error);
     }
