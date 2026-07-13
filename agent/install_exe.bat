@@ -555,7 +555,12 @@ icacls "%DATA_DIR%\config.json" /deny "Users:(DE)" /c /q >nul 2>&1
 icacls "%DATA_DIR%\agent_id" /deny "Users:(DE)" /c /q >nul 2>&1
 icacls "%DATA_DIR%\local_key" /deny "Users:(DE)" /c /q >nul 2>&1
 
-echo [OK] Data directory permissions set (Users: Modify, critical files protected)
+:: Token and signing files - SYSTEM and Administrators only (no user read/decrypt)
+for %%F in (token.dpapi token.enc token.salt .signing_key) do (
+    icacls "%DATA_DIR%\%%F" /inheritance:r /grant:r "SYSTEM:F" "Administrators:F" /c /q >nul 2>&1
+)
+
+echo [OK] Data directory permissions set (Users: Modify, critical files and tokens protected)
 
 :: ============================================================================
 :: STEP 12: Install Core Service (NSSM) with Stealth Name

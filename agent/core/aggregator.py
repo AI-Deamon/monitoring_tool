@@ -215,7 +215,14 @@ class HeartbeatAggregator:
                 # User was idle - end current app session if exists
                 if current_app and current_start:
                     try:
+                        # H-08 FIX: Parse with timezone awareness and normalize to UTC
                         ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        if ts.tzinfo is None:
+                            # Assume UTC if naive
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        else:
+                            # Convert to UTC if other timezone
+                            ts = ts.astimezone(timezone.utc)
                     except:
                         continue
                         
@@ -246,7 +253,12 @@ class HeartbeatAggregator:
             
             # Parse timestamp
             try:
+                # H-08 FIX: Parse with timezone awareness and normalize to UTC
                 ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                else:
+                    ts = ts.astimezone(timezone.utc)
             except:
                 continue
             

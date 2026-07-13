@@ -10,7 +10,7 @@ Features:
 - Security posture (AV installed, firewall status, Windows version)
 
 Collection Methods:
-- WMI (Windows Management Instrumentation) via PowerShell
+- CIM (Common Information Model) via PowerShell - modern replacement for WMI
 - Native Python libraries where possible
 - Graceful fallback on errors
 
@@ -85,7 +85,7 @@ class NetworkInfo:
     domain_name: str = ""
 
 
-@dataclass 
+@dataclass
 class SecurityInfo:
     """Security posture information"""
     os_name: str = ""
@@ -111,7 +111,7 @@ class AssetData:
     collected_at: str = ""
     collection_hash: str = ""
     agent_version: str = "2.0"
-    
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
         return {
@@ -128,18 +128,20 @@ class AssetData:
 class HardwareCollector:
     """
     Collects comprehensive hardware and system information.
-    
+
     Collection runs:
     - On agent registration (full collection)
     - Every 24 hours (change detection)
     - On-demand when requested
-    
-    Uses PowerShell/WMI for most data collection with Python fallbacks.
+
+    Uses PowerShell/CIM for most data collection with Python fallbacks.
+    Get-CimInstance is the modern replacement for deprecated Get-WmiObject,
+    using WS-Management instead of DCOM (required on Windows 11 25H2+).
     """
-    
+
     # Collection interval: 24 hours
     COLLECTION_INTERVAL = 24 * 60 * 60  # 86400 seconds
-    
+
     def __init__(self, config=None):
         self.config = config
         self.last_collection_time: Optional[datetime] = None
@@ -147,15 +149,15 @@ class HardwareCollector:
         self.last_network_hash: str = ""
         self._state_file = self._get_state_file()
         self._load_state()
-        
+
         logger.info("[HARDWARE] HardwareCollector initialized (24h hardware, instant network)")
-    
+
     def _get_state_file(self) -> Path:
         """Get path to state file for persistence"""
         if self.config and hasattr(self.config, 'state_dir'):
             return Path(self.config.state_dir) / "hardware_state.json"
         return Path.home() / ".sentineledge" / "hardware_state.json"
-    
+
     def _load_state(self):
         """Load previous collection state"""
         try:
@@ -170,7 +172,7 @@ class HardwareCollector:
                     logger.debug(f"[HARDWARE] Loaded state: hash={self.last_hash[:8] if self.last_hash else 'none'}, net={self.last_network_hash[:8] if self.last_network_hash else 'none'}")
         except Exception as e:
             logger.warning(f"[HARDWARE] Could not load state: {e}")
-    
+
     def _save_state(self, data_hash: str, network_hash: str = None):
         """Save collection state to disk"""
         try:
@@ -188,58 +190,58 @@ class HardwareCollector:
             logger.debug(f"[HARDWARE] State saved")
         except Exception as e:
             logger.error(f"[HARDWARE] Error saving state: {e}")
-    
+
     def should_collect(self) -> bool:
         """Check if collection is due"""
         if self.last_collection_time is None:
             return True
         elapsed = (datetime.now(timezone.utc) - self.last_collection_time).total_seconds()
         return elapsed >= self.COLLECTION_INTERVAL
-    
+
     def collect(self, force: bool = False) -> Optional[Dict]:
         """
         Collect all hardware/system information.
-        
+
         Args:
             force: Force collection regardless of interval
-            
+
         Returns:
             Dict with asset data, or None if no changes/not due
         """
         if not force and not self.should_collect():
             logger.debug("[HARDWARE] Collection not due yet")
             return None
-        
+
         logger.info("[HARDWARE] Starting hardware collection...")
-        
+
         asset_data = AssetData()
         asset_data.collected_at = datetime.now(timezone.utc).isoformat()
-        
+
         # Collect each category
         try:
             asset_data.identity = self._collect_identity()
             logger.debug("[HARDWARE] Identity collected")
         except Exception as e:
             logger.error(f"[HARDWARE] Identity collection failed: {e}")
-        
+
         try:
             asset_data.hardware = self._collect_hardware()
             logger.debug("[HARDWARE] Hardware specs collected")
         except Exception as e:
             logger.error(f"[HARDWARE] Hardware collection failed: {e}")
-        
+
         try:
             asset_data.network = self._collect_network()
             logger.debug("[HARDWARE] Network info collected")
         except Exception as e:
             logger.error(f"[HARDWARE] Network collection failed: {e}")
-        
+
         try:
             asset_data.security = self._collect_security()
             logger.debug("[HARDWARE] Security info collected")
         except Exception as e:
             logger.error(f"[HARDWARE] Security collection failed: {e}")
-        
+
         # Compute hash for change detection
         data_dict = asset_data.to_dict()
         # Exclude timestamp from hash calculation
@@ -247,30 +249,52 @@ class HardwareCollector:
         current_hash = hashlib.sha256(
             json.dumps(hash_data, sort_keys=True).encode()
         ).hexdigest()[:16]
-        
+
         asset_data.collection_hash = current_hash
-        
+
         # Check for changes
         if current_hash == self.last_hash and not force:
             logger.info("[HARDWARE] No changes detected")
             self.last_collection_time = datetime.now(timezone.utc)
             return None
-        
-        # Save state and return data
-        self._save_state(current_hash)
+
+        # Save state and return data.
+        # Also compute and persist the network hash so that
+        # collect_network_partial() (called every 5 min) sees an up-to-date
+        # baseline after agent restarts.  Without this, last_network_hash would
+        # stay stale and every first network check would look like a "change".
+        network = asset_data.network
+        network_hash_data = {
+            'all_macs': sorted(network.all_macs),
+            'all_ips': sorted(network.all_ips),
+            'dns_servers': sorted(network.dns_servers),
+            'domain_joined': network.domain_joined,
+            'domain_name': network.domain_name,
+        }
+        current_network_hash = hashlib.sha256(
+            json.dumps(network_hash_data, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        self.last_network_hash = current_network_hash
+        self._save_state(current_hash, current_network_hash)
         self.last_hash = current_hash
         self.last_collection_time = datetime.now(timezone.utc)
-        
-        logger.info(f"[HARDWARE] Collection complete (hash: {current_hash})")
+
+        logger.info(
+            f"[HARDWARE] Collection complete "
+            f"(hash: {current_hash}, net: {current_network_hash})"
+        )
         return asset_data.to_dict()
-    
+
     def _run_powershell(self, script: str, timeout: int = 30) -> Optional[str]:
         """Run PowerShell command and return output"""
         try:
+            # Force UTF-8 output to prevent JSON corruption from down-converted smart quotes
+            utf8_script = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {script}"
+            
             # Use CREATE_NO_WINDOW for robust background execution
             result = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive",
-                 "-ExecutionPolicy", "Bypass", "-Command", script],
+                 "-ExecutionPolicy", "Bypass", "-Command", utf8_script],
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
@@ -278,14 +302,14 @@ class HardwareCollector:
                 timeout=timeout,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
-            
+
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
                 stderr_preview = result.stderr[:100] if result.stderr else "No stderr"
                 logger.debug(f"[HARDWARE] PowerShell execution failed (code {result.returncode}): {stderr_preview}")
                 return None
-                
+
         except subprocess.TimeoutExpired:
             logger.warning(f"[HARDWARE] PowerShell timeout ({timeout}s)")
             return None
@@ -308,20 +332,21 @@ class HardwareCollector:
         if not isinstance(value, list):
             value = [value]
         return [str(item).strip() for item in value if item not in (None, "")]
-    
+
     def _collect_identity(self) -> AssetIdentity:
         """Collect system identity information"""
         identity = AssetIdentity()
-        
+
         # Hostname (Python fallback)
         identity.hostname = socket.gethostname()
-        
-        # System info via WMI
+
+        # System info via CIM (modern replacement for deprecated Get-WmiObject)
         script = '''
-        $cs = Get-WmiObject Win32_ComputerSystem | Select-Object Manufacturer, Model, Domain, PartOfDomain, Workgroup
-        $bios = Get-WmiObject Win32_BIOS | Select-Object SerialNumber, SMBIOSBIOSVersion
-        $csproduct = Get-WmiObject Win32_ComputerSystemProduct | Select-Object UUID, IdentifyingNumber
-        
+        $ErrorActionPreference = 'SilentlyContinue'
+        $cs = Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer, Model, Domain, PartOfDomain, Workgroup
+        $bios = Get-CimInstance Win32_BIOS | Select-Object SerialNumber, SMBIOSBIOSVersion
+        $csproduct = Get-CimInstance Win32_ComputerSystemProduct | Select-Object UUID, IdentifyingNumber
+
         @{
             Manufacturer = $cs.Manufacturer
             Model = $cs.Model
@@ -334,7 +359,7 @@ class HardwareCollector:
             AssetTag = $csproduct.IdentifyingNumber
         } | ConvertTo-Json
         '''
-        
+
         output = self._run_powershell(script)
         if output:
             try:
@@ -349,44 +374,73 @@ class HardwareCollector:
                 identity.workgroup = data.get('Workgroup', '') or ''
             except json.JSONDecodeError:
                 logger.debug("[HARDWARE] Failed to parse identity JSON")
-        
-        # Fallback for UUID if WMI failed
+
+        # Fallback for UUID if CIM failed
         if not identity.system_uuid:
             try:
                 identity.system_uuid = str(uuid.getnode())
             except:
                 pass
-        
+
         return identity
-    
+
     def _collect_hardware(self) -> HardwareSpecs:
         """Collect hardware specifications"""
         hardware = HardwareSpecs()
-        
+
         script = '''
         $ProgressPreference = 'SilentlyContinue'
-        
-        # CPU
-        $cpu = Get-WmiObject Win32_Processor | Select-Object -First 1
-        
+        $ErrorActionPreference = 'SilentlyContinue'
+
+        # CPU - use Get-CimInstance (modern, replaces deprecated Get-WmiObject)
+        $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+
         # RAM
-        $ram = Get-WmiObject Win32_PhysicalMemory
-        $ramSlots = (Get-WmiObject Win32_PhysicalMemoryArray).MemoryDevices
-        
-        # GPU - Get ALL GPUs (not just first)
-        $gpus = Get-WmiObject Win32_VideoController | Where-Object { $_.AdapterRAM -gt 0 } | ForEach-Object {
-            @{
-                Name = $_.Name
-                MemoryGB = [math]::Round($_.AdapterRAM / 1GB, 2)
-            }
+        $ram = Get-CimInstance Win32_PhysicalMemory
+        $ramSlots = (Get-CimInstance Win32_PhysicalMemoryArray).MemoryDevices
+
+        # GPU - use Get-CimInstance (not deprecated Get-WmiObject).
+        # Do NOT filter on $_.Name - Intel Arc / integrated GPUs on Win11 25H2
+        # may return an empty Name on first query but valid Caption/Description.
+        # Let ALL objects through; resolve name with fallback chain in ForEach.
+        $gpuObjects = Get-CimInstance Win32_VideoController
+
+        # Fallback 1: try PnP device list if CIM query returns nothing
+        if (-not $gpuObjects) {
+            $gpuObjects = Get-CimInstance Win32_PnPEntity |
+                Where-Object { $_.PNPClass -eq "Display" }
         }
-        
-        # Disks
-        $disks = Get-WmiObject Win32_DiskDrive | Select-Object Model, Size, MediaType, InterfaceType
-        
-        # Motherboard
-        $mb = Get-WmiObject Win32_BaseBoard | Select-Object Manufacturer, Product
-        
+
+        # Fallback 2: legacy Get-WmiObject in case CIM/WinRM is unavailable
+        if (-not $gpuObjects) {
+            $gpuObjects = Get-WmiObject Win32_VideoController -ErrorAction SilentlyContinue
+        }
+
+        $gpus = @($gpuObjects | ForEach-Object {
+            # Resolve display name via fallback chain
+            $gpuName = if ($_.Name)        { $_.Name }
+                       elseif ($_.Caption)  { $_.Caption }
+                       elseif ($_.Description) { $_.Description }
+                       else                { "Unknown GPU" }
+
+            $memoryGb = 0
+            # AdapterRAM is a UINT32 and overflows at ~4 GB on some drivers.
+            # Only trust values above 128 MB (134217728 bytes) to avoid noise.
+            if ($null -ne $_.AdapterRAM -and $_.AdapterRAM -gt 134217728) {
+                $memoryGb = [math]::Round($_.AdapterRAM / 1GB, 2)
+            }
+            @{
+                Name     = $gpuName.Trim()
+                MemoryGB = $memoryGb
+            }
+        })
+
+        # Disks - use Get-CimInstance
+        $disks = Get-CimInstance Win32_DiskDrive | Select-Object Model, Size, MediaType, InterfaceType
+
+        # Motherboard - use Get-CimInstance
+        $mb = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product
+
         @{
             CPU_Name = $cpu.Name
             CPU_Cores = $cpu.NumberOfCores
@@ -399,15 +453,15 @@ class HardwareCollector:
             Disks = $disks | ForEach-Object {
                 $diskName = $_.Model
                 $isVirtual = $false
-                
+
                 # Detect virtual disks
                 if ($diskName -match 'Virtual Disk|VMware|Virtual HD|Virtual DVD|CD-ROM|DVD|Mounted|ramdisk|ImDisk') {
                     $isVirtual = $true
-                    if ($diskName -notmatch '^\[VD\]') {
+                    if ($diskName -notmatch '^\\[VD\\]') {
                         $diskName = "[VD] " + $diskName
                     }
                 }
-                
+
                 @{
                     Name = $diskName
                     SizeGB = [math]::Round($_.Size / 1GB, 2)
@@ -419,7 +473,7 @@ class HardwareCollector:
             Motherboard = "$($mb.Manufacturer) $($mb.Product)"
         } | ConvertTo-Json -Depth 3
         '''
-        
+
         output = self._run_powershell(script, timeout=45)
         if output:
             try:
@@ -428,27 +482,27 @@ class HardwareCollector:
                 hardware.cpu_cores = int(data.get('CPU_Cores', 0) or 0)
                 hardware.cpu_threads = int(data.get('CPU_Threads', 0) or 0)
                 hardware.cpu_speed_mhz = int(data.get('CPU_Speed', 0) or 0)
-                
+
                 ram_bytes = data.get('RAM_Total', 0) or 0
                 hardware.ram_total_gb = round(ram_bytes / (1024**3), 2)
                 hardware.ram_slots_used = int(data.get('RAM_SlotsUsed', 0) or 0)
                 hardware.ram_slots_total = int(data.get('RAM_SlotsTotal', 0) or 0)
-                
-                # Parse all GPUs
+
+                # Parse all GPUs - do NOT filter on name here (already resolved in PS)
                 gpus_data = data.get('GPUs', [])
                 if gpus_data:
                     if isinstance(gpus_data, dict):
                         gpus_data = [gpus_data]
                     hardware.gpus = [
                         GPUInfo(
-                            name=g.get('Name', 'Unknown').strip(),
+                            name=g.get('Name', 'Unknown GPU').strip(),
                             memory_gb=float(g.get('MemoryGB', 0) or 0)
                         )
-                        for g in gpus_data if g.get('Name')
+                        for g in gpus_data if g
                     ]
-                
+
                 hardware.motherboard = (data.get('Motherboard', '') or '').strip()
-                
+
                 # Parse disks
                 disks_data = data.get('Disks', [])
                 if disks_data:
@@ -465,8 +519,8 @@ class HardwareCollector:
                     ]
             except (json.JSONDecodeError, TypeError) as e:
                 logger.debug(f"[HARDWARE] Failed to parse hardware JSON: {e}")
-        
-        # Python fallback for basic info
+
+        # Python fallback for basic CPU info
         if not hardware.cpu_name:
             hardware.cpu_name = platform.processor()
         if hardware.cpu_cores == 0:
@@ -474,26 +528,27 @@ class HardwareCollector:
                 hardware.cpu_cores = os.cpu_count() or 1
             except:
                 pass
-        
+
         return hardware
-    
+
     def _collect_network(self) -> NetworkInfo:
         """Collect network configuration"""
         network = NetworkInfo()
-        
+
         script = '''
         $ProgressPreference = 'SilentlyContinue'
-        
-        # Get active network adapters
-        $adapters = Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
-        
+        $ErrorActionPreference = 'SilentlyContinue'
+
+        # Get active network adapters - use Get-CimInstance (modern)
+        $adapters = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
+
         # Get computer system for domain info
-        $cs = Get-WmiObject Win32_ComputerSystem
-        
+        $cs = Get-CimInstance Win32_ComputerSystem
+
         $macs = @()
         $ips = @()
         $dns = @()
-        
+
         foreach ($adapter in $adapters) {
             if ($adapter.MACAddress) { $macs += $adapter.MACAddress }
             if ($adapter.IPAddress) { $ips += $adapter.IPAddress }
@@ -503,7 +558,7 @@ class HardwareCollector:
         $ipv4 = @($ips | Where-Object { $_ -and $_ -notmatch ':' } | Select-Object -Unique)
         $uniqueMacs = @($macs | Where-Object { $_ } | Select-Object -Unique)
         $uniqueDns = @($dns | Where-Object { $_ } | Select-Object -Unique)
-        
+
         @{
             PrimaryMAC = if ($uniqueMacs.Count -gt 0) { $uniqueMacs[0] } else { "" }
             PrimaryIP = if ($ipv4.Count -gt 0) { $ipv4[0] } else { "" }
@@ -514,7 +569,7 @@ class HardwareCollector:
             DomainName = if ($cs.PartOfDomain) { $cs.Domain } else { "" }
         } | ConvertTo-Json -Depth 2
         '''
-        
+
         output = self._run_powershell(script)
         if output:
             try:
@@ -528,53 +583,53 @@ class HardwareCollector:
                 network.domain_name = self._normalize_powershell_scalar(data.get('DomainName'))
             except json.JSONDecodeError:
                 logger.debug("[HARDWARE] Failed to parse network JSON")
-        
-        # Python fallback
-        if not network.primary_ip:
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                network.primary_ip = s.getsockname()[0]
-                s.close()
-            except:
-                network.primary_ip = "127.0.0.1"
-        
+
+        # Python fallback (always overrides PowerShell — socket connects to routing interface)
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            network.primary_ip = s.getsockname()[0]
+            s.close()
+        except:
+            network.primary_ip = network.primary_ip or "127.0.0.1"
+
         return network
-    
+
     def _collect_security(self) -> SecurityInfo:
         """Collect security posture information"""
         security = SecurityInfo()
-        
+
         script = '''
         $ProgressPreference = 'SilentlyContinue'
-        
-        # Antivirus (Windows Security Center)
+        $ErrorActionPreference = 'SilentlyContinue'
+
+        # Antivirus (Windows Security Center) - use Get-CimInstance
         $av = @()
         try {
-            $avProducts = Get-WmiObject -Namespace "root\\SecurityCenter2" -Class AntiVirusProduct -ErrorAction SilentlyContinue
+            $avProducts = Get-CimInstance -Namespace "root\\SecurityCenter2" -ClassName AntiVirusProduct -ErrorAction SilentlyContinue
             foreach ($product in $avProducts) {
                 $av += $product.displayName
             }
         } catch {}
-        
+
         # Firewall status
         $fwEnabled = $false
         try {
             $fw = Get-NetFirewallProfile -Profile Domain,Public,Private -ErrorAction SilentlyContinue
             $fwEnabled = ($fw | Where-Object { $_.Enabled -eq $true }).Count -gt 0
         } catch {}
-        
-        # Last boot time
-        $os = Get-WmiObject Win32_OperatingSystem
-        $lastBoot = $os.ConvertToDateTime($os.LastBootUpTime).ToString("o")
-        
+
+        # Last boot time - use Get-CimInstance (LastBootUpTime is already a DateTime)
+        $os = Get-CimInstance Win32_OperatingSystem
+        $lastBoot = $os.LastBootUpTime.ToString("o")
+
         # Windows Update status
         $wuEnabled = $false
         try {
             $wuService = Get-Service -Name wuauserv -ErrorAction SilentlyContinue
             $wuEnabled = $wuService.Status -eq 'Running'
         } catch {}
-        
+
         # BitLocker (simplified check)
         $bitlocker = "Unknown"
         try {
@@ -583,16 +638,16 @@ class HardwareCollector:
                 $bitlocker = $bl.ProtectionStatus.ToString()
             }
         } catch {}
-        
+
         # Extract Windows edition from Caption (e.g., "Microsoft Windows 11 Pro" -> "Pro")
         $osCaption = $os.Caption
         $osEdition = $osCaption -replace 'Microsoft Windows \\d+ ' -replace 'Microsoft Windows ', ''
-        
+
         # Get SKU number for precise identification
         $osSku = $os.OperatingSystemSKU
-        
+
         # Get Windows version from registry (DisplayVersion like "23H2", "24H2", "25H2")
-        $regPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+        $regPath = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion'
         $displayVersion = ""
         try {
             $reg = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
@@ -601,7 +656,7 @@ class HardwareCollector:
                 $displayVersion = $reg.ReleaseId
             }
         } catch {}
-        
+
         @{
             Antivirus = $av
             FirewallEnabled = $fwEnabled
@@ -617,7 +672,7 @@ class HardwareCollector:
             DisplayVersion = $displayVersion
         } | ConvertTo-Json
         '''
-        
+
         output = self._run_powershell(script, timeout=45)
         if output:
             try:
@@ -627,8 +682,8 @@ class HardwareCollector:
                 security.last_boot_time = data.get('LastBootTime', '') or ''
                 security.windows_update_enabled = bool(data.get('WindowsUpdateEnabled', False))
                 security.bitlocker_status = data.get('BitLockerStatus', 'Unknown') or 'Unknown'
-                
-                # OS info from WMI (more accurate than platform module)
+
+                # OS info from CIM (more accurate than platform module)
                 security.os_name = data.get('OSCaption') or security.os_name
                 # Use DisplayVersion from registry (e.g., "25H2") instead of raw build number
                 display_ver = data.get('DisplayVersion') or ''
@@ -638,7 +693,7 @@ class HardwareCollector:
                     security.os_version = data.get('OSVersion') or security.os_version
                 security.os_build = str(data.get('OSBuild') or security.os_build)
                 security.os_architecture = data.get('OSArchitecture') or security.os_architecture
-                
+
                 # Windows edition and SKU for EOL matching
                 if data.get('OSEdition'):
                     security.os_edition = data['OSEdition']
@@ -649,85 +704,85 @@ class HardwareCollector:
                         security.os_sku = 0
             except json.JSONDecodeError:
                 logger.debug("[HARDWARE] Failed to parse security JSON")
-        
+
         return security
-    
+
     def get_summary(self) -> Dict:
         """Get a brief summary of collected data (for logging/heartbeat)"""
         if not self.last_hash:
             return {'status': 'not_collected'}
-        
+
         return {
             'status': 'collected',
             'hash': self.last_hash,
             'network_hash': self.last_network_hash,
             'last_collection': self.last_collection_time.isoformat() if self.last_collection_time else None
         }
-    
+
     def check_network_changed(self) -> bool:
         """
         Check if network adapters have changed since last collection.
         Call this periodically or on network event to detect changes.
-        
+
         Returns:
             True if network has changed, False otherwise
         """
         network = self._collect_network()
-        
-        # Create hash from network data only
+
+        # Create hash from network data only (sorted lists for order-independence)
         network_hash_data = {
-            'all_macs': network.all_macs,
-            'all_ips': network.all_ips,
-            'dns_servers': network.dns_servers,
+            'all_macs': sorted(network.all_macs),
+            'all_ips': sorted(network.all_ips),
+            'dns_servers': sorted(network.dns_servers),
             'domain_joined': network.domain_joined,
             'domain_name': network.domain_name
         }
         current_network_hash = hashlib.sha256(
             json.dumps(network_hash_data, sort_keys=True).encode()
         ).hexdigest()[:16]
-        
+
         changed = current_network_hash != self.last_network_hash
-        
+
         if changed:
             logger.info(f"[HARDWARE] Network changed: {self.last_network_hash[:8] if self.last_network_hash else 'none'} -> {current_network_hash}")
         else:
             logger.debug(f"[HARDWARE] Network unchanged")
-        
+
         return changed
-    
+
     def collect_network_partial(self) -> Optional[Dict]:
         """
         Collect and send ONLY network data when change is detected.
         This is lightweight and can be called on network events.
-        
+
         Returns:
             Dict with network data, or None if no changes
         """
         network = self._collect_network()
-        
-        # Create hash from network data only
+
+        # Create hash from network data only (sorted lists for order-independence)
         network_hash_data = {
-            'all_macs': network.all_macs,
-            'all_ips': network.all_ips,
-            'dns_servers': network.dns_servers,
+            'all_macs': sorted(network.all_macs),
+            'all_ips': sorted(network.all_ips),
+            'dns_servers': sorted(network.dns_servers),
             'domain_joined': network.domain_joined,
             'domain_name': network.domain_name
         }
         current_network_hash = hashlib.sha256(
             json.dumps(network_hash_data, sort_keys=True).encode()
         ).hexdigest()[:16]
-        
+
         # Check for actual change
         if current_network_hash == self.last_network_hash:
             logger.debug("[HARDWARE] Network unchanged, skipping partial upload")
             return None
-        
+
         # Update state
         self.last_network_hash = current_network_hash
         self._save_state(self.last_hash, current_network_hash)
-        
+
         logger.info(f"[HARDWARE] Network partial collected: {current_network_hash}")
-        
+
         return {
             'agent_id': getattr(self.config, 'agent_id', '') if self.config else '',
             'network': asdict(network),
@@ -735,7 +790,7 @@ class HardwareCollector:
             'collection_hash': current_network_hash,
             'update_type': 'network_partial'
         }
-    
+
     def get_network_state(self) -> Dict:
         """Get current network state info for external monitoring"""
         return {

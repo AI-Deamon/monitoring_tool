@@ -257,13 +257,6 @@ class HelperMonitor:
 
         elapsed = (now - self.last_heartbeat_time).total_seconds()
 
-        # If helper was recently restarted, apply grace period even if
-        # a previous heartbeat was received before the restart.
-        if self.helper_startup_time:
-            grace_elapsed = (now - self.helper_startup_time).total_seconds()
-            if grace_elapsed < self.startup_grace_seconds:
-                return True
-
         if elapsed > self.heartbeat_timeout_seconds:
             within_grace = (
                 elapsed

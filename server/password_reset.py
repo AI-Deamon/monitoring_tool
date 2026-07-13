@@ -97,7 +97,10 @@ class PasswordResetService:
             
         # Update password
         user.set_password(new_password)
-        
+        # Invalidate any existing sessions - a reset must not leave a
+        # previously-hijacked session valid (login_required checks session_version).
+        user.session_version = (user.session_version or 1) + 1
+
         # Atomically mark token as used to prevent race conditions
         token_hash_val = cls._hash_token(token)
         result = db.session.execute(

@@ -9,8 +9,9 @@ import json
 import math
 from datetime import datetime, timezone, timedelta
 
-# IST Timezone for Asia/Kolkata
-IST = timezone(timedelta(hours=5, minutes=30))
+# H-04 FIX: Force UTC for all timestamps (server expects UTC)
+# IST rendering only at display layer, not in telemetry transport
+UTC = timezone.utc
 from pathlib import Path
 from typing import Dict, List, Optional
 import logging
@@ -104,11 +105,11 @@ class DataCollector:
             self._last_foreground_app = None
 
             # Enhanced: Session tracking
-            self._session_start = datetime.now(IST)
+            self._session_start = datetime.now(UTC)
             self._heartbeat_count = 0
 
             # Track current date for midnight detection
-            self._current_date = datetime.now(IST).date()
+            self._current_date = datetime.now(UTC).date()
 
             self.window_tracking_failures = 0
             logger.info("[INIT] [OK] Initialization complete")
@@ -213,7 +214,7 @@ class DataCollector:
         Returns:
             Heartbeat dict ready to send to core
         """
-        now = datetime.now(IST)
+        now = datetime.now(UTC)
         self.sequence_number += 1
         self._heartbeat_count += 1
 
@@ -329,8 +330,8 @@ class DataCollector:
                 is_idle=is_idle,
             )
 
-            # Track state for next cycle
-            self._last_idle_state = current_idle
+            # Track state for next cycle (self._last_idle_state is set once,
+            # unconditionally, at the end of this method - not duplicated here)
             self._last_foreground_app = foreground_app
 
         # ====================================================================
@@ -368,22 +369,36 @@ class DataCollector:
 
         # Get cumulative totals from StateDetector (ONLY source of truth)
         # StateDetector calls state_machine.tick() then state_machine.get_daily_totals()
+        totals = {"active_seconds": 0, "idle_seconds": 0, "locked_seconds": 0, "away_seconds": 0}
         if self.state_detector:
             # Check if we have final totals from midnight boundary (yesterday's final data)
             final_totals = self.state_detector._final_totals_for_upload
             if final_totals:
-                # Use yesterday's final totals instead of current (for proper day storage)
-                totals = final_totals
-                # Clear the flag after use
+                # Validate totals before using to prevent stale overflow data
+                total = (final_totals.get("active_seconds", 0) + 
+                         final_totals.get("idle_seconds", 0) + 
+                         final_totals.get("locked_seconds", 0) + 
+                         final_totals.get("away_seconds", 0))
+                if total > 86400:
+                    logger.warning(
+                        f"[COLLECTOR] Discarding stale final-day totals (total={total}s > 86400s)"
+                    )
+                    # Fall through to get current totals instead
+                    totals = self.state_detector.get_cumulative_totals()
+                else:
+                    # Use yesterday's final totals instead of current (for proper day storage)
+                    totals = final_totals
+                    final_day = getattr(
+                        self.state_detector, "_final_totals_day_for_upload", None
+                    )
+                    # Mark as final data so server stores in yesterday's date
+                    heartbeat["screentime"]["is_final_day"] = True
+                    if final_day:
+                        heartbeat["screentime"]["final_day_date"] = str(final_day)
+                
+                # Clear the flag (already sent or discarded)
                 self.state_detector._final_totals_for_upload = None
-                final_day = getattr(
-                    self.state_detector, "_final_totals_day_for_upload", None
-                )
                 self.state_detector._final_totals_day_for_upload = None
-                # Mark as final data so server stores in yesterday's date
-                heartbeat["screentime"]["is_final_day"] = True
-                if final_day:
-                    heartbeat["screentime"]["final_day_date"] = str(final_day)
                 # Persist cleared flags so restart cannot re-send stale final-day data.
                 try:
                     self.state_detector._persist_current_state()
@@ -468,7 +483,7 @@ class DataCollector:
             "agent_id": self.config.agent_id,
             "state": "idle",
             "duration_seconds": round(duration, 1),
-            "timestamp": datetime.now(IST).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         logger.info(f"[COLLECTOR] Dispatching clean idle event: {duration:.1f}s")
@@ -577,7 +592,7 @@ class DataCollector:
                     except Exception as e:
                         logger.error(f"[BUFFER] Failed to store inventory: {e}")
 
-                self.last_inventory_time = datetime.now(IST).isoformat()
+                self.last_inventory_time = datetime.now(UTC).isoformat()
                 self._save_state()
 
                 return inventory

@@ -542,7 +542,11 @@ async function loadHardware() {
     setText('hw-cpu', hw.cpu_name);
     setText('hw-cpu-cores', hw.cpu_cores ? `${hw.cpu_cores} cores / ${hw.cpu_threads || hw.cpu_cores} threads` : '-');
     setText('hw-ram', hw.ram_total_gb ? `${hw.ram_total_gb} GB` : '-');
-    setText('hw-gpu', hw.gpu_name);
+    if (hw.gpus && hw.gpus.length > 0) {
+        setText('hw-gpu', hw.gpus.map(g => g.name).join(', '));
+    } else {
+        setText('hw-gpu', '-');
+    }
     // Compute total disk from disks array
     const totalDisk = hw.disks && hw.disks.length > 0
         ? hw.disks.reduce((sum, d) => sum + (d.size_gb || 0), 0).toFixed(0)

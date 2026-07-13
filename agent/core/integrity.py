@@ -167,6 +167,15 @@ def verify_integrity(install_dir: Path, strict: bool = False) -> Tuple[bool, Lis
         if actual_hash != expected_hash:
             violations.append(f"MODIFIED: {file_path}")
     
+    # Detect files on disk that are not in the manifest (planted files)
+    on_disk = {
+        str(p.relative_to(install_dir))
+        for p in install_dir.rglob('*.pyc')
+        if '__pycache__' not in str(p)
+    }
+    for extra in sorted(on_disk - set(manifest.keys())):
+        violations.append(f"UNEXPECTED: {extra}")
+    
     # Report violations
     if violations:
         logger.critical("=" * 70)
@@ -178,10 +187,12 @@ def verify_integrity(install_dir: Path, strict: bool = False) -> Tuple[bool, Lis
         
         if strict:
             return False, violations
+        # Non-strict: log and continue per docstring contract
+        return True, violations
     else:
         logger.info(f"SEC-024: Integrity verified ({len(manifest)} files OK)")
     
-    return len(violations) == 0, violations
+    return True, violations
 
 
 def verify_integrity_or_exit(install_dir: Path):

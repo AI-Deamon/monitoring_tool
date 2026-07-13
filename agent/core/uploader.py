@@ -335,7 +335,7 @@ class ServerUploader:
         if self.config.secure_storage:
             token = self.config.secure_storage.load_token_securely(str(self.config.config_path))
             if token:
-                logger.debug(f"[TOKEN] Loaded from secure storage: {token[:10]}...")
+                logger.debug(f"[TOKEN] Loaded from secure storage: {token[:4]}***")
                 self.config.api_token = token
                 return token
             else:
@@ -343,7 +343,7 @@ class ServerUploader:
         
         # Try config attribute as fallback
         if self.config.api_token and self.config.api_token != '':
-            logger.debug(f"[TOKEN] Using token from config attribute: {self.config.api_token[:10]}...")
+            logger.debug(f"[TOKEN] Using token from config attribute: {self.config.api_token[:4]}***")
             return self.config.api_token
         
         # Absolutely no token available
@@ -378,7 +378,7 @@ class ServerUploader:
             "Content-Type": "application/json",
         }
         
-        logger.debug(f"[AUTH] Created headers with Bearer token: {token[:20]}...")
+        logger.debug(f"[AUTH] Created headers with Bearer token: {token[:4]}***")
         logger.debug(f"[AUTH] Agent ID: {self.config.agent_id}")
         return headers
     
@@ -473,7 +473,7 @@ class ServerUploader:
                 return False
             
             logger.info("=" * 70)
-            logger.info(f"[REGISTER] SUCCESS: Received API key: {api_key[:20]}...")
+            logger.info(f"[REGISTER] SUCCESS: Received API key: {api_key[:4]}***")
             logger.info("=" * 70)
             
             # Verify agent data in response
@@ -521,7 +521,7 @@ class ServerUploader:
                 
                 if not loaded_key or loaded_key != api_key:
                     logger.error("[REGISTER] API key verification FAILED after storage")
-                    logger.error(f"[REGISTER] Stored: {api_key[:10]}..., Loaded: {loaded_key[:10] if loaded_key else 'None'}...")
+                    logger.error(f"[REGISTER] Stored: {api_key[:4]}***, Loaded: {loaded_key[:4] if loaded_key else 'None'}***")
                     self.registration_attempts += 1
                     self.last_registration_failure = time.time()
                     return False
@@ -660,13 +660,6 @@ class ServerUploader:
                 context = None
                 if url.startswith('https://') and not self.config.allow_insecure_http:
                     context = ssl.create_default_context()
-                    
-                    # Custom certificate verification
-                    def verify_cert(conn, url, cert, errnum, errdepth, retcode):
-                        if retcode == 0:  # Pre-verification
-                            return self._validate_certificate(conn)
-                        return retcode
-                    
                     context.verify_mode = ssl.CERT_REQUIRED
                     
                     # mTLS support: Load client cert if enabled
@@ -686,7 +679,13 @@ class ServerUploader:
                         except Exception as e:
                             logger.error(f"[SECURITY] Failed to load mTLS certificates: {e}")
                 
+                # H-07 FIX: Manual certificate validation after connection
                 with urllib.request.urlopen(req, timeout=timeout, context=context) as response:
+                    # Validate certificate pinning if HTTPS
+                    if url.startswith('https://') and context:
+                        sock = response.fp.raw._sock
+                        if hasattr(sock, 'getpeercert'):
+                            self._validate_certificate(sock)
                     response_data = response.read().decode('utf-8')
                     if response_data:
                         return json.loads(response_data)
@@ -966,13 +965,13 @@ class ServerUploader:
                 continue
             
             if self._is_ack_success(response):
+                # Mark immediately per-item to avoid re-delivery on crash
+                self.buffer.mark_events_uploaded([event['id']])
                 uploaded_ids.append(event['id'])
             else:
                 self.buffer.record_upload_ack_failure()
         
-        # Mark as uploaded
         if uploaded_ids:
-            self.buffer.mark_events_uploaded(uploaded_ids)
             logger.info(f"[OK] Uploaded {len(uploaded_ids)} merged events")
     
     def _upload_domains(self):
@@ -1014,6 +1013,7 @@ class ServerUploader:
             return
         
         uploaded_ids = []
+        total_duration = 0
         
         # Send each session individually to domain-switch endpoint
         # (which stores in domain_sessions and aggregates to domain_usage)
@@ -1032,18 +1032,14 @@ class ServerUploader:
             response = self._make_request('/telemetry/domain-switch', payload)
             
             if self._is_ack_success(response):
+                # Mark immediately per-item to avoid re-delivery on crash
+                self.buffer.mark_domain_sessions_uploaded([session['id']])
                 uploaded_ids.append(session['id'])
+                total_duration += session.get('duration_seconds', 0)
             else:
                 self.buffer.record_upload_ack_failure()
         
-        # Mark uploaded sessions
         if uploaded_ids:
-            self.buffer.mark_domain_sessions_uploaded(uploaded_ids)
-            
-            total_duration = sum(
-                s.get('duration_seconds', 0) for s in sessions 
-                if s['id'] in uploaded_ids
-            )
             logger.info(f"[OK] Uploaded {len(uploaded_ids)} domain sessions ({total_duration:.0f}s)")
         else:
             logger.debug("Failed to upload domain sessions (server offline?)")
@@ -1144,6 +1140,8 @@ class ServerUploader:
                 response = self._make_request('/extended-inventory', data)
                 
                 if self._is_ack_success(response):
+                    # Mark immediately per-item to avoid re-delivery on crash
+                    self.buffer.mark_extended_inventory_uploaded([snapshot['id']])
                     uploaded_ids.append(snapshot['id'])
                     counts = {
                         k: len(v) for k, v in data.items()
@@ -1156,7 +1154,6 @@ class ServerUploader:
                     break  # Stop on first failure
             
             if uploaded_ids:
-                self.buffer.mark_extended_inventory_uploaded(uploaded_ids)
                 logger.info(f"[EXTENDED] Marked {len(uploaded_ids)} snapshots as uploaded")
         
         except Exception as e:
@@ -1179,6 +1176,8 @@ class ServerUploader:
                 response = self._make_request('/eol-data', data)
                 
                 if self._is_ack_success(response):
+                    # Mark immediately per-item to avoid re-delivery on crash
+                    self.buffer.mark_eol_data_uploaded([snapshot['id']])
                     uploaded_ids.append(snapshot['id'])
                     # Count number of items in each EOL data category
                     counts = {}
@@ -1199,7 +1198,6 @@ class ServerUploader:
                     break
             
             if uploaded_ids:
-                self.buffer.mark_eol_data_uploaded(uploaded_ids)
                 logger.info(f"[EOL] Marked {len(uploaded_ids)} snapshots as uploaded")
         
         except Exception as e:
@@ -1222,6 +1220,8 @@ class ServerUploader:
                 response = self._make_request('/security-indicators', data)
                 
                 if self._is_ack_success(response):
+                    # Mark immediately per-item to avoid re-delivery on crash
+                    self.buffer.mark_security_indicators_uploaded([snapshot['id']])
                     uploaded_ids.append(snapshot['id'])
                     total = len(data.get('indicators', []))
                     logger.info(f"[OK] Uploaded security indicators: {total} indicators")
@@ -1231,7 +1231,6 @@ class ServerUploader:
                     break
             
             if uploaded_ids:
-                self.buffer.mark_security_indicators_uploaded(uploaded_ids)
                 logger.info(f"[SECURITY] Marked {len(uploaded_ids)} snapshots as uploaded")
         
         except Exception as e:
@@ -1254,6 +1253,8 @@ class ServerUploader:
                 response = self._make_request('/system-visibility', data)
 
                 if self._is_ack_success(response):
+                    # Mark immediately per-item to avoid re-delivery on crash
+                    self.buffer.mark_system_visibility_uploaded([snapshot['id']])
                     uploaded_ids.append(snapshot['id'])
                     counts = data.get('counts', {})
                     logger.info(f"[OK] Uploaded system visibility snapshot: {counts}")
@@ -1263,7 +1264,6 @@ class ServerUploader:
                     break
 
             if uploaded_ids:
-                self.buffer.mark_system_visibility_uploaded(uploaded_ids)
                 logger.info(f"[VISIBILITY] Marked {len(uploaded_ids)} snapshots as uploaded")
 
         except Exception as e:

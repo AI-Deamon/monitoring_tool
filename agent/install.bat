@@ -506,6 +506,11 @@ icacls "%INSTALL_DIR%" /grant:r "Users:(OI)(CI)RX" /c /q >nul 2>&1
 icacls "%DATA_DIR%" /grant:r "SYSTEM:(OI)(CI)F" /c /q >nul 2>&1
 icacls "%DATA_DIR%" /grant:r "Users:(OI)(CI)M" /c /q >nul 2>&1
 
+:: Token and signing files - SYSTEM and Administrators only (no user read/decrypt)
+for %%F in (token.dpapi token.enc token.salt .signing_key) do (
+    icacls "%DATA_DIR%\%%F" /inheritance:r /grant:r "SYSTEM:F" "Administrators:F" /c /q >nul 2>&1
+)
+
 echo [OK] Permissions set
 
 :: ============================================================================

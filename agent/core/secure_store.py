@@ -88,15 +88,15 @@ def dpapi_encrypt(data: bytes) -> bytes:
     blob_in = DATA_BLOB(len(data), buffer_in)
     blob_out = DATA_BLOB()
     
-    # CRYPTPROTECT_LOCAL_MACHINE flag (0x4) = machine-level encryption
-    # Any process on this machine can decrypt
+    # Bind DPAPI to the calling process's user store (0x0) instead of
+    # CRYPTPROTECT_LOCAL_MACHINE (0x4) which allows any local user to decrypt.
     if crypt32.CryptProtectData(
         ctypes.byref(blob_in),
         None,  # Description
         None,  # Optional entropy
         None,  # Reserved
         None,  # Prompt struct
-        0x4,   # CRYPTPROTECT_LOCAL_MACHINE
+        0x0,   # CRYPTPROTECT_UI_FORBIDDEN — user-store scope
         ctypes.byref(blob_out)
     ):
         try:
@@ -130,7 +130,7 @@ def dpapi_decrypt(encrypted: bytes) -> bytes:
         None,
         None,
         None,
-        0x4,  # CRYPTPROTECT_LOCAL_MACHINE
+        0x0,  # CRYPTPROTECT_UI_FORBIDDEN — user-store scope (matches encrypt)
         ctypes.byref(blob_out)
     ):
         try:

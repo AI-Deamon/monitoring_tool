@@ -27,7 +27,12 @@ import server_models
 
 # Helper function to convert UTC to IST
 def utc_to_ist(utc_dt):
-    """Convert UTC datetime to IST (UTC+5:30)"""
+    """
+    Convert UTC datetime to IST (UTC+5:30) for display.
+    
+    Note: After H-10 fix, database stores all timestamps in UTC.
+    This function converts them to IST for user-facing displays.
+    """
     if not utc_dt:
         return None
     # If datetime is naive, assume it's UTC
@@ -36,6 +41,29 @@ def utc_to_ist(utc_dt):
     # Convert to IST (UTC+5:30)
     ist_dt = utc_dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
     return ist_dt.isoformat()
+
+
+def _format_ist_timestamp(dt):
+    """
+    Format timestamp for frontend display with IST timezone.
+    Handles both datetime objects and strings from database.
+    """
+    if not dt:
+        return None
+    
+    # If it's a string, parse it first
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+    
+    # If naive, assume UTC (database stores in UTC after H-10)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    
+    # Convert to IST
+    ist_dt = dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    
+    # Return in ISO format with proper IST offset
+    return ist_dt.strftime('%Y-%m-%dT%H:%M:%S+05:30')
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -806,13 +834,15 @@ def get_single_asset_data(agent_id):
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
+        from datetime import timedelta
+        five_min_ago = datetime.utcnow() - timedelta(minutes=5)
+
         # Join Agent and AssetInfo to get all details
         query = (
             db.session.query(
                 server_models.Agent,
                 server_models.AssetInfo,
                 server_models.AgentCurrentStatus.username,
-                server_models.AgentCurrentStatus.is_online,
             )
             .join(
                 server_models.AssetInfo,
@@ -835,7 +865,9 @@ def get_single_asset_data(agent_id):
         if not result:
             return jsonify({"error": "Asset not found"}), 404
 
-        agent, info, username, is_online = result
+        agent, info, username = result
+        # Compute is_online based on last_seen recency (matching the rest of the file)
+        is_online = bool(agent.last_seen and agent.last_seen >= five_min_ago)
 
         # Comprehensive data structure
         data = {
@@ -2221,7 +2253,7 @@ def api_agent_full_report(agent_id):
         )
 
         first_seen_today = (
-            first_session_today.start_time.isoformat() if first_session_today else None
+            utc_to_ist(first_session_today.start_time) if first_session_today else None
         )
 
         # Find last activity today (latest app session)
@@ -2239,9 +2271,9 @@ def api_agent_full_report(agent_id):
         total_tracked_seconds = 0
         if last_session_today:
             if last_session_today.end_time:
-                last_seen_today = last_session_today.end_time.isoformat()
+                last_seen_today = utc_to_ist(last_session_today.end_time)
             else:
-                last_seen_today = last_session_today.start_time.isoformat()
+                last_seen_today = utc_to_ist(last_session_today.start_time)
 
         # Calculate total tracked time (last - first)
         if first_session_today and last_session_today:
@@ -2620,8 +2652,8 @@ def api_agent_full_report(agent_id):
                 "state_events": [
                     {
                         "state": span.state,
-                        "start_time": str(span.start_time) + '+05:30' if isinstance(span.start_time, str) else span.start_time.strftime('%Y-%m-%dT%H:%M:%S+05:30'),
-                        "end_time": str(span.end_time) + '+05:30' if isinstance(span.end_time, str) else span.end_time.strftime('%Y-%m-%dT%H:%M:%S+05:30'),
+                        "start_time": _format_ist_timestamp(span.start_time),
+                        "end_time": _format_ist_timestamp(span.end_time),
                         "duration_seconds": span.duration_seconds,
                     }
                     for span in db.session.execute(
@@ -2687,7 +2719,11 @@ def api_agent_activity_timeline(agent_id):
         timeline = {}  # {hour: {app: duration}}
 
         for sess in sessions:
-            hour = sess.start_time.hour
+            # Convert UTC timestamp to IST for display
+            ist_time = sess.start_time.replace(tzinfo=timezone.utc).astimezone(
+                timezone(timedelta(hours=5, minutes=30))
+            )
+            hour = ist_time.hour
             if hour not in timeline:
                 timeline[hour] = {}
 
@@ -3717,7 +3753,11 @@ def api_idle_analysis():
 
         for session in sessions:
             if session.start_time:
-                hour = session.start_time.hour
+                # Convert UTC to IST for display
+                ist_time = session.start_time.replace(tzinfo=timezone.utc).astimezone(
+                    timezone(timedelta(hours=5, minutes=30))
+                )
+                hour = ist_time.hour
                 duration = session.duration_seconds or 0
                 state = getattr(session, "system_state", "active") or "active"
 

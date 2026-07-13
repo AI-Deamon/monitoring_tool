@@ -24,7 +24,7 @@ import tempfile
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional, Tuple
 from urllib.parse import urlparse
 import logging
@@ -371,15 +371,18 @@ class DomainSession:
         self.end_time = datetime.now(timezone.utc)
         duration = (self.end_time - self.start_time).total_seconds()
         
-        # Fix #8: Cap maximum domain session duration to 24 hours (catches stuck sessions)
+        # H-05 FIX: Cap maximum domain session duration to 24 hours (catches stuck sessions)
+        # Return capped duration WITHOUT mutating self.end_time (avoid side effects)
         if duration > 86400:  # 24 hours in seconds
             logger.warning(
                 f"DOMAIN: Session exceeded 24h: {self.domain}, "
-                f"duration={duration/3600:.1f}h, capping to 24h"
+                f"duration={duration/3600:.1f}h, capping to 24h for reporting"
             )
             duration = 86400
-            from datetime import timedelta
-            self.end_time = self.start_time + timedelta(seconds=86400)
+            # Use capped end_time only for the return dict, don't modify instance state
+            capped_end_time = self.start_time + timedelta(seconds=86400)
+        else:
+            capped_end_time = self.end_time
         
         return {
             'domain': self.domain,
@@ -389,7 +392,7 @@ class DomainSession:
             'raw_title': self.raw_window_title,  # Raw window title for server-side filtering
             'raw_url': self.url,                 # CDP URL if available
             'start': self.start_time.isoformat(),
-            'end': self.end_time.isoformat(),
+            'end': capped_end_time.isoformat(),
             'duration_seconds': round(duration, 2)
         }
     
@@ -412,7 +415,15 @@ class DomainSession:
             url=data.get('url'),
             title=data.get('title')
         )
-        session.start_time = datetime.fromisoformat(data.get('start', '').replace('Z', '+00:00'))
+        # M-10 FIX: Safe timestamp parsing with fallback
+        start_str = data.get('start', '')
+        if start_str:
+            try:
+                session.start_time = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+            except (ValueError, AttributeError):
+                session.start_time = datetime.now(timezone.utc)
+        else:
+            session.start_time = datetime.now(timezone.utc)
         return session
 
 
@@ -562,7 +573,9 @@ class CDPClient:
 
         except urllib.error.URLError:
             return []
-        except Exception:
+        except Exception as e:
+            # M-06 FIX: Log exception instead of silently swallowing
+            logger.debug(f"Error fetching Chrome tabs: {e}")
             return []
     
     def _try_cdp_port(self, port: int) -> Optional[Dict]:
@@ -646,7 +659,6 @@ class CDPClient:
             return None
         except Exception as e:
             logger.debug(f"[CDP] Port {port} error: {e}")
-            return None
             return None
     
     def _extract_domain(self, url: str) -> Optional[str]:

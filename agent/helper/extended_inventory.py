@@ -224,13 +224,21 @@ class ExtendedInventoryCollector:
                     if ($vi.CompanyName) { $publisher = $vi.CompanyName }
                 } catch {}
             } elseif ($ext -in @('.cmd', '.bat', '.ps1')) {
-                # For script wrappers, try to get version via --version
-                try {
-                    $verOutput = & $FilePath --version 2>&1 | Select-Object -First 1
-                    if ($verOutput -match '(\d+\.\d+[\d.]*)') {
-                        $version = $Matches[1]
-                    }
-                } catch {}
+                # Only execute scripts from a known allow-list to prevent
+                # arbitrary code execution from user-writable directories.
+                $knownToolBaseNames = @('opencode','claude','cursor','aider','continue',
+                    'gh','git','docker','kubectl','terraform','ansible',
+                    'python','pip','node','npm','yarn','pnpm','go','rustc','cargo',
+                    'dotnet','az','aws','gcloud','code','code-insiders',
+                    'winget','choco','scoop')
+                if ($baseName.ToLower() -in $knownToolBaseNames) {
+                    try {
+                        $verOutput = & $FilePath --version 2>&1 | Select-Object -First 1
+                        if ($verOutput -match '(\d+\.\d+[\d.]*)') {
+                            $version = $Matches[1]
+                        }
+                    } catch {}
+                }
             }
             
             return @{

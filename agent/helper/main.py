@@ -499,9 +499,24 @@ class SentinelHelper:
                         current_interval = 60  # 1 minute
 
                 # Heartbeat (idle + foreground app)
-                force_midnight_flush = bool(
-                    getattr(self.state_detector, "_final_totals_for_upload", None)
+                # Only force an early flush when the cached final-day totals are
+                # actually valid.  Stale/corrupted data (total > 86400s) must NOT
+                # trigger a burst — collector.py will discard it on the next regular
+                # heartbeat.  Forcing a flush with bad data just fills the log with
+                # REJECTED entries every 1s until the flag is cleared.
+                _pending_final = getattr(
+                    self.state_detector, "_final_totals_for_upload", None
                 )
+                if isinstance(_pending_final, dict):
+                    _pf_total = (
+                        _pending_final.get("active_seconds", 0)
+                        + _pending_final.get("idle_seconds", 0)
+                        + _pending_final.get("locked_seconds", 0)
+                        + _pending_final.get("away_seconds", 0)
+                    )
+                    force_midnight_flush = _pf_total <= 86400
+                else:
+                    force_midnight_flush = False
                 if force_midnight_flush or (now - last_heartbeat >= current_interval):
                     success = self._send_heartbeat()
                     last_heartbeat = now

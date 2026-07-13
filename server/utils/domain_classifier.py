@@ -4,6 +4,7 @@ Classifies domain sessions using rules + manual tags
 """
 
 import re
+import threading
 from typing import Optional, Dict, List
 from datetime import datetime
 import logging
@@ -19,6 +20,7 @@ class DomainClassifier:
         self._rules_cache = None
         self._cache_time = None
         self._cache_ttl = 300  # 5 minutes
+        self._cache_lock = threading.Lock()
 
     def classify(self, raw_title: str, raw_url: str = None) -> Dict:
         """
@@ -127,40 +129,43 @@ class DomainClassifier:
 
         now = datetime.now()
 
-        # Check cache
-        if (self._rules_cache and self._cache_time and 
-            (now - self._cache_time).total_seconds() < self._cache_ttl):
-            return self._rules_cache
+        # Check cache (lock guards both the staleness check and the refresh below,
+        # since this classifier is a shared singleton reached from concurrent
+        # Flask request threads).
+        with self._cache_lock:
+            if (self._rules_cache and self._cache_time and
+                    (now - self._cache_time).total_seconds() < self._cache_ttl):
+                return self._rules_cache
 
-        # Fetch from database
-        try:
-            result = self.db.session.execute(text('''
-                SELECT id, pattern, pattern_type, classified_as, action, 
-                       priority, is_active
-                FROM domain_classification_rules
-                WHERE is_active = TRUE
-                ORDER BY priority ASC, created_at ASC
-            '''))
+            # Fetch from database
+            try:
+                result = self.db.session.execute(text('''
+                    SELECT id, pattern, pattern_type, classified_as, action,
+                           priority, is_active
+                    FROM domain_classification_rules
+                    WHERE is_active = TRUE
+                    ORDER BY priority ASC, created_at ASC
+                '''))
 
-            rules = []
-            for row in result:
-                rules.append({
-                    'id': row[0],
-                    'pattern': row[1],
-                    'pattern_type': row[2],
-                    'classified_as': row[3],
-                    'action': row[4],
-                    'priority': row[5],
-                    'is_active': row[6]
-                })
+                rules = []
+                for row in result:
+                    rules.append({
+                        'id': row[0],
+                        'pattern': row[1],
+                        'pattern_type': row[2],
+                        'classified_as': row[3],
+                        'action': row[4],
+                        'priority': row[5],
+                        'is_active': row[6]
+                    })
 
-            # Update cache
-            self._rules_cache = rules
-            self._cache_time = now
+                # Update cache
+                self._rules_cache = rules
+                self._cache_time = now
 
-            return rules
-        except Exception as e:
-            logger.warning(f"[CLASSIFIER] Failed to fetch rules: {e}")
+                return rules
+            except Exception as e:
+                logger.warning(f"[CLASSIFIER] Failed to fetch rules: {e}")
             try:
                 # Rollback the failed transaction to allow future queries
                 self.db.session.rollback()

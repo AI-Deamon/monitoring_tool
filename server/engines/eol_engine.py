@@ -278,9 +278,41 @@ def sync_lifecycle_data(products=None):
             
         try:
             url = f'https://endoflife.date/api/{product_key}.json'
-            resp = requests.get(url, timeout=15)
-            resp.raise_for_status()
-            cycles = resp.json()
+            
+            # H-18 FIX: Retry with exponential backoff on rate limit (429)
+            max_retries = 3
+            retry_delay = 1  # Start with 1 second
+            
+            for attempt in range(max_retries):
+                try:
+                    resp = requests.get(url, timeout=15)
+                    
+                    # Handle rate limiting
+                    if resp.status_code == 429:
+                        if attempt < max_retries - 1:
+                            # Exponential backoff: 1s, 2s, 4s
+                            wait_time = retry_delay * (2 ** attempt)
+                            logger.warning(f"[EOL] Rate limited on '{product_key}', waiting {wait_time}s...")
+                            import time
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error(f"[EOL] Rate limit exceeded for '{product_key}' after {max_retries} attempts")
+                            results[product_key] = 'error: rate limit exceeded'
+                            break
+                    
+                    resp.raise_for_status()
+                    cycles = resp.json()
+                    break  # Success, exit retry loop
+                    
+                except requests.Timeout:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"[EOL] Timeout on '{product_key}', retrying...")
+                        continue
+                    raise
+            else:
+                # All retries exhausted without success
+                continue
             
             synced = 0
             for cycle_data in cycles:

@@ -173,9 +173,10 @@ def get_friendly_name(exe_name: str) -> str:
     # Try without .exe suffix
     if exe_lower.endswith('.exe'):
         base_name = exe_lower[:-4]
-        # Check if base name is in mapping
+        # Check if base name matches a known key (exact base or base with suffix like -cli)
         for key, value in APP_NAME_MAP.items():
-            if key.startswith(base_name):
+            key_base = key[:-4] if key.endswith('.exe') else key
+            if base_name == key_base or base_name.startswith(key_base + '-'):
                 return value
     
     # Fallback: Clean up the exe name

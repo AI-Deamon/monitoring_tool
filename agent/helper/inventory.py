@@ -15,6 +15,7 @@ import logging
 import math
 import re
 import time
+import threading
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -79,6 +80,7 @@ class InventoryTracker:
         self._timeout_cooldown_seconds: int = 30 * 60
         self._timeout_cooldown_until: float = 0.0
         self._is_suspended_check = None  # Set by main.py to check system suspend state
+        self._collect_lock = threading.Lock()
         
         # State file for persistence
         self._state_file = self._get_state_file()
@@ -770,99 +772,105 @@ $script:AllApps | ConvertTo-Json -Compress -Depth 10
         Returns:
             Dict with inventory data, or None if no changes
         """
-        if not force and not self.should_check():
+        if not self._collect_lock.acquire(blocking=False):
+            logger.warning("[INVENTORY] Collection already in progress, skipping overlapping call")
             return None
-        
-        logger.info("[INVENTORY] Collecting app inventory...")
-        
-        apps = self._collect_via_powershell()
-        if apps is None:
-            return None
-        
-        # Fix #6: Validate inventory scan completed successfully
-        if len(apps) < 5:  # Minimum threshold - even basic Windows has more apps
-            logger.error(
-                f"INVENTORY: Scan incomplete, only {len(apps)} apps found. "
-                f"Expected at least 5. Skipping this collection."
-            )
-            return None
-
-        logger.info(f"INVENTORY: Collected {len(apps)} applications successfully")
-        
-        # Build dict and compute hash
-        apps_dict = {app.name: app for app in apps}
-        current_hash = self._compute_hash(apps)
-        
-        # Check for changes
-        changes = {
-            'installed': [],
-            'uninstalled': [],
-            'updated': [],
-            'changed': False
-        }
-        
-        is_registration = self.is_first_scan or force
-        
-        if current_hash != self.last_hash:
-            changes['changed'] = True
-            
-            if not is_registration and self.last_apps:
-                previous_names = set(self.last_apps.keys())
-                current_names = set(apps_dict.keys())
-                
-                changes['installed'] = sorted(list(current_names - previous_names))
-                changes['uninstalled'] = sorted(list(previous_names - current_names))
-                
-                # Check for version updates
-                for name in current_names & previous_names:
-                    if apps_dict[name].version != self.last_apps[name].version:
-                        changes['updated'].append(name)
-                changes['updated'].sort()
-                
-                logger.info(
-                    f"[INVENTORY] Changes detected: "
-                    f"+{len(changes['installed'])} -{len(changes['uninstalled'])} "
-                    f"~{len(changes['updated'])}"
-                )
-        else:
-            if not is_registration:
-                logger.debug("[INVENTORY] No changes detected")
-                self.last_scan_time = datetime.now(timezone.utc)
+        try:
+            if not force and not self.should_check():
                 return None
-        
-        # Update state
-        self._save_state(apps_dict, current_hash)
-        self.last_hash = current_hash
-        self.last_apps = apps_dict
-        self.is_first_scan = False
-        self.last_scan_time = datetime.now(timezone.utc)
-        
-        result = {
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'total_apps': len(apps),
-            'inventory_hash': current_hash,
-            'is_full_inventory': is_registration,
-            'changes': changes,
-            'apps': [app.to_dict() for app in apps]
-        }
-        
-        if is_registration:
-            logger.info(f"[INVENTORY] Full inventory: {len(apps)} apps (hash: {current_hash})")
-        else:
-            logger.info(f"[INVENTORY] Updated inventory: {len(apps)} apps")
-        
-        # Debug: Log sample of first app with all fields
-        if result['apps']:
-            sample = result['apps'][0]
-            logger.info(f"[INVENTORY] Sample app JSON:")
-            logger.info(f"  Name: {sample.get('name')}")
-            logger.info(f"  Version: {sample.get('version')}")
-            logger.info(f"  Publisher: {sample.get('publisher')}")
-            logger.info(f"  Location: {sample.get('install_location')}")
-            logger.info(f"  Date: {sample.get('install_date')}")
-            logger.info(f"  Source: {sample.get('source')}")
-        
-        return result  # CRITICAL: Return the inventory data!
+            
+            logger.info("[INVENTORY] Collecting app inventory...")
+            
+            apps = self._collect_via_powershell()
+            if apps is None:
+                return None
+            
+            # Fix #6: Validate inventory scan completed successfully
+            if len(apps) < 5:  # Minimum threshold - even basic Windows has more apps
+                logger.error(
+                    f"INVENTORY: Scan incomplete, only {len(apps)} apps found. "
+                    f"Expected at least 5. Skipping this collection."
+                )
+                return None
+
+            logger.info(f"INVENTORY: Collected {len(apps)} applications successfully")
+            
+            # Build dict and compute hash
+            apps_dict = {app.name: app for app in apps}
+            current_hash = self._compute_hash(apps)
+            
+            # Check for changes
+            changes = {
+                'installed': [],
+                'uninstalled': [],
+                'updated': [],
+                'changed': False
+            }
+            
+            is_registration = self.is_first_scan or force
+            
+            if current_hash != self.last_hash:
+                changes['changed'] = True
+                
+                if not is_registration and self.last_apps:
+                    previous_names = set(self.last_apps.keys())
+                    current_names = set(apps_dict.keys())
+                    
+                    changes['installed'] = sorted(list(current_names - previous_names))
+                    changes['uninstalled'] = sorted(list(previous_names - current_names))
+                    
+                    # Check for version updates
+                    for name in current_names & previous_names:
+                        if apps_dict[name].version != self.last_apps[name].version:
+                            changes['updated'].append(name)
+                    changes['updated'].sort()
+                    
+                    logger.info(
+                        f"[INVENTORY] Changes detected: "
+                        f"+{len(changes['installed'])} -{len(changes['uninstalled'])} "
+                        f"~{len(changes['updated'])}"
+                    )
+            else:
+                if not is_registration:
+                    logger.debug("[INVENTORY] No changes detected")
+                    self.last_scan_time = datetime.now(timezone.utc)
+                    return None
+            
+            # Update state
+            self._save_state(apps_dict, current_hash)
+            self.last_hash = current_hash
+            self.last_apps = apps_dict
+            self.is_first_scan = False
+            self.last_scan_time = datetime.now(timezone.utc)
+            
+            result = {
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'total_apps': len(apps),
+                'inventory_hash': current_hash,
+                'is_full_inventory': is_registration,
+                'changes': changes,
+                'apps': [app.to_dict() for app in apps]
+            }
+            
+            if is_registration:
+                logger.info(f"[INVENTORY] Full inventory: {len(apps)} apps (hash: {current_hash})")
+            else:
+                logger.info(f"[INVENTORY] Updated inventory: {len(apps)} apps")
+            
+            # Debug: Log sample of first app with all fields
+            if result['apps']:
+                sample = result['apps'][0]
+                logger.info(f"[INVENTORY] Sample app JSON:")
+                logger.info(f"  Name: {sample.get('name')}")
+                logger.info(f"  Version: {sample.get('version')}")
+                logger.info(f"  Publisher: {sample.get('publisher')}")
+                logger.info(f"  Location: {sample.get('install_location')}")
+                logger.info(f"  Date: {sample.get('install_date')}")
+                logger.info(f"  Source: {sample.get('source')}")
+            
+            return result  # CRITICAL: Return the inventory data!
+        finally:
+            self._collect_lock.release()
 
         
     def _validate_field(self, field_name: str, field_value: str) -> bool:

@@ -69,12 +69,6 @@ def _extract_username_from_linked(linked_username: str) -> str:
     return linked_username
 
 
-def _build_user_dn(username: str, base_dn: str) -> str:
-    """Build user DN for binding."""
-    # Try sAMAccountName format first
-    return f"cn={username},cn=Users,{base_dn}"
-
-
 def authenticate_ldap(
     username: str, password: str, linked_username: str = None
 ) -> Tuple[bool, str]:
@@ -82,7 +76,10 @@ def authenticate_ldap(
     Authenticate user against AD using direct user bind.
 
     Args:
-        username: Local dashboard username (e.g., 'admin')
+        username: Local dashboard username (NOT used for DN construction - only
+            linked_username is used to build the LDAP bind DN. This parameter is
+            accepted for logging/API-compat but intentionally ignored to prevent
+            LDAP injection attacks.
         password: User's AD password
         linked_username: The AD username to bind with (e.g., 'GODDSYSTEMS\\pittalabhaskar')
 

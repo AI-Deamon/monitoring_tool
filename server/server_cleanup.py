@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Retention periods — configurable via env vars (FR-002)
 SESSION_RETENTION_DAYS = int(os.getenv('SESSION_RETENTION_DAYS', '30'))
 VISIT_RETENTION_DAYS = int(os.getenv('VISIT_RETENTION_DAYS', '30'))
+RAW_EVENT_RETENTION_DAYS = int(os.getenv('RAW_EVENT_RETENTION_DAYS', '30'))
 
 
 def cleanup_old_data():
@@ -58,21 +59,33 @@ def cleanup_old_data():
             ).delete()
             logger.info(f"[CLEANUP] Deleted {deleted} old domain_sessions")
             
-            # 3. Delete old domain_visits
+            # 3. Delete old domain_visits (uses its own configurable retention window,
+            #    not the session cutoff above)
+            visit_cutoff_date = datetime.now(timezone.utc).date() - timedelta(days=VISIT_RETENTION_DAYS)
+            visit_cutoff_datetime = datetime.combine(visit_cutoff_date, datetime.min.time())
             deleted = server_models.DomainVisit.query.filter(
-                server_models.DomainVisit.visited_at < cutoff_datetime
+                server_models.DomainVisit.visited_at < visit_cutoff_datetime
             ).delete()
             logger.info(f"[CLEANUP] Deleted {deleted} old domain_visits")
-            
+
             # 4. Delete old state_changes
             deleted = server_models.StateChange.query.filter(
                 server_models.StateChange.timestamp < cutoff_datetime
             ).delete()
             logger.info(f"[CLEANUP] Deleted {deleted} old state_changes")
-            
+
+            # 5. Delete old raw_events - this is the scheduled job that is
+            # guaranteed to run regardless of server entrypoint, so raw_events
+            # retention must live here rather than in an ad-hoc startup thread.
+            raw_event_cutoff = datetime.now(timezone.utc) - timedelta(days=RAW_EVENT_RETENTION_DAYS)
+            deleted = server_models.RawEvent.query.filter(
+                server_models.RawEvent.received_at < raw_event_cutoff
+            ).delete()
+            logger.info(f"[CLEANUP] Deleted {deleted} old raw_events")
+
             # Note: We keep screen_time and app_usage (daily aggregates) forever
             # These are already summarized per-day
-            
+
             db.session.commit()
             logger.info("[CLEANUP] Cleanup complete!")
             

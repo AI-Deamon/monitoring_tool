@@ -29,6 +29,26 @@ def create_app():
     app.jinja_env.auto_reload = True
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
     
+    # H-17 FIX: Explicit XSS protection via Jinja autoescaping
+    app.jinja_env.autoescape = True  # Enabled by default, but make it explicit
+    
+    # H-17 FIX: Add Content-Security-Policy header for defense-in-depth
+    @app.after_request
+    def add_security_headers(response):
+        """Add security headers to all responses."""
+        # CSP: Allow external fonts and CDN resources for dashboard
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "img-src 'self' data:; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "connect-src 'self'"
+        )
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        return response
+    
     # ================================================================
     # ISSUE-001 FIX: Enforce strong SECRET_KEY in production
     # ================================================================
@@ -60,15 +80,21 @@ def create_app():
     # SESSION CONFIGURATION (for dashboard auth)
     # ================================================================
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
-    is_production = os.getenv('FLASK_ENV') == 'production'
-    app.config['SESSION_COOKIE_SECURE'] = is_production
-    if not is_production:
-        logging.getLogger(__name__).warning(
-            "Session cookies not secure (SESSION_COOKIE_SECURE=False). "
-            "Set FLASK_ENV=production for HTTPS."
-        )
+    # C-09 FIX: Enhanced cookie security
+    # - Secure: Only sent over HTTPS (when USE_TLS=True)
+    # - HttpOnly: Not accessible via JavaScript (XSS protection)
+    # - SameSite=Strict: Prevents CSRF attacks
+    app.config['SESSION_COOKIE_SECURE'] = config.USE_TLS
     app.config['SESSION_COOKIE_HTTPONLY'] = True
-    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'
+
+    # ================================================================
+    # CSRF TOKEN: Make available in all templates app-wide
+    # ================================================================
+    @app.context_processor
+    def inject_csrf_token():
+        from auth import generate_csrf_token
+        return {"csrf_token": generate_csrf_token}
 
     # Configure extensions
     from extensions import configure_database_pooling, setup_db_event_listeners
@@ -119,7 +145,7 @@ def create_app():
         setup_db_event_listeners(app)
         
         # Register Blueprints
-        from server_api import bp as api_bp, register_root_endpoint, telemetry_bp
+        from server_api import bp as api_bp, register_root_endpoint
         from server_telemetry import bp as telemetry_bp_v1, register_root_telemetry_endpoints
         from server_dashboard import bp as dash_bp
         from admin_classification import admin_classification_bp
@@ -133,7 +159,6 @@ def create_app():
         # Register Blueprints
         app.register_blueprint(api_bp, url_prefix='/api/v1')
         app.register_blueprint(telemetry_bp_v1, url_prefix='/api/v1/telemetry')
-        app.register_blueprint(telemetry_bp, url_prefix='/api/v1/telemetry')  # /api/v1/telemetry/event
         app.register_blueprint(dash_bp, url_prefix='/dashboard')
         app.register_blueprint(admin_classification_bp)  # Admin classification UI
         app.register_blueprint(auth_bp)  # Auth routes at /auth/*
