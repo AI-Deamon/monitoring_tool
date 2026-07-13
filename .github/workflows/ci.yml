@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "phase_*", "feature/**", "version*"]
+  pull_request:
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sentinel_ci
+  SECRET_KEY: ci-only-secret-key-0123456789abcdef0123456789abcdef
+  REGISTRATION_SECRET: ci-registration-secret
+  SERVER_PORT: "5050"
+
+jobs:
+  migrations-fresh-db:
+    name: Alembic upgrade on empty PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentinel_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: server/server_requirements.txt
+
+      - name: Install server dependencies
+        run: pip install -r server/server_requirements.txt
+
+      - name: Run full migration chain against an empty database
+        working-directory: server
+        run: |
+          alembic upgrade head
+          alembic current
+
+      - name: Verify required stored procedures exist
+        working-directory: server
+        run: |
+          python - <<'EOF'
+          import os
+          import sqlalchemy as sa
+          required = {
+              'process_screentime_event', 'process_screentime_delta',
+              'process_app_switch_event', 'process_domain_switch_event',
+              'sync_screen_time_from_sessions', 'sync_app_usage_from_sessions',
+              'sync_domain_usage_from_sessions',
+          }
+          eng = sa.create_engine(os.environ['DATABASE_URL'])
+          with eng.connect() as c:
+              rows = c.execute(sa.text(
+                  "SELECT proname FROM pg_proc WHERE proname = ANY(:n)"
+              ), {'n': list(required)}).fetchall()
+          found = {r[0] for r in rows}
+          missing = required - found
+          assert not missing, f"Missing stored procedures after migrations: {missing}"
+          print("All required stored procedures present.")
+          EOF
+
+  tests:
+    name: pytest
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sentinel_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: server/server_requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r server/server_requirements.txt
+          pip install pytest
+
+      - name: Prepare database schema
+        working-directory: server
+        run: alembic upgrade head
+
+      - name: Run test suite
+        run: pytest tests/ -v --tb=short
