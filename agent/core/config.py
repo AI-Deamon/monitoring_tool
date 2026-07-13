@@ -177,6 +177,14 @@ class CoreConfig:
         self.current_version = agent.get("current_version", "")
         self.last_update_time = agent.get("last_update_time", "")
 
+        # Apply the configured agent-local UTC offset before anything computes
+        # a day boundary. core.agent_time is the single source of truth for
+        # buffer timestamps, state-machine midnight and live telemetry.
+        tz_offset = agent.get("timezone_offset_minutes")
+        if tz_offset is not None:
+            from .agent_time import set_offset_minutes
+            set_offset_minutes(tz_offset)
+
         # Update config if agent_id was loaded from file
         if not agent.get("agent_id"):
             config["agent"]["agent_id"] = self.agent_id
@@ -250,8 +258,8 @@ class CoreConfig:
         self.update_check_interval = updates.get("check_interval", 1800)  # 30 minutes
         self.update_signing_key = updates.get("signing_key", "")
         
+        # M-04 FIX: data_dir already set in __init__, no need to reassign
         # Paths - use writable directory (handles admin/non-admin)
-        self.data_dir = self._get_writable_data_dir()
         self.state_dir = self.data_dir / 'state'
         self.buffer_dir = self.data_dir / 'buffer'
         self.logs_dir = self.data_dir / 'logs'
@@ -490,8 +498,11 @@ class CoreConfig:
                 
                 self.config['api_key'] = self.api_key
                 
-                with open(self.config_path, 'w') as f:
+                # Atomic write: temp file then replace to prevent truncation on crash
+                temp_path = self.config_path.with_suffix('.tmp')
+                with open(temp_path, 'w') as f:
                     json.dump(self.config, f, indent=2)
+                temp_path.replace(self.config_path)
                 
                 # Update tracking
                 self._last_mtime = self.config_path.stat().st_mtime

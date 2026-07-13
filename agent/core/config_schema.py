@@ -24,7 +24,9 @@ CONFIG_SCHEMA_V2 = {
             "agent_name": {"type": str, "required": False, "default": ""},  # Custom display name
             "local_agent_key": {"type": str, "required": True, "default": ""},
             "current_version": {"type": str, "required": False, "default": ""},
-            "last_update_time": {"type": str, "required": False, "default": ""}
+            "last_update_time": {"type": str, "required": False, "default": ""},
+            # UTC offset in minutes for buffered timestamps (330 = IST default)
+            "timezone_offset_minutes": {"type": int, "required": False, "default": 330}
         }
     },
     # Authentication section - populated after registration

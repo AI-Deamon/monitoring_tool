@@ -28,12 +28,22 @@ from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
 
-# Standardize day-boundary logic to IST (UTC+05:30).
-IST = timezone(timedelta(hours=5, minutes=30), name="IST")
+# Day-boundary logic uses the agent-local offset owned by core.agent_time
+# (defaults to IST). Every module must agree on "what day is it" or the same
+# activity lands on different dates in different tables.
+#
+# Read the timezone through _local_tz() rather than caching it in a module
+# constant: config load calls agent_time.set_offset_minutes() *after* this
+# module is imported, and a cached tzinfo would keep the stale offset.
+from . import agent_time as _agent_time
+
+
+def _local_tz() -> timezone:
+    return _agent_time.get_timezone()
 
 
 def _now_ist() -> datetime:
-    return datetime.now(IST)
+    return _agent_time.now()
 
 
 class ScreenState(Enum):
@@ -197,6 +207,26 @@ class ScreenTimeEngine:
                 "event_type": event_type.value,
             }
 
+    def _add_to_current_bucket(self, delta: float):
+        """Add delta seconds to the current state's bucket."""
+        if self.current_state == ScreenState.ACTIVE:
+            self.active_seconds += delta
+        elif self.current_state == ScreenState.IDLE:
+            self.idle_seconds += delta
+        elif self.current_state == ScreenState.LOCKED:
+            self.pending_locked_seconds += delta
+            AWAY_THRESHOLD = 7200  # 2 hours
+            if self.pending_locked_seconds >= AWAY_THRESHOLD:
+                self.away_seconds += self.pending_locked_seconds
+                logger.info(
+                    f"[STATE_MACHINE] 2h+ lock → AWAY "
+                    f"({self.pending_locked_seconds:.1f}s)"
+                )
+                self.pending_locked_seconds = 0.0
+                self.transition(ScreenState.AWAY)
+        elif self.current_state == ScreenState.AWAY:
+            self.away_seconds += delta
+
     def tick(self):
         """
         Update counter for current state (MANDATORY - prevents time freezing).
@@ -224,32 +254,27 @@ class ScreenTimeEngine:
                 )
                 return
 
-            # Add to current state's counter (no threshold — tick is sole updater)
-            if self.current_state == ScreenState.ACTIVE:
-                self.active_seconds += delta
-            elif self.current_state == ScreenState.IDLE:
-                self.idle_seconds += delta
-            elif self.current_state == ScreenState.LOCKED:
-                self.pending_locked_seconds += delta
+            # Split delta at IST midnight if we crossed a day boundary.
+            # This prevents overnight sleep/resume from dumping the entire
+            # gap onto one calendar day.
+            last_date = datetime.fromtimestamp(
+                self.last_timestamp, tz=_local_tz()
+            ).date()
+            today = _now_ist().date()
+            if last_date != today:
+                # Compute local midnight of the day the gap started
+                midnight_ts = (
+                    datetime.combine(
+                        last_date, datetime.min.time(), tzinfo=_local_tz()
+                    ).timestamp()
+                    + 86400
+                )
+                pre_midnight_delta = max(0.0, midnight_ts - self.last_timestamp)
+                self._add_to_current_bucket(pre_midnight_delta)
+                self.last_timestamp = midnight_ts
+                delta = now - midnight_ts
 
-                AWAY_THRESHOLD = 7200  # 2 hours
-
-                if self.pending_locked_seconds >= AWAY_THRESHOLD:
-                    # Entire session becomes AWAY
-                    self.away_seconds += self.pending_locked_seconds
-
-                    logger.info(
-                        f"[STATE_MACHINE] 2h+ lock → AWAY "
-                        f"({self.pending_locked_seconds:.1f}s)"
-                    )
-
-                    # Reset buffer
-                    self.pending_locked_seconds = 0.0
-
-                    # Move to AWAY state
-                    self.current_state = ScreenState.AWAY
-            elif self.current_state == ScreenState.AWAY:
-                self.away_seconds += delta
+            self._add_to_current_bucket(delta)
 
             # Update timestamp
             self.last_timestamp = now
@@ -501,11 +526,19 @@ class ScreenTimeEngine:
             + totals["away_seconds"]
         )
 
-        # Validation
+        # Validation and clamp
         if totals["total_seconds"] > 86400:
+            overflow = totals["total_seconds"] - 86400
+            trim_from_away = min(overflow, totals["away_seconds"])
+            totals["away_seconds"] -= trim_from_away
+            overflow -= trim_from_away
+            if overflow > 0:
+                totals["locked_seconds"] -= min(overflow, totals["locked_seconds"])
+            totals["total_seconds"] = 86400
             logger.warning(
-                f"[STATE_MACHINE] Total exceeds 24h: {totals['total_seconds']}s "
-                f"({totals['total_seconds'] / 3600:.1f}h)"
+                f"[STATE_MACHINE] Total exceeded 24h ({totals['total_seconds'] + overflow + trim_from_away}s), "
+                f"clamped to 86400s (trimmed {trim_from_away}s from away, "
+                f"{overflow if overflow > 0 else 0}s from locked)"
             )
 
         return totals
@@ -564,15 +597,20 @@ class ScreenTimeEngine:
 
             return False, None
 
-    def reset_daily(self):
+    def reset_daily(self, on_final_totals_callback: Optional[callable] = None):
         """
         Reset counters at midnight (IDEMPOTENT).
 
         CRITICAL:
         - Only fires once per calendar day (_last_reset_date guard)
+        - Calls callback with final totals BEFORE resetting (for offline persistence)
         - Reset counters to 0
         - Keep current_state (LOCKED/AWAY continuity matters)
         - Reset last_timestamp to now
+        
+        Args:
+            on_final_totals_callback: Optional callback(final_totals: dict) called before reset
+                                     to persist data for offline resilience
         """
         with self._lock:
             current_date = _now_ist().date()
@@ -614,6 +652,16 @@ class ScreenTimeEngine:
             # Add to daily counters BEFORE reset - these will be sent via heartbeat
             self.locked_seconds += final_locked
             self.away_seconds += final_away
+            
+            # C-03 FIX: Call callback with final totals BEFORE clearing
+            # This ensures offline agents persist the data to buffer before losing it
+            if on_final_totals_callback:
+                try:
+                    final_data = self.get_daily_totals()
+                    on_final_totals_callback(final_data)
+                    logger.info("[STATE_MACHINE] Final totals queued via callback for offline persistence")
+                except Exception as e:
+                    logger.error(f"[STATE_MACHINE] Callback error during reset: {e}", exc_info=True)
 
             # Now reset ALL counters for the new day.
             # The accumulated locked/away values have been incorporated into
@@ -716,6 +764,24 @@ class ScreenTimeEngine:
                 self.pending_locked_seconds = float(
                     data.get("pending_locked_seconds", 0)
                 )  # FIX #1: Restore buffer
+                
+                # VALIDATION: Clamp restored values to prevent stale overflow data
+                total_restored = self.active_seconds + self.idle_seconds + self.locked_seconds + self.away_seconds
+                if total_restored > 86400:
+                    overflow = total_restored - 86400
+                    logger.warning(
+                        f"[STATE_MACHINE] Restored counters exceeded 24h ({total_restored:.0f}s), "
+                        f"trimming {overflow:.0f}s to prevent validation errors"
+                    )
+                    # Trim from away_seconds first, then locked_seconds
+                    trim_away = min(overflow, self.away_seconds)
+                    self.away_seconds -= trim_away
+                    overflow -= trim_away
+                    if overflow > 0:
+                        self.locked_seconds -= min(overflow, self.locked_seconds)
+                        overflow = 0
+                    self.pending_locked_seconds = 0  # Clear pending to prevent double-count
+                
                 logger.info(
                     f"[STATE_MACHINE] Restored daily counters: "
                     f"A={self.active_seconds:.0f}s, "

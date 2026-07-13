@@ -366,6 +366,7 @@ class StateDetector:
         self, new_state: str, source: str = "poll", remote_session_active: bool = False
     ):
         """PHASE 2: Use state machine for ALL time calculations"""
+        callback_args = None
         with self._transition_lock:
             prev_state = self.current_state
             if prev_state == new_state:
@@ -394,7 +395,7 @@ class StateDetector:
 
             # NEW: CREATE SPAN for the exiting state (timeline visualization only)
             if (
-                prev_state in ("active", "idle", "locked")
+                prev_state in ("active", "idle", "locked", "away")
                 and self._last_state_change_time > 0
                 and duration_seconds >= 1.0
             ):
@@ -465,25 +466,28 @@ class StateDetector:
             # NEW: Persist current state for crash recovery
             self._persist_current_state()
 
-            # Call callback with duration
+            # Capture callback args — invoke outside the lock to avoid blocking
+            # other threads on a slow/unreachable network request.
             if self.on_state_change:
-                try:
-                    prev_state_enum = (
-                        SystemState(prev_state)
-                        if prev_state != "unknown"
-                        else SystemState.UNKNOWN
-                    )
-                    new_state_enum = SystemState(new_state)
-                    self.on_state_change(
-                        prev_state_enum, new_state_enum, duration_seconds
-                    )
-                except Exception as e:
-                    logger.error(f"[STATE] Callback error: {e}", exc_info=True)
+                prev_state_enum = (
+                    SystemState(prev_state)
+                    if prev_state != "unknown"
+                    else SystemState.UNKNOWN
+                )
+                new_state_enum = SystemState(new_state)
+                callback_args = (prev_state_enum, new_state_enum, duration_seconds)
 
             logger.info(
                 f"[STATE] {prev_state} -> {new_state} "
                 f"(source={source}, remote={remote_session_active})"
             )
+
+        # Invoke callback outside the lock
+        if callback_args:
+            try:
+                self.on_state_change(*callback_args)
+            except Exception as e:
+                logger.error(f"[STATE] Callback error: {e}", exc_info=True)
 
     def _handle_enter(self, prev_state, new_state):
         pass
@@ -848,7 +852,7 @@ class StateDetector:
 
     def get_pending_spans(self) -> list:
         """Return and clear pending spans (called by Collector)."""
-        with self._state_lock:
+        with self._transition_lock:
             spans = self.pending_spans.copy()
             self.pending_spans.clear()
             return spans
@@ -874,15 +878,19 @@ class StateDetector:
                 from pathlib import Path
                 from core.buffer import BufferDB
                 
-                # Determine buffer path (typically ProgramData/SentinelEdge/buffer.db)
-                possible_paths = [
+                # H-01 FIX: Prioritize dynamic buffer path from state_file location
+                # This handles custom installation directories correctly
+                possible_paths = []
+                
+                # Primary: Use state_file.parent (same directory as helper state)
+                if hasattr(self, 'state_file') and self.state_file:
+                    possible_paths.append(self.state_file.parent / "buffer.db")
+                
+                # Fallback: Standard installation paths (only if primary unavailable)
+                possible_paths.extend([
                     Path("C:\\ProgramData\\SentinelEdge\\buffer.db"),
                     Path("C:\\ProgramData\\SentinelEdge\\data\\buffer.db"),
-                ]
-                
-                # Add data_dir path if available
-                if hasattr(self, 'state_file') and self.state_file:
-                    possible_paths.insert(0, self.state_file.parent / "buffer.db")
+                ])
                 
                 for path in possible_paths:
                     if path.exists():
@@ -954,7 +962,7 @@ class StateDetector:
         Returns:
             Number of spans successfully persisted
         """
-        with self._state_lock:
+        with self._transition_lock:
             if not self.pending_spans:
                 logger.debug("[SPAN] No pending spans to persist")
                 return 0
@@ -987,22 +995,48 @@ class StateDetector:
             with open(self.state_file, "r") as f:
                 data = json.load(f)
 
+            # Track whether we discarded stale data that needs a deferred persist.
+            # We CANNOT call _persist_current_state() here yet — current_state and
+            # session_start have not been restored yet.  Writing now would save a
+            # blank session state that would break continuity on the next restart.
+            _needs_stale_persist = False
+
             # Recover pending final-day totals (midnight rollover) if present.
             pending_final = data.get("final_totals_for_upload")
             pending_day = data.get("final_totals_day_for_upload")
             if isinstance(pending_final, dict) and pending_day:
-                self._final_totals_for_upload = pending_final
-                self._final_totals_day_for_upload = str(pending_day)
-                logger.info(
-                    f"[RECOVERY] Restored pending final-day totals for {self._final_totals_day_for_upload}: "
-                    f"A={pending_final.get('active_seconds', 0)} "
-                    f"I={pending_final.get('idle_seconds', 0)} "
-                    f"L={pending_final.get('locked_seconds', 0)} "
-                    f"W={pending_final.get('away_seconds', 0)}"
-                )
+                # Validate totals before restoring to prevent stale overflow data
+                total = (pending_final.get('active_seconds', 0) +
+                         pending_final.get('idle_seconds', 0) +
+                         pending_final.get('locked_seconds', 0) +
+                         pending_final.get('away_seconds', 0))
+                if total > 86400:
+                    logger.warning(
+                        f"[RECOVERY] Discarding stale final-day totals (total={total}s > 86400s) "
+                        f"- will send fresh data instead"
+                    )
+                    # Clear in-memory; deferred persist happens after full recovery.
+                    self._final_totals_for_upload = None
+                    self._final_totals_day_for_upload = None
+                    _needs_stale_persist = True
+                else:
+                    self._final_totals_for_upload = pending_final
+                    self._final_totals_day_for_upload = str(pending_day)
+                    logger.info(
+                        f"[RECOVERY] Restored pending final-day totals for {self._final_totals_day_for_upload}: "
+                        f"A={pending_final.get('active_seconds', 0)}s, "
+                        f"I={pending_final.get('idle_seconds', 0)}s, "
+                        f"L={pending_final.get('locked_seconds', 0)}s, "
+                        f"W={pending_final.get('away_seconds', 0)}s"
+                    )
 
             # 1. Recover Current Session Span
-            if "current_state" in data and "session_start" in data:
+            # Use while-False so we can 'break' out early without 'return',
+            # letting the deferred persist below always run.
+            while True:
+                if "current_state" not in data or "session_start" not in data:
+                    break
+
                 prev_state = data["current_state"]
                 session_start = float(data["session_start"])
                 now = time.time()
@@ -1023,7 +1057,7 @@ class StateDetector:
                         f"[RECOVERY] Skipping interrupted {prev_state} span after "
                         f"{last_event}; gap is handled by ScreenTimeEngine"
                     )
-                    return
+                    break
 
                 saved_day = str(data.get("date") or "")
                 today = datetime.now().date().isoformat()
@@ -1032,20 +1066,20 @@ class StateDetector:
                         f"[RECOVERY] Skipping interrupted {prev_state} span from "
                         f"previous day {saved_day}; today is {today}"
                     )
-                    return
+                    break
 
                 if prev_state not in ("active", "idle", "locked"):
                     logger.info(
                         f"[RECOVERY] Skipping unsupported interrupted state: {prev_state}"
                     )
-                    return
+                    break
 
                 if duration < 0:
                     logger.warning(
                         f"[RECOVERY] Skipping interrupted {prev_state} span with "
                         f"negative duration: {duration:.1f}s"
                     )
-                    return
+                    break
 
                 # Long gaps are ambiguous after restart. Do not rewrite them to
                 # "now - 8h"; that fabricates overnight activity after shutdown.
@@ -1056,7 +1090,7 @@ class StateDetector:
                         f"[RECOVERY] Interrupted session too long ({duration:.1f}s), "
                         f"skipping recovery"
                     )
-                    return
+                    break
 
                 if duration > 60:  # Only if > 1 minute
                     # Create span for the interrupted session
@@ -1067,11 +1101,23 @@ class StateDetector:
                         duration=duration,
                     )
                     if span:
-                        with self._state_lock:
+                        # Use _transition_lock (not _state_lock) - it's the lock
+                        # every other reader/writer of pending_spans uses
+                        # (_transition, get_pending_spans, persist_all_pending_spans).
+                        with self._transition_lock:
                             self.pending_spans.append(span)
                         logger.info(
                             f"[RECOVERY] Recovered {prev_state} session: {duration:.1f}s"
                         )
+                break  # end of while True — always exit after one pass
+
+            # Deferred persist: now that current_state, session_start, and pending
+            # spans are all restored, it is safe to write the cleared stale data.
+            # This block always runs even when span recovery used 'break'.
+            if _needs_stale_persist:
+                self._persist_current_state()
+                logger.info("[RECOVERY] Persisted cleared stale final-day totals")
+
         except Exception as e:
             logger.error(f"[RECOVERY] Failed to load state: {e}")
 
@@ -1108,11 +1154,12 @@ class StateDetector:
                 )
                 # Store final totals to send via next heartbeat (for yesterday's final data)
                 self._final_totals_for_upload = final_totals
+                # "Yesterday" must use the same agent-local day boundary the
+                # state machine rolled over on (core.agent_time), not a
+                # second hardcoded IST offset.
+                from core.agent_time import now as _local_now
                 self._final_totals_day_for_upload = (
-                    datetime.now(timezone.utc).astimezone(
-                        timezone(timedelta(hours=5, minutes=30))
-                    ).date()
-                    - timedelta(days=1)
+                    _local_now().date() - timedelta(days=1)
                 ).isoformat()
                 logger.info(
                     f"[STATE] Final totals ready for upload: "
