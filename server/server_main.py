@@ -47,14 +47,23 @@ def init_database(app):
     # db.create_all() removed to enforce Alembic-only schema management.
 
 def apply_startup_fixes(app):
-    """Run self-healing scripts on startup."""
-    from scripts.fixes.ensure_procedures_correct import apply_fixes as fix_procedures
-    # Import other fixes dynamically or path-based if needed, but procedures are critical
-    
+    """Run optional self-healing scripts on startup.
+
+    Stored procedures are owned by the Alembic migration chain; the
+    scripts.fixes package is a legacy add-on that is not part of the repo,
+    so its absence must never prevent the server from booting.
+    """
+    try:
+        from scripts.fixes.ensure_procedures_correct import apply_fixes as fix_procedures
+    except ImportError:
+        logger.info("[STARTUP] scripts.fixes not present - skipping self-healing "
+                    "(schema/procedures are managed by Alembic)")
+        return
+
     with app.app_context():
         try:
             logger.info("[STARTUP] Running self-healing scripts...")
-            
+
             # 1. Fix Stored Procedures (Round function error)
             fix_procedures()
             
@@ -83,12 +92,16 @@ def sync_screen_time_background(app):
     - Syncs app_usage from app_sessions (source of truth)
     - Syncs domain_usage from domain_sessions (source of truth)
     """
+    from leader_election import get_leader
+    leader = get_leader(app)
     while True:
         try:
             time.sleep(60)  # Wait 1 minute (Optimized for shift)
+            if not leader.check():
+                continue
             with app.app_context():
                 from sqlalchemy import text
-                
+
                 # Sync screen_time
                 result = db.session.execute(text(
                     "SELECT * FROM sync_screen_time_from_sessions(CURRENT_DATE)"
@@ -113,49 +126,32 @@ def sync_screen_time_background(app):
 
 def cleanup_background(app):
     """
-    FIX 3: Hourly cleanup - Purge old data + sync aggregates + classify domains.
-    Runs every hour to clean up old raw events and sessions.
+    FIX 3: Hourly domain auto-classification.
+    Data-retention purging is owned by background_tasks.py's scheduled job.
     """
     import server_models
-    from datetime import datetime, timedelta, timezone
-    
+    from leader_election import get_leader
+    leader = get_leader(app)
+
     while True:
         try:
             time.sleep(3600)  # 1 hour
+            if not leader.check():
+                continue
             with app.app_context():
                 from sqlalchemy import text
-                
-                # ================================================================
-                # PART 1: PURGE OLD DATA
-                # ================================================================
-                # Purge old raw events (30 days retention)
-                # Use timezone-aware UTC time
-                cutoff_30d = datetime.now(timezone.utc) - timedelta(days=30)
-                # Ensure we compare against offset-naive if DB is naive, or aware if aware.
-                # Usually naive UTC is stored in Postgres TIMESTAMP WITHOUT TIME ZONE
-                # So we might need to strip tzinfo if DB columns are naive. 
-                # Ideally, we should migrate to TIMESTAMP WITH TIME ZONE, but for now:
-                cutoff_30d = cutoff_30d.replace(tzinfo=None)
 
-                purged_raw = db.session.query(server_models.RawEvent).filter(
-                    server_models.RawEvent.received_at < cutoff_30d
-                ).delete(synchronize_session='fetch')
-                
-                # Purge old app sessions (90 days retention)
-                cutoff_90d = datetime.now(timezone.utc) - timedelta(days=90)
-                cutoff_90d = cutoff_90d.replace(tzinfo=None) # Strip timezone for naive DB columns
-                
-                purged_sessions = 0
-                if hasattr(server_models, 'AppSession'):
-                    purged_sessions = db.session.query(server_models.AppSession).filter(
-                        server_models.AppSession.created_at < cutoff_90d
-                    ).delete(synchronize_session='fetch')
-                
-                db.session.commit()
-                logger.info(f"[CLEANUP] Purged: raw_events={purged_raw}, sessions={purged_sessions}")
-                
+                # NOTE: Data-retention purging (raw_events, app_sessions, domain
+                # sessions/visits, state_changes) is no longer done here. It is
+                # owned exclusively by background_tasks.py's scheduled
+                # cleanup_old_data() job (which calls server_cleanup.cleanup_old_data()),
+                # started from create_app(). Having two independent threads purge
+                # the same tables on different schedules/cutoff columns was itself
+                # a source of confusion and risk; this thread now only handles
+                # domain auto-classification below.
+
                 # ================================================================
-                # PART 2: CLASSIFY UNREVIEWED DOMAINS (AUTOMATIC!)
+                # CLASSIFY UNREVIEWED DOMAINS (AUTOMATIC!)
                 # ================================================================
                 try:
                     # Get unreviewed sessions
