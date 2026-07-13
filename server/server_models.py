@@ -27,6 +27,11 @@ class Organization(db.Model):
 
     # Relationships
     agents = db.relationship("Agent", backref="organization", lazy="dynamic")
+    # NOTE: intentionally no cascade="all, delete-orphan" here, unlike Agent's
+    # owned relationships elsewhere in this file - deleting an Organization
+    # must not silently cascade-delete DashboardUser accounts. org_id on
+    # DashboardUser blocks the delete instead (IntegrityError) until users
+    # are explicitly reassigned or removed.
     users = db.relationship("DashboardUser", backref="organization", lazy="dynamic")
 
 
@@ -1712,7 +1717,8 @@ class ReportSchedule(db.Model):
     include_pdf = db.Column(db.Boolean, default=False, nullable=False)
     auto_email = db.Column(db.Boolean, default=True, nullable=False)
     template_name = db.Column(db.String(100), nullable=True)
-    recipients_json = db.Column(postgresql.JSONB, nullable=True)  # overrides recipients field
+    # JSONB on PostgreSQL; falls back to JSON on SQLite so tests can create the schema
+    recipients_json = db.Column(db.JSON().with_variant(postgresql.JSONB(), 'postgresql'), nullable=True)  # overrides recipients field
 
 
 class ReportGenerationJob(db.Model):
@@ -1727,7 +1733,7 @@ class ReportGenerationJob(db.Model):
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.String(20), default='pending', nullable=False)
-    progress = db.Column(postgresql.JSONB, default=dict, nullable=False)
+    progress = db.Column(db.JSON().with_variant(postgresql.JSONB(), 'postgresql'), default=dict, nullable=False)
     result_html = db.Column(db.Text, nullable=True)
     result_pdf_path = db.Column(db.String(500), nullable=True)
     error_message = db.Column(db.Text, nullable=True)

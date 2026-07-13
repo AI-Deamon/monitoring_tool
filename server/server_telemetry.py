@@ -19,6 +19,7 @@ from datetime import datetime, date, timezone, timedelta
 from typing import Optional
 from flask import Blueprint, request, jsonify, g
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from extensions import db
 import server_models
 from server_auth import require_auth
@@ -50,16 +51,15 @@ RECOVERY_ACTIVE_SPAN_CAP_SECONDS = 8 * 3600
 # HELPER FUNCTIONS
 # ============================================================================
 
-# Server timezone (matches PostgreSQL stored procedures)
-SERVER_TIMEZONE = 'Asia/Kolkata'
+# H-10 FIX: Server timezone standardized to UTC (was Asia/Kolkata)
+SERVER_TIMEZONE = 'UTC'
 
 def get_server_tz():
-    """Get server timezone object."""
+    """Get server timezone object (UTC)."""
     if _PYTZ_AVAILABLE:
         return pytz.timezone(SERVER_TIMEZONE)
     else:
-        # Fallback: IST is UTC+5:30
-        return timezone(timedelta(hours=5, minutes=30))
+        return timezone.utc
 
 
 def pick_earliest_timestamp(*values: Optional[datetime]) -> Optional[datetime]:
@@ -80,10 +80,10 @@ def update_telemetry_time(agent_id: str, event_timestamp: Optional[datetime] = N
     try:
         agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
         if agent:
-            # Keep liveness heartbeat based on receive time (not event time).
-            agent.last_telemetry_time = datetime.now(get_server_tz())
-
-            # Canonical first activity must come from telemetry event timestamp.
+            # Keep liveness heartbeat based on receive time (not event time) - UTC for consistency
+            agent.last_telemetry_time = datetime.now(timezone.utc).replace(tzinfo=None)
+            
+            # Canonical first activity must come from telemetry event timestamp - UTC
             if event_timestamp is not None:
                 if not agent.first_activity_at or event_timestamp < agent.first_activity_at:
                     agent.first_activity_at = event_timestamp
@@ -96,12 +96,11 @@ def parse_agent_timestamp(ts_str: str, agent_id: str = None) -> datetime:
     """
     Parse and normalize agent timestamps with robust timezone handling
     
-    - New agents (v1.2+): Send IST timestamp with +05:30
-    - Old agents (v1.0-1.1): Send UTC timestamp with Z
+    H-10 FIX: Standardized to UTC (previously IST).
+    - New agents: Send timestamp with timezone
+    - Old agents: Send UTC with Z
     
-    Enhanced validation with better error handling and DST support.
-    
-    Returns: Naive datetime in server timezone (IST)
+    Returns: Naive datetime in UTC
     """
     short_id = short_agent_id(agent_id) if agent_id else "??????"
     
@@ -119,44 +118,46 @@ def parse_agent_timestamp(ts_str: str, agent_id: str = None) -> datetime:
             ts = ts.replace(tzinfo=timezone.utc)
             
         # Validate timestamp range (enhanced from original)
-        now = datetime.now(get_server_tz())
+        now = datetime.now(timezone.utc)
         max_future = now + timedelta(hours=2)  # Reduce clock drift tolerance
         min_past = now - timedelta(days=365)
         
         if ts > max_future:
             logger.warning(f"[{short_id}] Timestamp too far in future: {ts_str}")
-            return now.astimezone(get_server_tz()).replace(tzinfo=None)
+            return now.replace(tzinfo=None)
         if ts < min_past:
             logger.warning(f"[{short_id}] Timestamp too old: {ts_str}")
             raise ValueError("Timestamp outside valid range")
             
-        # Convert to server timezone with proper DST support
-        server_tz = get_server_tz()
-        ts_local = ts.astimezone(server_tz)
-        
-        # Return naive datetime in server timezone (for PostgreSQL)
-        return ts_local.replace(tzinfo=None)
+        # Always return UTC naive datetime (H-10 FIX: database stores UTC)
+        ts_utc = ts.astimezone(timezone.utc)
+        return ts_utc.replace(tzinfo=None)
         
     except Exception as e:
         logger.error(f"[{short_id}] Failed to parse timestamp: {ts_str} - {e}")
-        # Fallback: use current server time
-        if _PYTZ_AVAILABLE:
-            return datetime.now(pytz.timezone(SERVER_TIMEZONE)).replace(tzinfo=None)
-        else:
-            return datetime.now(get_server_tz()).replace(tzinfo=None)
+        # Fallback: use current UTC time
+        return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def safe_int(value, default=0, min_val=0, max_val=86400) -> int:
     """
     Safely convert value to integer with validation.
     
+    M-18 FIX: Enhanced with type validation.
+    
     Prevents:
     - NaN, Infinity from causing errors
     - Negative values
     - Values exceeding max (default 86400 = 24 hours)
+    - Invalid types (dict, list, etc.)
     """
     try:
         if value is None:
+            return default
+        
+        # M-18 FIX: Reject invalid types early
+        if not isinstance(value, (int, float, str)):
+            logger.warning(f"Invalid type for safe_int: {type(value)}, using default {default}")
             return default
         
         # Handle string input
@@ -198,8 +199,8 @@ def validate_span(span: dict, agent_id: str) -> Optional[str]:
             if field not in span:
                 return f"Missing field: {field}"
         
-        # 1. State validation
-        if span['state'] not in ['active', 'idle', 'locked']:
+        # 1. State validation (must match the screen_time_spans CHECK constraint)
+        if span['state'] not in ['active', 'idle', 'locked', 'away']:
             return f"Invalid state: {span['state']}"
             
         # 2. Time parsing and relative validation
@@ -213,6 +214,10 @@ def validate_span(span: dict, agent_id: str) -> Optional[str]:
         # 3. Duration validation
         calc_duration = (end - start).total_seconds()
         sent_duration = float(span['duration_seconds'])
+        
+        # H-16 FIX: Validate duration bounds (1s to 24h)
+        if sent_duration < 1:
+            return "Span duration must be at least 1 second"
         
         # Reject unrealistically long spans (> 24h)
         if sent_duration > 86400:
@@ -321,6 +326,20 @@ def store_raw_event(agent_id, event_type, payload, processed=False, error=None):
         logger.error(f"Failed to store raw event: {e}")
         return None
 
+
+def update_raw_event_error(raw_event_id, error_message):
+    """C-08 FIX: Update raw event with validation error."""
+    try:
+        raw = server_models.RawEvent.query.get(raw_event_id)
+        if raw:
+            raw.error = error_message
+            raw.processed = False
+            db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to update raw event error: {e}")
+
+
 # ============================================================================
 # TELEMETRY: SCREENTIME (LIVE - SOURCE OF TRUTH)
 # ============================================================================
@@ -357,7 +376,15 @@ def telemetry_screentime():
     data = request.get_json() or {}
     agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     
+    # C-08 FIX: Store raw event BEFORE validation to prevent data loss
+    if agent_id:
+        raw_event = store_raw_event(agent_id, 'screentime', data, processed=False)
+    else:
+        raw_event = None
+    
     if not agent_id:
+        if raw_event:
+            update_raw_event_error(raw_event.id, "Missing agent_id")
         return jsonify({'error': 'Missing agent_id'}), 400
     
     short_id = short_agent_id(agent_id)
@@ -392,6 +419,9 @@ def telemetry_screentime():
             f"[{short_id}] screentime REJECTED: invalid {bucket_name}={bucket_value} "
             f"(must be 0..86400)"
         )
+        # C-08 FIX: Update raw event with validation error
+        if raw_event:
+            update_raw_event_error(raw_event.id, f"Invalid {bucket_name}: {bucket_value}")
         return jsonify({'error': f'Invalid {bucket_name}: {bucket_value}'}), 400
 
     if total_seconds > 86400:
@@ -399,6 +429,9 @@ def telemetry_screentime():
             f"[{short_id}] screentime REJECTED: invalid total={total_seconds}s "
             f"(A={active_seconds}, I={idle_seconds}, L={locked_seconds}, W={away_seconds})"
         )
+        # C-08 FIX: Update raw event with validation error
+        if raw_event:
+            update_raw_event_error(raw_event.id, f"Invalid total: {total_seconds} > 86400")
         return jsonify({'error': f'Invalid screentime total: {total_seconds} > 86400'}), 400
     
     logger.info(
@@ -406,9 +439,6 @@ def telemetry_screentime():
         f"idle={idle_seconds}s, locked={locked_seconds}s, "
         f"away={away_seconds}s (state={current_state})"
     )
-    
-    # Store Raw Event
-    raw_event = store_raw_event(agent_id, 'screentime', data, processed=False)
     
     try:
         # Parse timestamp
@@ -649,9 +679,27 @@ def telemetry_app_active():
             db.session.add(status)
         
         update_telemetry_time(agent_id, pick_earliest_timestamp(session_start_naive, timestamp_naive))
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Concurrent request for the same agent_id raced us and inserted first
+            # (no row lock on the get-or-create above). Retry as an update instead
+            # of losing this whole request to a generic 500.
+            db.session.rollback()
+            status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent_id).first()
+            if status:
+                if status.current_app != app:
+                    status.session_start = session_start_naive
+                status.current_app = app
+                status.window_title = window_title
+                status.duration_seconds = duration
+                status.current_state = current_state
+                status.last_seen = timestamp_naive
+                if username:
+                    status.username = username
+                db.session.commit()
         return jsonify({'status': 'success'}), 200
-        
+
     except Exception as e:
         db.session.rollback()
         logger.error(f"[{short_id}] app-active ERROR: {e}", exc_info=True)
@@ -744,9 +792,26 @@ def telemetry_domain_active():
             db.session.add(status)
         
         update_telemetry_time(agent_id, pick_earliest_timestamp(session_start_naive, timestamp_naive))
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Concurrent request for the same agent_id raced us - retry as an
+            # update instead of losing the whole request to a generic 500.
+            db.session.rollback()
+            status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent_id).first()
+            if status:
+                if status.current_domain != domain:
+                    status.domain_session_start = session_start_naive
+                status.current_domain = domain
+                status.current_browser = browser
+                status.current_url = url
+                status.domain_duration_seconds = duration
+                status.last_seen = timestamp_naive
+                if username:
+                    status.username = username
+                db.session.commit()
         return jsonify({'status': 'success'}), 200
-        
+
     except Exception as e:
         db.session.rollback()
         logger.error(f"[{short_id}] domain-active ERROR: {e}")
@@ -1156,11 +1221,15 @@ def process_state_duration_event(payload: dict):
         return jsonify({"status": "ignored", "reason": "unknown_state"}), 200
 
     try:
-        # Step 4.3: IST Normalization
-        timestamp = parse_agent_time(ts_str) if ts_str else datetime.now(get_server_tz())
+        # Step 4.3: UTC Normalization (matches parse_agent_timestamp used everywhere
+        # else in this file - the stored procedure casts this value's wall-clock
+        # reading directly into a TIMESTAMP WITHOUT TIME ZONE column, so binding an
+        # IST-localized value here caused a ~5.5h day-boundary shift vs every other
+        # telemetry endpoint).
+        timestamp = parse_agent_timestamp(ts_str, agent_id) if ts_str else datetime.now(timezone.utc).replace(tzinfo=None)
         
         # Step 4.2: Call the additive procedure
-        db.session.execute(
+        proc_result = db.session.execute(
             text("""
                 SELECT * FROM process_screentime_delta(
                     :agent_id,
@@ -1181,8 +1250,18 @@ def process_state_duration_event(payload: dict):
                 "state": state,
                 "away": int(delta_away),
             }
-        )
-        
+        ).fetchone()
+
+        # The procedure traps SQL errors and returns ('error', message)
+        # instead of raising - surface that instead of reporting success
+        # while silently dropping the delta.
+        if proc_result is not None and proc_result[0] == 'error':
+            db.session.rollback()
+            logger.error(
+                f"[{short_id}] process_screentime_delta returned error: {proc_result[1]}"
+            )
+            return jsonify({"error": f"screentime delta failed: {proc_result[1]}"}), 500
+
         db.session.commit()
         logger.info(f"[{short_id}] Processed state_duration: {state} +{duration:.1f}s (IST: {timestamp.strftime('%H:%M')})")
         return jsonify({"status": "success"}), 200
