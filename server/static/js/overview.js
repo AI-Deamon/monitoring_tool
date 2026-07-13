@@ -16,14 +16,14 @@
             return dateInput.value;
         }
         const params = new URLSearchParams(window.location.search);
-        return params.get('date') || new Date().toISOString().split('T')[0];
+        return params.get('date') || localDateStr();
     }
 
     // Initialize global date picker and attach listener
     document.addEventListener('DOMContentLoaded', () => {
         const dateInput = document.getElementById('global-date-select');
         if (dateInput) {
-            const today = new Date().toISOString().split('T')[0];
+            const today = localDateStr();
             dateInput.value = getSelectedDate();
             dateInput.max = today;
             // Attach change listener for this page

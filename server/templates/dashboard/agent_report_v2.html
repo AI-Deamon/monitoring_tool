@@ -572,7 +572,7 @@
 
     // Get date from URL parameter or use today
     const urlParams = new URLSearchParams(window.location.search);
-    let reportDate = urlParams.get('date') || new Date().toISOString().split('T')[0];
+    let reportDate = urlParams.get('date') || localDateStr();
 
     // Set date picker
     document.getElementById('report-date-input').value = reportDate;

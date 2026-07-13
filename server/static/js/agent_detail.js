@@ -83,7 +83,7 @@ function formatTimeShort(seconds) {
 
 function getSelectedDate() {
     const el = document.getElementById('global-date-select');
-    return el ? el.value : new Date().toISOString().split('T')[0];
+    return el ? el.value : localDateStr();
 }
 
 async function fetchJSON(url) {

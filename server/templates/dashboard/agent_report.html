@@ -296,7 +296,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     // Set date picker to selected date
     const params = new URLSearchParams(window.location.search);
-    const dateParam = params.get('date') || new Date().toISOString().split('T')[0];
+    const dateParam = params.get('date') || localDateStr();
     document.getElementById('report-date').value = dateParam;
 
     // Load report

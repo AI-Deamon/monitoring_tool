@@ -367,6 +367,18 @@
 
     <!-- Custom JS -->
     <script>
+        // ── Local calendar date (YYYY-MM-DD) ──────────────────────────────
+        // Date.toISOString() returns the UTC day. East of Greenwich that is
+        // YESTERDAY for the first hours after local midnight (in IST, until
+        // 05:30), so the dashboard silently asked the API for the wrong day
+        // every morning - and a date the user picked in the calendar could be
+        // sent one day earlier than they chose. Always format the LOCAL day.
+        window.localDateStr = function (d) {
+            const dt = d ? new Date(d) : new Date();
+            const local = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000);
+            return local.toISOString().split('T')[0];
+        };
+
         // Dark Mode Toggle
         function initTheme() {
             const savedTheme = localStorage.getItem('theme') || 'light';

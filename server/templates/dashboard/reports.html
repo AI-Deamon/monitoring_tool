@@ -621,7 +621,7 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
         // Set today's date as default
-        const today = new Date().toISOString().split('T')[0];
+        const today = localDateStr();
         document.getElementById('report-date').value = today;
         document.getElementById('fleet-date').value = today;
 
@@ -823,7 +823,7 @@
                 csv += `${esc(ls.hostname)},${esc(ls.agent_id)},${esc(ls.product_name)},${esc(ls.installed_version)},${esc(ls.matched_cycle)},${esc(ls.status)},${esc(ls.eol_date)},${ls.risk_score},${esc(ls.severity)}\n`;
             });
 
-            downloadCSV(csv, `lifecycle_compliance_report_${new Date().toISOString().split('T')[0]}.csv`);
+            downloadCSV(csv, `lifecycle_compliance_report_${localDateStr()}.csv`);
         } catch (error) {
             console.error('Lifecycle CSV Error:', error);
             alert('Failed to generate report.');
@@ -906,16 +906,16 @@
         let start, end;
         if (type === 'daily') {
             const d = new Date(today); d.setDate(d.getDate() - 1);
-            start = end = d.toISOString().split('T')[0];
+            start = end = localDateStr(d);
         } else if (type === 'monthly') {
             const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
             const last = new Date(today.getFullYear(), today.getMonth(), 0);
-            start = first.toISOString().split('T')[0]; end = last.toISOString().split('T')[0];
+            start = localDateStr(first); end = localDateStr(last);
         } else {
             const dow = today.getDay() || 7;
             const mon = new Date(today); mon.setDate(today.getDate() - dow - 6);
             const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-            start = mon.toISOString().split('T')[0]; end = sun.toISOString().split('T')[0];
+            start = localDateStr(mon); end = localDateStr(sun);
         }
         return { start: document.getElementById('ar-start').value || start, end: document.getElementById('ar-end').value || end };
     }
@@ -1287,7 +1287,7 @@
         const now = new Date();
         const ist = new Date(now.getTime() + (5.5 * 3600000));
         const today = new Date(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate());
-        const fmt = d => d.toISOString().split('T')[0];
+        const fmt = d => localDateStr(d);
         let s, e;
         if (preset === 'last_week') {
             const dow = today.getDay() || 7;
