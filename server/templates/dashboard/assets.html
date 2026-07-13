@@ -307,7 +307,7 @@
 
 {% block extra_js %}
 <!-- Chart.js for Lifecycle Distribution -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
 
 <script>
     let fleetAssets = [];
