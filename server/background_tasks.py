@@ -22,15 +22,19 @@ class BackgroundScheduler:
         self.shutdown_event = Event()
         self.thread = None
         self.tasks = []
+        from leader_election import get_leader
+        self.leader = get_leader(app)
 
-    def add_job(self, func, hour, minute, name):
-        """Add a job to run at a specific time daily (UTC)"""
+    def add_job(self, func, hour, minute, name, day_of_week=None):
+        """Add a job to run at a specific time daily (UTC), optionally
+        restricted to one weekday (0=Monday..6=Sunday)."""
         self.tasks.append(
             {
                 "type": "daily",
                 "func": func,
                 "hour": hour,
                 "minute": minute,
+                "day_of_week": day_of_week,
                 "name": name,
                 "last_run": None,
             }
@@ -71,9 +75,18 @@ class BackgroundScheduler:
         logger.info("[SCHEDULER] Background tasks stopped")
 
     def _run_loop(self):
-        """Main scheduler loop"""
+        """Main scheduler loop with crash recovery"""
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        
         while self.running and not self.shutdown_event.is_set():
             try:
+                # Only the elected leader process runs jobs; other gunicorn
+                # workers idle here and take over if the leader dies.
+                if not self.leader.check():
+                    self.shutdown_event.wait(30)
+                    continue
+
                 now = datetime.now(timezone.utc)
                 now_ts = time.time()
 
@@ -81,7 +94,8 @@ class BackgroundScheduler:
                     should_run = False
 
                     if task["type"] == "daily":
-                        if now.hour == task["hour"] and now.minute == task["minute"]:
+                        dow_ok = task.get("day_of_week") is None or now.weekday() == task["day_of_week"]
+                        if dow_ok and now.hour == task["hour"] and now.minute == task["minute"]:
                             if task["last_run"] != now.strftime("%Y-%m-%d %H:%M"):
                                 should_run = True
                                 task["last_run"] = now.strftime("%Y-%m-%d %H:%M")
@@ -92,19 +106,58 @@ class BackgroundScheduler:
                             task["last_run_time"] = now_ts
 
                     if should_run:
-                        logger.info(f"[SCHEDULER] Running: {task['name']}")
+                        task_name = task['name']
+                        logger.info(f"[SCHEDULER] Running: {task_name}")
                         try:
                             with self.app.app_context():
                                 task["func"]()
+                            # H-13 FIX: Track successful execution
+                            task["failures"] = 0
                         except Exception as e:
-                            logger.error(f"[SCHEDULER] Error in {task['name']}: {e}")
+                            # H-13 FIX: Enhanced error handling with failure tracking
+                            task["failures"] = task.get("failures", 0) + 1
+                            logger.error(
+                                f"[SCHEDULER] Error in {task_name} (failure #{task['failures']}): {e}",
+                                exc_info=True
+                            )
+                            
+                            # Alert on repeated failures
+                            if task["failures"] >= 3:
+                                logger.critical(
+                                    f"[SCHEDULER] ALERT: {task_name} has failed {task['failures']} times! "
+                                    "Manual intervention may be required."
+                                )
+                            
+                            # Reset failure counter if task recovers after restart
+                            if task["failures"] >= 5:
+                                logger.warning(f"[SCHEDULER] Resetting failure counter for {task_name}")
+                                task["failures"] = 0
 
                 # Sleep for 10 seconds (more responsive than 30s)
                 self.shutdown_event.wait(10)
+                # H-13 FIX: Reset error counter on successful iteration
+                consecutive_errors = 0
 
             except Exception as e:
-                logger.error(f"[SCHEDULER] Error in scheduler loop: {e}")
-                self.shutdown_event.wait(60)
+                # H-13 FIX: Enhanced crash recovery
+                consecutive_errors += 1
+                logger.error(
+                    f"[SCHEDULER] Error in scheduler loop (#{consecutive_errors}): {e}",
+                    exc_info=True
+                )
+                
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.critical(
+                        f"[SCHEDULER] FATAL: Scheduler crashed {consecutive_errors} times! "
+                        "Stopping scheduler to prevent infinite crash loop."
+                    )
+                    self.running = False
+                    break
+                
+                # Exponential backoff: 10s, 20s, 40s, 60s, 60s
+                backoff = min(10 * (2 ** (consecutive_errors - 1)), 60)
+                logger.warning(f"[SCHEDULER] Restarting in {backoff}s...")
+                self.shutdown_event.wait(backoff)
 
 
 def sync_yesterday_data():
@@ -570,7 +623,7 @@ def start_background_tasks(app):
 
     # Run NVD cache sync weekly (Sundays at 1:30 AM UTC — supplementary)
     scheduler.add_job(
-        func=sync_nvd_cache, hour=1, minute=30, name="NVD vulnerability cache sync"
+        func=sync_nvd_cache, hour=1, minute=30, day_of_week=6, name="NVD vulnerability cache sync"
     )
 
     # ── Auto-Update Background Jobs ──────────────────────────────
