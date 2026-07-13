@@ -146,11 +146,12 @@ def get_hidden_imports():
         # root-level modules
         "logger",
         
-        # core modules (13 files)
+        # core modules (14 files)
         "core",
         "core.service",
         "core.config",
         "core.config_schema",
+        "core.agent_time",
         "core.ingest",
         "core.buffer",
         "core.uploader",
@@ -179,7 +180,6 @@ def get_hidden_imports():
         "helper.performance",
         "helper.persistence",
         "helper.state_detector",
-        "helper.state_detector_spans",
         "helper.identity_sync",
         "helper.app_names",
     ]

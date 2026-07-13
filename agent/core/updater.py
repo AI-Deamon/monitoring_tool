@@ -93,8 +93,16 @@ class AgentUpdater:
 
     def _detect_install_dir(self) -> Path:
         """Detect the agent installation directory."""
-        # service.py sets install_dir as parent of core/
-        # __file__ is core/updater.py -> parent is core/ -> parent is agent install
+        # Frozen (PyInstaller) build: __file__ lives in the temporary _MEIPASS
+        # extraction dir, NOT the install dir - so the source-layout probe
+        # below always misses and we would fall back to a hardcoded
+        # C:\Program Files path, which is wrong for non-admin/custom installs.
+        # The EXE's own location IS the install dir.
+        if getattr(sys, 'frozen', False):
+            return Path(sys.executable).resolve().parent
+
+        # Source layout: __file__ is core/updater.py -> parent is core/
+        # -> parent is the agent install dir
         candidate = Path(__file__).resolve().parent.parent
         if (candidate / 'core').is_dir():
             return candidate
@@ -171,10 +179,12 @@ class AgentUpdater:
         """
         key = self._get_signing_key()
         if not key:
-            logger.warning(
-                "[UPDATER] Skipping signature verification - no signing key"
-            )
-            return True
+            allow_unsigned = self.config.config.get('updates', {}).get('allow_unsigned_updates', False)
+            if allow_unsigned:
+                logger.warning("[UPDATER] Skipping signature verification (allow_unsigned_updates=true)")
+                return True
+            logger.error("[UPDATER] No signing key configured - REJECTING update")
+            return False
 
         received_sig = metadata.get('signature', '')
         if not received_sig:
@@ -384,6 +394,9 @@ class AgentUpdater:
                 # Verify SHA256
                 actual_sha256 = self._compute_sha256(zip_path)
                 if actual_sha256 != expected_sha256:
+                    # A truncated or corrupted transfer is retryable - only
+                    # give up once the retries are exhausted (a genuinely bad
+                    # package on the server will fail every attempt anyway).
                     logger.error(
                         f"[UPDATER] [FAIL] SHA256 mismatch on attempt {attempt}! "
                         f"Expected: {expected_sha256[:16]}... "
@@ -393,6 +406,17 @@ class AgentUpdater:
                         zip_path.unlink()
                     except Exception:
                         pass
+                    if attempt < max_retries:
+                        wait_seconds = min(2 ** attempt, 30)
+                        logger.info(
+                            f"[UPDATER] Re-downloading in {wait_seconds}s..."
+                        )
+                        time.sleep(wait_seconds)
+                        continue
+                    logger.error(
+                        "[UPDATER] SHA256 mismatch persisted across "
+                        f"{max_retries} attempts - aborting update"
+                    )
                     return None
 
                 file_size = zip_path.stat().st_size
@@ -492,24 +516,34 @@ class AgentUpdater:
             logger.error(f"[UPDATER] Extract failed: {e}")
             return False
 
-        # Step 3: Replace agent files
+        # Step 3: Replace agent files (atomic rename, not rmtree+copytree)
         try:
             updated_items = []
 
-            # Replace core/ directory
+            # Replace core/ directory (atomic: rename old -> rename new)
             if (staging_dir / 'core').is_dir():
                 target = self.install_dir / 'core'
+                old_target = self.install_dir / 'core.rollback'
+                if old_target.exists():
+                    shutil.rmtree(old_target)
                 if target.exists():
-                    shutil.rmtree(target)
-                shutil.copytree(staging_dir / 'core', target)
+                    target.rename(old_target)
+                (staging_dir / 'core').rename(target)
+                if old_target.exists():
+                    shutil.rmtree(old_target, ignore_errors=True)
                 updated_items.append('core/')
 
-            # Replace helper/ directory
+            # Replace helper/ directory (atomic: rename old -> rename new)
             if (staging_dir / 'helper').is_dir():
                 target = self.install_dir / 'helper'
+                old_target = self.install_dir / 'helper.rollback'
+                if old_target.exists():
+                    shutil.rmtree(old_target)
                 if target.exists():
-                    shutil.rmtree(target)
-                shutil.copytree(staging_dir / 'helper', target)
+                    target.rename(old_target)
+                (staging_dir / 'helper').rename(target)
+                if old_target.exists():
+                    shutil.rmtree(old_target, ignore_errors=True)
                 updated_items.append('helper/')
 
             # Replace main scripts
@@ -536,6 +570,15 @@ class AgentUpdater:
             logger.warning(f"[UPDATER] Compilation warning: {e}")
             # Non-fatal - Python can still run .py files
 
+        # Step 4b: Regenerate integrity manifest for new version
+        try:
+            from .integrity import generate_manifest, save_manifest
+            new_manifest = generate_manifest(self.install_dir)
+            save_manifest(self.install_dir, new_manifest)
+            logger.info("[UPDATER] Integrity manifest regenerated for new version")
+        except Exception as e:
+            logger.warning(f"[UPDATER] Could not regenerate integrity manifest: {e}")
+
         # Step 5: Write version.json
         version_data = {
             'version': version,
@@ -556,7 +599,12 @@ class AgentUpdater:
             except Exception:
                 pass
 
-        self.version_file.write_text(json.dumps(version_data, indent=2))
+        # Write atomically (temp file + rename) so a crash mid-write can't
+        # leave a truncated version.json that check_pending_update()/
+        # _read_current_version() would silently misinterpret.
+        tmp_version_file = self.version_file.with_suffix('.tmp')
+        tmp_version_file.write_text(json.dumps(version_data, indent=2))
+        tmp_version_file.replace(self.version_file)
 
         # Step 6: Write pending flag (read on next startup)
         pending = {
@@ -565,7 +613,9 @@ class AgentUpdater:
             'applied_at': datetime.now(timezone.utc).isoformat(),
             'backup_path': str(backup_path),
         }
-        self.pending_file.write_text(json.dumps(pending, indent=2))
+        tmp_pending_file = self.pending_file.with_suffix('.tmp')
+        tmp_pending_file.write_text(json.dumps(pending, indent=2))
+        tmp_pending_file.replace(self.pending_file)
 
         logger.info(f"[UPDATER] [OK] Update applied: {version}")
         logger.info("[UPDATER] Restart required to complete update")
@@ -652,13 +702,28 @@ class AgentUpdater:
         logger.info(f"[UPDATER] [ROLLBACK] Rolling back from {backup_path}")
 
         try:
-            # Restore backed up items
+            # Restore backed up items (atomic rename for directories)
             for item in backup_path.iterdir():
                 target = self.install_dir / item.name
                 if item.is_dir():
+                    # Stage a copy of the backup first (non-destructively - the
+                    # backup itself must remain intact for a future rollback
+                    # attempt), then swap it into place via rename so a crash
+                    # mid-copy leaves `target` either fully old or fully staged,
+                    # never partially written.
+                    staging = self.install_dir / f'{item.name}.rollback_staging'
+                    if staging.exists():
+                        shutil.rmtree(staging)
+                    shutil.copytree(item, staging)
+
+                    old_target = self.install_dir / f'{item.name}.rollback'
+                    if old_target.exists():
+                        shutil.rmtree(old_target)
                     if target.exists():
-                        shutil.rmtree(target)
-                    shutil.copytree(item, target)
+                        target.rename(old_target)
+                    staging.rename(target)
+                    if old_target.exists():
+                        shutil.rmtree(old_target, ignore_errors=True)
                 elif item.is_file():
                     shutil.copy2(item, target)
 
@@ -692,7 +757,12 @@ class AgentUpdater:
         try:
             return json.loads(self.pending_file.read_text())
         except Exception as e:
-            logger.error(f"[UPDATER] Failed to read pending file: {e}")
+            # An unreadable pending file can never be completed, and leaving
+            # it in place makes every subsequent startup re-fail on it.
+            logger.error(
+                f"[UPDATER] Failed to read pending file, discarding it: {e}"
+            )
+            self._safe_delete(self.pending_file)
             return None
 
     def run_self_test(self) -> Tuple[bool, str]:
@@ -1048,8 +1118,7 @@ class AgentUpdater:
 
         # UPD-002: Prevent concurrent update cycles
         if self.update_lock_file.exists():
-            # Check if lock is stale (older than 30 mins)
-            if time.time() - self.update_lock_file.stat().st_mtime > 1800:
+            if self._lock_is_stale():
                 logger.warning("[UPDATER] Stale update lock found, removing")
                 try: self.update_lock_file.unlink()
                 except: pass
@@ -1057,6 +1126,11 @@ class AgentUpdater:
                 logger.info("[UPDATER] Update cycle skipped - lock file exists")
                 return False
 
+        # Tracks whether the lock should survive this call - only the
+        # restart-triggered success path keeps it (the dying process takes
+        # it with it); every other return path clears it immediately so a
+        # transient failure doesn't block the next update check indefinitely.
+        keep_lock_for_restart = False
         try:
             # Acquire lock
             self.update_lock_file.write_text(str(os.getpid()))
@@ -1111,6 +1185,11 @@ class AgentUpdater:
                     logger.info(
                         "[UPDATER] EXE swap initiated - service will restart"
                     )
+                    # Hold the lock: the swapper is a detached process that
+                    # waits for THIS process to exit before replacing files.
+                    # Clearing the lock here would let another update cycle
+                    # start mid-swap (the race UPD-002 exists to prevent).
+                    keep_lock_for_restart = True
                     return True
 
                 logger.error(
@@ -1141,20 +1220,70 @@ class AgentUpdater:
             # Restart service
             self.trigger_restart()
 
-            # Lock is removed after restart (clean data dir) or by OS on exit normally,
-            # but here we should keep it until we die to ensure nothing else starts.
+            # Keep the lock file in place until the process actually exits -
+            # trigger_restart() only launches the restart asynchronously, so
+            # this process may keep running briefly. Clearing the lock here
+            # would let a second concurrent update cycle start during that
+            # window (the exact race UPD-002 exists to prevent).
+            keep_lock_for_restart = True
             return True
         except Exception as e:
             logger.error(f"[UPDATER] Critical error in update cycle: {e}")
             return False
         finally:
-            if self.update_lock_file.exists():
+            if not keep_lock_for_restart and self.update_lock_file.exists():
                 try: self.update_lock_file.unlink()
                 except: pass
 
     # =========================================================================
     # Utilities
     # =========================================================================
+
+    def _lock_is_stale(self) -> bool:
+        """Is the existing update.lock abandoned?
+
+        The lock is deliberately held across the update restart (the swapper
+        waits for this process to exit before replacing files), so after a
+        successful update the file outlives the process that wrote it and
+        NOTHING deletes it. A pure age check would then block every update
+        cycle for 30 minutes after each update. So: a lock whose owning PID
+        is gone is stale immediately; the age check remains as a backstop for
+        a lock whose PID we cannot read or that got recycled.
+        """
+        try:
+            age = time.time() - self.update_lock_file.stat().st_mtime
+        except OSError:
+            return True
+
+        if age > 1800:
+            return True
+
+        try:
+            pid = int(self.update_lock_file.read_text().strip())
+        except (ValueError, OSError):
+            return True  # unreadable lock cannot be attributed to anyone
+
+        if pid == os.getpid():
+            return False  # our own in-flight cycle
+
+        return not self._pid_is_running(pid)
+
+    @staticmethod
+    def _pid_is_running(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            import psutil
+            return psutil.pid_exists(pid)
+        except ImportError:
+            pass
+        try:
+            os.kill(pid, 0)  # signal 0 = existence check, no signal sent
+        except OSError:
+            return False
+        except Exception:
+            return True  # can't prove it's gone - assume alive (fail safe)
+        return True
 
     @staticmethod
     def _safe_delete(path: Path):

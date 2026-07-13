@@ -591,6 +591,10 @@ def main() -> int:
         _set_helper_task_enabled_and_run(helper_task)
 
         _cleanup_path(data_dir / "failed_swap.json")
+        # The core holds update.lock across the swap (it must not run another
+        # cycle while we replace its EXE). That process is gone now, so
+        # release the lock or the restarted core is blocked from updating.
+        _cleanup_path(data_dir / "update.lock")
         # Service was already stopped before file swap, so use "start" not "restart"
         if not _restart_service(install_dir, service_name, mode="start"):
             raise RuntimeError(
@@ -614,6 +618,14 @@ def main() -> int:
             backup_path=str(backup_dir) if str(backup_dir) else "",
             error=error_text,
         )
+
+        # update_pending.json is written before the service restart, so a
+        # failure after that point would leave it behind. The core reads it on
+        # startup and would self-test the ROLLED-BACK binary, then report the
+        # new version as 'healthy' - while failed_swap.json says the swap
+        # failed. Drop it so the failure is reported once, consistently.
+        _cleanup_path(data_dir / "update_pending.json")
+        _cleanup_path(data_dir / "update.lock")
 
         if backup_created and backup_dir.exists():
             try:
