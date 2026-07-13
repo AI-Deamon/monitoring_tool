@@ -267,7 +267,10 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/overview.js') }}"></script>
-<script src="{{ url_for('static', filename='js/eol-dashboard.js') }}"></script>
+{# eol-dashboard.js is already loaded for every page by base.html. Loading it
+   again here ran its DOMContentLoaded handler twice, so the two fetches it
+   makes (alerts banner + risk chart) became four calls to
+   /api/lifecycle/fleet-summary on every overview load. #}
 <script>
 // Color schemes for charts
 const CATEGORY_COLORS = {

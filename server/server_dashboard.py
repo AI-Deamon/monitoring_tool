@@ -3645,6 +3645,53 @@ def api_productivity_score():
         return jsonify({"error": str(e)}), 500
 
 
+def _unwrap_panel(view_func):
+    """Call an overview panel view in-process and return (data, ok).
+
+    The overview page fired 5+ separate polling requests every 30s per open
+    tab, each its own round trip and DB session. This lets one bundle endpoint
+    reuse each panel's exact logic (access control, visibility filter, queries)
+    without duplicating it, by calling the view and unwrapping its JSON body.
+    A panel that errors yields ok=False rather than failing the whole bundle.
+    """
+    try:
+        rv = view_func()
+        # Views return jsonify(...) or (jsonify(...), status_code)
+        resp = rv[0] if isinstance(rv, tuple) else rv
+        status = rv[1] if isinstance(rv, tuple) else 200
+        data = resp.get_json(silent=True)
+        return data, (status == 200 and not (isinstance(data, dict) and data.get("error")))
+    except Exception as e:
+        logger.warning("[OVERVIEW-BUNDLE] panel %s failed: %s",
+                       getattr(view_func, "__name__", "?"), e)
+        return None, False
+
+
+@bp.route("/api/overview/bundle", methods=["GET"])
+@login_required
+@api_rate_limit
+def api_overview_bundle():
+    """One request returning every overview panel.
+
+    Collapses the overview page's 5 polls (KPIs, productivity, top apps, top
+    domains, category breakdown) into a single round trip. Each panel is under
+    its own key so the client can render partial results if one fails.
+    Query args (date, limit, days) pass straight through to the panel views.
+    """
+    panels = {
+        "overview": api_overview,
+        "productivity_metrics": api_overview_productivity_metrics,
+        "top_apps": api_overview_top_apps,
+        "top_domains": api_overview_top_domains,
+        "category_breakdown": api_category_breakdown,
+    }
+    result = {}
+    for key, fn in panels.items():
+        data, ok = _unwrap_panel(fn)
+        result[key] = {"ok": ok, "data": data}
+    return jsonify(result)
+
+
 @bp.route("/api/overview/category-breakdown", methods=["GET"])
 @login_required
 @api_rate_limit
