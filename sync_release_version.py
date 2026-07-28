@@ -53,11 +53,22 @@ def _update_latest_json(
         return False
 
     data = json.loads(path.read_text(encoding="utf-8"))
+    previous_version = data.get("version")
     data["version"] = version
     data["changelog"] = changelog or f"Agent version {version}"
     if min_agent_version:
         data["min_agent_version"] = min_agent_version
     data["release_date"] = release_date or datetime.now(timezone.utc).isoformat()
+
+    # package_sha256/package_size/signature describe the *previous* package.
+    # Carrying them onto a new version number produces a file that claims to
+    # be version X while checksumming version Y - which is what put a 4.2.0
+    # row with 4.0.2's hash into update_versions. Clear them; the real values
+    # are written by create_update_package.py when the package is built.
+    if previous_version and previous_version != version:
+        for stale_key in ("package_sha256", "package_size", "signature"):
+            if stale_key in data:
+                data[stale_key] = "" if isinstance(data[stale_key], str) else 0
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return True
 

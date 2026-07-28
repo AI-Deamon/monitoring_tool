@@ -237,20 +237,39 @@ def _write_update_history(agent_id: str, event: str, version: str, details: str 
             pass
 
 
-def _get_agent_from_db(agent_id: str):
-    """Helper to get agent record from DB."""
+def _get_agent_from_db(agent_id):
+    """Helper to get agent record from DB.
+
+    agent_id is untrusted input - it arrives from an X-Agent-ID header or a
+    JSON body, so it may be any type, or absent entirely.
+    """
+    import uuid as _uuid
+
+    # agents.agent_id is a native UUID column; bind a uuid.UUID so the
+    # lookup works on every dialect (SQLite's UUID binding rejects str).
     try:
-        import uuid as _uuid
+        parsed_id = _uuid.UUID(str(agent_id))
+    except (ValueError, AttributeError, TypeError):
+        # A non-UUID id (callers default to the literal 'unknown' when
+        # X-Agent-ID is absent) can never match a UUID column. Issuing the
+        # query anyway made Postgres raise InvalidTextRepresentation, which
+        # aborts the transaction and makes every later query in the same
+        # request fail with "current transaction is aborted" - including the
+        # policy lookup right after this one. Just miss cleanly instead.
+        logger.debug(f"[UPDATES] Ignoring non-UUID agent id: {agent_id!r}")
+        return None
+
+    try:
         import server_models
-        # agents.agent_id is a native UUID column; bind a uuid.UUID so the
-        # lookup works on every dialect (SQLite's UUID binding rejects str).
-        try:
-            agent_id = _uuid.UUID(str(agent_id))
-        except (ValueError, AttributeError, TypeError):
-            pass  # non-UUID id - let the query match (or miss) as-is
-        return server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        return server_models.Agent.query.filter_by(agent_id=parsed_id).first()
     except Exception as e:
         logger.error(f"[UPDATES] DB lookup failed for {agent_id}: {e}")
+        # Leave the session usable for the rest of the request.
+        try:
+            from extensions import db
+            db.session.rollback()
+        except Exception:
+            pass
         return None
 
 

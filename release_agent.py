@@ -346,6 +346,19 @@ def step_verify(version: str, latest: dict, installer_zip: Path) -> None:
             fail(f"version.json inside package says {meta.get('version')!r}")
     log("7/7", "  Package holds only the 3 executables + matching version.json")
 
+    # sync_release_version.py also maintains a second copy under
+    # server/scripts/updates/. The server never reads it, but
+    # sync_available_versions-style tooling and humans do, and a copy left
+    # claiming this version with the previous package's checksum is exactly
+    # how update_versions ended up with a 4.2.0 row carrying 4.0.2's hash.
+    mirror = SERVER_DIR / "scripts" / "updates" / "latest.json"
+    if mirror.exists():
+        mirrored = json.loads(mirror.read_text(encoding="utf-8"))
+        if (mirrored.get("version") == version
+                and mirrored.get("package_sha256") != latest["package_sha256"]):
+            shutil.copy2(SERVER_UPDATES_DIR / "latest.json", mirror)
+            log("7/7", "  Refreshed stale server/scripts/updates/latest.json mirror")
+
     with zipfile.ZipFile(installer_zip) as zf:
         names = set(zf.namelist())
         for required in ("dist/install_exe.bat", "dist/VERSION.txt",
