@@ -21,10 +21,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
 
 @pytest.fixture
-def app():
-    os.environ['FLASK_ENV'] = 'development'
-    os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
-    os.environ['SECRET_KEY'] = 'test-secret-key-for-unit-tests'
+def app(monkeypatch):
+    # monkeypatch, not os.environ[...] = ...: other suites (e.g.
+    # test_midnight_span_handling) deliberately run against the real
+    # DATABASE_URL, and permanently repointing it at in-memory SQLite
+    # makes every later test fail with "no such table: agents".
+    monkeypatch.setenv('FLASK_ENV', 'development')
+    monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
+    monkeypatch.setenv('SECRET_KEY', 'test-secret-key-for-unit-tests')
 
     from server_app import create_app
     from extensions import db
