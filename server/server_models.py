@@ -236,7 +236,20 @@ class AgentCurrentStatus(db.Model):
 
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
 
-    agent = db.relationship("Agent", backref="current_status", uselist=False)
+    # agent_id is BOTH this table's primary key and the FK to agents. Without
+    # an explicit cascade, deleting an Agent makes SQLAlchemy try to null out
+    # the child's FK - which is the PK here, so it raises:
+    #   "Dependency rule tried to blank-out primary key column
+    #    'agent_current_status.agent_id'"
+    # and the delete fails before Postgres' ON DELETE CASCADE can act.
+    # uselist=False belongs on the backref so agent.current_status is the
+    # scalar this class documents, not a list.
+    agent = db.relationship(
+        "Agent",
+        backref=db.backref(
+            "current_status", uselist=False, cascade="all, delete-orphan"
+        ),
+    )
 
     # FIX 5: STALE STATUS DETECTION
     @property
