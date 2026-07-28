@@ -24,7 +24,7 @@ import threading
 from enum import Enum
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +315,17 @@ class ScreenTimeEngine:
                 logger.warning("[STATE_MACHINE] No last_timestamp in persisted state")
                 return {"action": "no_timestamp", "gap_seconds": 0}
 
+            # JSON round-trips whole numbers as int; normalize once here so
+            # everything downstream can rely on the float annotations.
+            try:
+                last_timestamp = float(last_timestamp)
+            except (TypeError, ValueError):
+                logger.warning(
+                    f"[STATE_MACHINE] Unusable last_timestamp in persisted state: "
+                    f"{last_timestamp!r}"
+                )
+                return {"action": "no_timestamp", "gap_seconds": 0}
+
             now = time.time()
 
             # ✅ PHASE 2 FIX: Split gap at midnight boundary (IST).
@@ -471,9 +482,7 @@ class ScreenTimeEngine:
             return False
 
         try:
-            boot_time = float(psutil.boot_time())
-            start_time = float(start_time)
-            end_time = float(end_time)
+            boot_time = psutil.boot_time()
 
             # Reboot during the gap means shutdown/crash path, not sleep.
             if boot_time > start_time:
@@ -597,7 +606,7 @@ class ScreenTimeEngine:
 
             return False, None
 
-    def reset_daily(self, on_final_totals_callback: Optional[callable] = None):
+    def reset_daily(self, on_final_totals_callback: Optional[Callable[[Dict], None]] = None):
         """
         Reset counters at midnight (IDEMPOTENT).
 
