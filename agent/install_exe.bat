@@ -125,6 +125,21 @@ if "%REGISTRATION_SECRET%"=="" (
     echo [OK] Registration secret configured
 )
 
+:: Update signing key - must match the server's UPDATE_SIGNING_KEY.
+:: Without it the agent rejects EVERY update as unsigned
+:: (updater.verify_signature -> "No signing key configured - REJECTING update"),
+:: so auto-update silently never works on this machine.
+set "UPDATE_SIGNING_KEY="
+set /p "UPDATE_SIGNING_KEY=Enter update signing key (from admin, UPDATE_SIGNING_KEY): "
+if "%UPDATE_SIGNING_KEY%"=="" (
+    echo [WARN] No update signing key - THIS AGENT WILL NEVER AUTO-UPDATE.
+    echo [WARN] It will keep polling, be offered updates, and reject each one
+    echo [WARN] as unsigned. Re-run with the key, or set updates.signing_key in
+    echo [WARN] %DATA_DIR%\config.json later and restart the services.
+) else (
+    echo [OK] Update signing key configured
+)
+
 :: ============================================================================
 :: STEP 5: Stop and Remove Old Installation (Both Old + New Names)
 :: ============================================================================
@@ -492,7 +507,7 @@ echo   },
 echo   "updates": {
 echo     "enabled": true,
 echo     "check_interval": 1800,
-echo     "signing_key": ""
+echo     "signing_key": "!UPDATE_SIGNING_KEY!"
 echo   },
 echo   "api_token": ""
 echo }
