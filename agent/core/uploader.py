@@ -264,6 +264,7 @@ def get_certificate_fingerprint(hostname: str, port: int = 443) -> Optional[str]
     
     try:
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         with socket.create_connection((hostname, port), timeout=5) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert_der = ssock.getpeercert(binary_form=True)
@@ -660,6 +661,7 @@ class ServerUploader:
                 context = None
                 if url.startswith('https://') and not self.config.allow_insecure_http:
                     context = ssl.create_default_context()
+                    context.minimum_version = ssl.TLSVersion.TLSv1_2
                     context.verify_mode = ssl.CERT_REQUIRED
                     
                     # mTLS support: Load client cert if enabled
@@ -734,7 +736,17 @@ class ServerUploader:
                     error_body = e.read().decode('utf-8')
                     logger.error(f"[REQUEST] Error body: {error_body}")
                 except:
-                    pass
+                    error_body = None
+
+                # 400 = the payload itself failed server-side validation
+                # (e.g. screentime totals exceeding 24h). Retrying an
+                # unmodified payload can never succeed, unlike network
+                # errors/401/403/5xx which are transient. Callers that
+                # buffer-and-retry (e.g. _upload_merged_events) need to be
+                # able to tell these apart so they stop resending data that
+                # will be rejected forever.
+                if e.code == 400:
+                    return {'status': 'rejected', 'http_code': 400, 'error': error_body}
                 return None
                 
             except CertificatePinningError as e:
@@ -811,6 +823,13 @@ class ServerUploader:
             return False
         status = str(response.get('status', '')).lower()
         return status in ('ok', 'success', 'skipped')
+
+    def _is_permanent_rejection(self, response: Optional[Dict]) -> bool:
+        """True if the server rejected the payload with HTTP 400 - i.e. the
+        data itself is invalid and will never be accepted, no matter how
+        many times it's resent. Distinct from transient failures (network
+        errors, 401/403, 5xx) which are worth retrying."""
+        return bool(response) and str(response.get('status', '')).lower() == 'rejected'
 
     def _send_current_status(self):
         """Send current app/idle status from latest heartbeat"""
@@ -968,9 +987,19 @@ class ServerUploader:
                 # Mark immediately per-item to avoid re-delivery on crash
                 self.buffer.mark_events_uploaded([event['id']])
                 uploaded_ids.append(event['id'])
+            elif self._is_permanent_rejection(response):
+                # Server validation will never pass for this exact payload
+                # (e.g. a screentime snapshot whose bucket sum exceeds 24h).
+                # Drop it instead of resending it every upload cycle forever.
+                logger.warning(
+                    f"[UPLOAD] Dropping permanently-invalid {event_type} event "
+                    f"id={event['id']} (agent={event.get('agent_id')}): "
+                    f"server rejected with HTTP 400, will never succeed"
+                )
+                self.buffer.mark_events_uploaded([event['id']])
             else:
                 self.buffer.record_upload_ack_failure()
-        
+
         if uploaded_ids:
             logger.info(f"[OK] Uploaded {len(uploaded_ids)} merged events")
     
