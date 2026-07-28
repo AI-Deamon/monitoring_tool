@@ -36,6 +36,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent
 AGENT_DIR = ROOT / "agent"
@@ -61,7 +62,7 @@ def log(step: str, msg: str) -> None:
     print(f"[{step}] {msg}")
 
 
-def fail(msg: str) -> None:
+def fail(msg: str) -> NoReturn:
     raise ReleaseError(msg)
 
 
@@ -202,15 +203,40 @@ def step_build(version: str) -> None:
     log("3/7", "  Built windiag.exe, syshealth.exe, tools/swapper.exe")
 
 
+def step_strip_installer_files() -> None:
+    """Keep installer-only payload out of the auto-update package.
+
+    The packager globs *.exe recursively from dist/, so anything staged for
+    the installer would ride along into the update zip. nssm.exe especially
+    must not: it is the service wrapper hosting windiag.exe, and having the
+    swapper overwrite it in place during an update is asking for a bricked
+    service. Runs before packaging so reruns with --skip-build are safe.
+    """
+    log("4/7", "Excluding installer-only files from the update payload")
+
+    nssm_dst = DIST_DIR / "nssm"
+    if nssm_dst.exists():
+        shutil.rmtree(nssm_dst)
+        log("4/7", "  removed dist/nssm/")
+    stray_installer = DIST_DIR / "install_exe.bat"
+    if stray_installer.exists():
+        stray_installer.unlink()
+        log("4/7", "  removed dist/install_exe.bat")
+    log("4/7", "  update payload is windiag.exe + syshealth.exe + tools/swapper.exe")
+
+
 def step_stage_installer_files() -> None:
-    """build_exe.py wipes dist/, so restore the installer-only payload."""
-    log("4/7", "Staging installer files into dist/")
+    """build_exe.py wipes dist/, so restore the installer-only payload.
+
+    Runs *after* the update package is built (see step_strip_installer_files).
+    """
+    log("6/7", "Staging installer files into dist/")
 
     installer = AGENT_DIR / "install_exe.bat"
     if not installer.exists():
         fail(f"Missing {installer}")
     shutil.copy2(installer, DIST_DIR / "install_exe.bat")
-    log("4/7", "  install_exe.bat")
+    log("6/7", "  install_exe.bat")
 
     nssm_src = AGENT_DIR / "nssm"
     if not nssm_src.is_dir():
@@ -219,7 +245,7 @@ def step_stage_installer_files() -> None:
     if nssm_dst.exists():
         shutil.rmtree(nssm_dst)
     shutil.copytree(nssm_src, nssm_dst)
-    log("4/7", "  nssm/win32 + nssm/win64")
+    log("6/7", "  nssm/win32 + nssm/win64")
 
 
 def step_publish(version: str, signing_key: str, min_version: str,
@@ -301,10 +327,24 @@ def step_verify(version: str, latest: dict, installer_zip: Path) -> None:
             arc = str(rel).replace("\\", "/")
             if arc not in names:
                 fail(f"Update package is missing {arc}")
+
+        # The swapper replaces these in place on a live install. nssm.exe is
+        # the service wrapper currently hosting windiag.exe, and the installer
+        # batch file has no business in an update, so neither may ship here.
+        forbidden = sorted(
+            n for n in names
+            if n.startswith("nssm/") or n.endswith("install_exe.bat")
+        )
+        if forbidden:
+            fail(
+                "Update package contains installer-only files that the swapper "
+                "must never overwrite in place: " + ", ".join(forbidden)
+            )
+
         meta = json.loads(zf.read("version.json"))
         if meta.get("version") != version:
             fail(f"version.json inside package says {meta.get('version')!r}")
-    log("7/7", "  Package contains all 3 executables + matching version.json")
+    log("7/7", "  Package holds only the 3 executables + matching version.json")
 
     with zipfile.ZipFile(installer_zip) as zf:
         names = set(zf.namelist())
@@ -361,9 +401,10 @@ def main() -> int:
                 fail(f"dist/ is missing {', '.join(missing)} - cannot --skip-build")
         else:
             step_build(version)
-        step_stage_installer_files()
+        step_strip_installer_files()
         latest = step_publish(version, signing_key, args.min_version,
                               args.changelog, args.mandatory)
+        step_stage_installer_files()
         installer_zip = step_installer_zip(version)
         step_verify(version, latest, installer_zip)
     except ReleaseError as exc:
