@@ -91,7 +91,7 @@ def extract_domain_from_url_enhanced(url: str, keep_www: Optional[bool] = None) 
             # Keep port for localhost and private IPs
             try:
                 if _is_private_or_local(host):
-                    netloc = netloc  # Keep with port
+                    pass  # Keep with port
                 elif port in ('80', '443'):
                     netloc = host  # Strip standard ports
                 # else keep non-standard port

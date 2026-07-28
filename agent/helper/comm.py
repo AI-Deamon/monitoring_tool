@@ -114,6 +114,7 @@ class CoreCommunicator:
             if url.startswith('https://') and self.config.ssl_enabled:
                 import ssl
                 context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
                 if os.path.exists(self.config.client_cert_path):
                     try:
                         context.load_cert_chain(
@@ -122,8 +123,9 @@ class CoreCommunicator:
                         )
                         context.load_verify_locations(cafile=self.config.ca_cert_path)
                         context.verify_mode = ssl.CERT_REQUIRED
-                        # For local communication, hostname check can be tricky with self-signed
-                        context.check_hostname = False 
+                        # Core's local cert (server.crt) carries a SAN covering
+                        # localhost/127.0.0.1, and core_url is always localhost,
+                        # so hostname verification can stay enabled here.
                         logger.debug("[SECURITY] Loaded mTLS certificates for Core communication")
                     except Exception as e:
                         logger.error(f"[SECURITY] Failed to load mTLS certificates: {e}")

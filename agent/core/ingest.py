@@ -1017,6 +1017,7 @@ class IngestServer:
                 import ssl
 
                 context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
                 if os.path.exists(self.config.local_cert_path):
                     context.load_cert_chain(
                         certfile=self.config.local_cert_path,
