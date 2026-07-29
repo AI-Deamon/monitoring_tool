@@ -19,10 +19,10 @@ from typing import Any, Dict, Optional, Tuple
 DEFAULT_DATA_DIR = Path(r"C:\ProgramData\WinDiagSvc")
 FALLBACK_LOG_FILE = Path(r"C:\ProgramData\WinDiagSvc\logs\swapper_fallback.log")
 STALE_MANIFEST_MINUTES = 30
-PARENT_EXIT_TIMEOUT_SECONDS = 60
 REPLACE_RETRIES = 10
 REPLACE_RETRY_DELAY_SECONDS = 3
 SERVICE_START_TIMEOUT_SECONDS = 45
+SERVICE_STOP_TIMEOUT_SECONDS = 90
 SERVICE_STATE_POLL_SECONDS = 2
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -178,39 +178,43 @@ def _validate_manifest(manifest: Dict[str, Any], manifest_path: Path) -> None:
         )
 
 
-def _wait_for_process_exit(pid: int, timeout: int) -> bool:
-    """Wait for process to exit."""
-    if pid <= 0:
+def _stop_service(
+    install_dir: Path,
+    service_name: str,
+    timeout: int = SERVICE_STOP_TIMEOUT_SECONDS,
+) -> bool:
+    """Stop the core service and wait until SCM confirms STOPPED.
+
+    This replaces the old wait-for-parent-PID step. The core has no code path
+    that exits on its own (its update worker only returns from the thread), so
+    the service stop IS the parent exit - waiting for both just burned a fixed
+    60s on every swap before force-stopping the service anyway.
+    """
+    state = _get_service_state(service_name)
+    if state == "STOPPED":
+        LOGGER.info(f"Service already STOPPED: {service_name}")
         return True
 
-    LOGGER.info(f"Waiting for parent PID {pid} to exit (timeout={timeout}s)")
+    LOGGER.info(f"Stopping core service {service_name} (current state={state})")
 
-    try:
-        import psutil  # type: ignore
+    nssm = install_dir / "nssm" / "win64" / "nssm.exe"
+    if nssm.exists():
+        _run_command(
+            [str(nssm), "stop", service_name, str(timeout * 1000)],
+            timeout=timeout + 10,
+        )
+    else:
+        _run_command(["net", "stop", service_name], timeout=timeout)
 
-        try:
-            proc = psutil.Process(pid)
-            proc.wait(timeout=timeout)
-            LOGGER.info(f"Parent PID {pid} exited")
-            return True
-        except psutil.NoSuchProcess:
-            LOGGER.info(f"Parent PID {pid} already exited")
-            return True
-        except psutil.TimeoutExpired:
-            LOGGER.error(f"Timeout waiting for parent PID {pid}")
-            return False
-    except Exception:
-        started = time.time()
-        while time.time() - started < timeout:
-            try:
-                os.kill(pid, 0)
-            except OSError:
-                LOGGER.info(f"Parent PID {pid} exited")
-                return True
-            time.sleep(1)
+    if _wait_for_service_state(service_name, "STOPPED", timeout):
+        LOGGER.info(f"Service confirmed STOPPED: {service_name}")
+        return True
 
-        LOGGER.error(f"Timeout waiting for parent PID {pid}")
-        return False
+    LOGGER.error(
+        f"Service did not reach STOPPED within {timeout}s "
+        f"(last_state={_get_service_state(service_name) or 'UNKNOWN'})"
+    )
+    return False
 
 
 def _set_helper_task_disabled(task_name: str) -> bool:
@@ -516,23 +520,18 @@ def main() -> int:
         LOGGER.info(f"Install dir: {install_dir}")
         LOGGER.info(f"Data dir: {data_dir}")
 
-        if not _wait_for_process_exit(parent_pid, PARENT_EXIT_TIMEOUT_SECONDS):
-            LOGGER.warning(
-                f"Parent PID {parent_pid} did not exit in "
-                f"{PARENT_EXIT_TIMEOUT_SECONDS}s; proceeding with forced stop"
-            )
+        LOGGER.info(f"Parent PID (advisory): {parent_pid}")
 
         # Step 1: Stop helper task
         _set_helper_task_disabled(helper_task)
 
-        # Step 2: Stop the core service BEFORE file replacement
-        LOGGER.info(f"Stopping core service {service_name} before file swap...")
-        nssm = install_dir / "nssm" / "win64" / "nssm.exe"
-        if nssm.exists():
-            _run_command([str(nssm), "stop", service_name, "60"], timeout=70)
-        else:
-            _run_command(["net", "stop", service_name], timeout=60)
-        time.sleep(3)  # Allow SCM/task scheduler state to settle
+        # Step 2: Stop the core service BEFORE file replacement. This is also
+        # how the parent process exits - the core never exits on its own.
+        if not _stop_service(install_dir, service_name):
+            raise RuntimeError(
+                f"Could not stop {service_name}; refusing to swap files "
+                "while the old binaries may still be running"
+            )
 
         # Kill any stale windiag/syshealth processes
         LOGGER.info("Killing stale processes...")
