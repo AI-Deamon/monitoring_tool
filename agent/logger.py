@@ -85,15 +85,47 @@ class ReadableFormatter(logging.Formatter):
         return s
 
 
+# Third-party loggers that would otherwise flood the log now that records
+# reach the root handlers. urllib3 in particular logs every HTTP request the
+# uploader makes.
+NOISY_LOGGERS = (
+    "urllib3",
+    "requests",
+    "asyncio",
+    "charset_normalizer",
+    "PIL",
+)
+
+
 def setup_logger(name, log_file, level=logging.INFO):
     """
     Sets up and returns a human-readable logger writing to a rotating file.
-    """
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
 
-    # Avoid adding handlers multiple times
-    if not logger.handlers:
+    Handlers go on the ROOT logger, not on `name`. Every module outside
+    service.py uses logging.getLogger(__name__) - core.updater, core.buffer,
+    helper.state_detector - which are siblings of a named logger like
+    "SentinelCore", not descendants. Attaching the handlers to the named
+    logger meant those records propagated to a bare root logger, hit
+    logging.lastResort, and were dropped at INFO / dumped to stderr unformatted
+    at WARNING+. On L180701PB that left core.log holding records from
+    service.py alone: the entire update, buffer and uploader subsystems logged
+    into a void.
+
+    Root handlers fix that for every module at once. `name` is still returned
+    (with no handlers of its own, so it propagates) to keep the existing
+    call sites working and to keep one record per emit rather than two.
+    """
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    target = os.path.abspath(log_file)
+    already_attached = any(
+        isinstance(handler, RotatingFileHandler)
+        and os.path.abspath(getattr(handler, "baseFilename", "")) == target
+        for handler in root.handlers
+    )
+
+    if not already_attached:
         # Ensure log directory exists
         log_dir = os.path.dirname(log_file)
         if log_dir and not os.path.exists(log_dir):
@@ -107,11 +139,18 @@ def setup_logger(name, log_file, level=logging.INFO):
             log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
         )
         file_handler.setFormatter(ReadableFormatter())
-        logger.addHandler(file_handler)
+        root.addHandler(file_handler)
 
         # Console handler
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(ReadableFormatter())
-        logger.addHandler(console_handler)
+        root.addHandler(console_handler)
 
+    for noisy in NOISY_LOGGERS:
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    # No handlers here on purpose - it propagates to root. Handlers on both
+    # would write every service.py line twice.
     return logger
