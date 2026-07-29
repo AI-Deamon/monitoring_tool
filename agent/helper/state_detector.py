@@ -60,6 +60,11 @@ class SystemState(Enum):
 # High-confidence lock screen processes
 LOCK_APPS = ["lockapp.exe", "logonui.exe"]
 
+# Consecutive not-locked polling ticks required before a heuristic-sourced
+# (desktop/process) LOCKED state is allowed to self-correct back to ACTIVE.
+# _monitor_loop ticks every 5s, so 3 ticks ~= 15s of confirmation.
+HEURISTIC_UNLOCK_CONFIRM_TICKS = 3
+
 
 class StateAuthority:
     """
@@ -79,16 +84,41 @@ class StateAuthority:
         """Rule engine for state transitions"""
         if self.current_state == SystemState.LOCKED:
             # LOCKED can only be exited by:
-            # 1. OS unlock event (highest authority)
-            # 2. RDP override (user is active remotely)
-            # if new_state == SystemState.ACTIVE and (
-            #     source == "os" or remote_session_active
-            # ):
-            if new_state == SystemState.ACTIVE and (source == "os"):
+            # 1. OS unlock event (highest authority) - a real WTS lock
+            #    always got here via source="os", so a real WTS unlock is
+            #    guaranteed to eventually arrive.
+            if new_state == SystemState.ACTIVE and source == "os":
+                return True
+            # 2. Heuristic self-correction — ONLY for locks entered via a
+            #    non-OS heuristic (desktop/process). Those heuristics can
+            #    false-positive on things that are not real OS locks (e.g.
+            #    a UAC secure-desktop switch), which means no matching OS
+            #    unlock event will ever arrive to release them. A real
+            #    OS-confirmed lock (lock_source == "os") is never eligible
+            #    here, so it stays fully terminal.
+            if (
+                new_state == SystemState.ACTIVE
+                and source == "heuristic_confirmed"
+                and self.lock_source in ("desktop", "process")
+            ):
                 return True
             return False
 
         return True
+
+    def upgrade_lock_source_to_os(self):
+        """
+        Promote an in-progress heuristic-sourced lock to OS-confirmed.
+
+        Called when a real WTS_SESSION_LOCK event arrives for a session
+        that a desktop/process heuristic had already (correctly, in this
+        case) flagged as LOCKED. Without this, the lock would stay tagged
+        with its original non-authoritative source and remain eligible for
+        heuristic self-correction even though it is now a real OS lock.
+        """
+        with self._lock:
+            if self.current_state == SystemState.LOCKED:
+                self.lock_source = "os"
 
     def set_state(
         self, new_state: SystemState, source: str, remote_session_active: bool = False
@@ -146,6 +176,7 @@ class StateDetector:
         self._last_unlock_transition_time = (
             0  # Grace period after any unlock transition
         )
+        self._heuristic_unlock_streak = 0  # Consecutive not-locked polls while heuristic-locked
         self._transition_lock = (
             threading.RLock()
         )  # Serialize transitions across threads
@@ -370,6 +401,14 @@ class StateDetector:
         with self._transition_lock:
             prev_state = self.current_state
             if prev_state == new_state:
+                # A real OS lock event can arrive after a desktop/process
+                # heuristic already flagged LOCKED (heuristics poll every
+                # 5s; WTS events are near-instant but not guaranteed to
+                # win the race). Promote it to OS-confirmed so it becomes
+                # fully terminal, even though the visible state is unchanged.
+                if new_state == "locked" and source == "os":
+                    self.authority.upgrade_lock_source_to_os()
+                    self._heuristic_unlock_streak = 0
                 return
             try:
                 new_state_enum = SystemState(new_state)
@@ -463,6 +502,10 @@ class StateDetector:
 
             # Mirror authority state locally
             self.current_state = new_state
+            # Any real transition clears the heuristic self-correction
+            # counter; it only tracks consecutive not-locked polls while
+            # stuck in the same heuristic-sourced LOCKED state.
+            self._heuristic_unlock_streak = 0
             # NEW: Persist current state for crash recovery
             self._persist_current_state()
 
@@ -746,6 +789,7 @@ class StateDetector:
                     and self._foreground_app
                     and self._foreground_app.lower() in LOCK_APPS
                 ):
+                    self._heuristic_unlock_streak = 0
                     self._transition("locked", source="process")
                     return
 
@@ -754,13 +798,43 @@ class StateDetector:
                 # remote_session_active = self._is_remote_session()
                 remote_session_active = False
                 if self._is_session_locked() and not remote_session_active:
+                    self._heuristic_unlock_streak = 0
                     self._transition("locked", source="desktop")
+                    return
+
+                # Neither heuristic detects a lock this tick. If we're
+                # currently LOCKED via one of those same heuristics (never
+                # confirmed by a real OS lock event), count this as a vote
+                # to self-correct — some false positives (e.g. a UAC
+                # secure-desktop switch) never get a matching OS unlock
+                # event, so without this the state would stay stuck LOCKED
+                # indefinitely.
+                if (
+                    self.authority.state == SystemState.LOCKED
+                    and self.authority.lock_source in ("desktop", "process")
+                ):
+                    self._heuristic_unlock_streak += 1
+                    if self._heuristic_unlock_streak >= HEURISTIC_UNLOCK_CONFIRM_TICKS:
+                        logger.info(
+                            f"[STATE] Heuristic-sourced LOCKED (source="
+                            f"{self.authority.lock_source}) self-corrected to ACTIVE "
+                            f"after {self._heuristic_unlock_streak} consecutive "
+                            f"not-locked polls with no OS lock/unlock event"
+                        )
+                        self._transition("active", source="heuristic_confirmed")
+                        return
+                    logger.debug(
+                        f"[STATE] Heuristic-sourced LOCKED looks unlocked "
+                        f"({self._heuristic_unlock_streak}/{HEURISTIC_UNLOCK_CONFIRM_TICKS} "
+                        f"confirmation polls)"
+                    )
                     return
             else:
                 # remote_session_active = self._is_remote_session()
                 remote_session_active = False
 
-            # If we reach here, neither lock detection triggered.
+            # If we reach here, neither lock detection triggered (or we're
+            # in the post-unlock grace window).
             # If currently locked, only OS unlock or remote-session activity may unlock.
             if self.authority.state == SystemState.LOCKED:
                 if remote_session_active:
