@@ -951,6 +951,51 @@ class AgentUpdater:
     # Full Update Cycle
     # =========================================================================
 
+    def _stage_swapper(self, zip_path: Path, version: str) -> Optional[Path]:
+        """Extract this package's swapper.exe to a scratch path and return it.
+
+        The swapper is launched from here rather than from
+        install_dir/tools/swapper.exe so that it is not running from the path
+        it needs to overwrite. Returns None if the package has no swapper or
+        extraction fails - the caller falls back to the installed one.
+
+        The ZIP has already been SHA256-verified by download_update() at this
+        point, so what comes out of it is as trusted as the rest of the update.
+        """
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                match = None
+                for name in zf.namelist():
+                    if '..' in name or name.startswith(('/', '\\')):
+                        continue
+                    if Path(name).name.lower() == 'swapper.exe':
+                        match = name
+                        break
+
+                if not match:
+                    logger.warning(
+                        "[UPDATER] Package contains no swapper.exe - falling "
+                        "back to the installed swapper"
+                    )
+                    return None
+
+                staged_dir = self.updates_dir / version
+                staged_dir.mkdir(parents=True, exist_ok=True)
+                staged = staged_dir / 'swapper_run.exe'
+
+                with zf.open(match) as source, open(staged, 'wb') as target:
+                    shutil.copyfileobj(source, target)
+
+            logger.info(f"[UPDATER] Staged swapper from package: {staged}")
+            return staged
+
+        except Exception as e:
+            logger.warning(
+                f"[UPDATER] Could not stage swapper from package ({e}) - "
+                "falling back to the installed swapper"
+            )
+            return None
+
     def trigger_exe_swap(self, zip_path: Path, metadata: Dict) -> bool:
         """
         Launch a detached external swapper process for EXE bundle updates.
@@ -986,18 +1031,31 @@ class AgentUpdater:
         manifest_path = self.data_dir / 'swap_manifest.json'
         manifest_path.write_text(json.dumps(swap_manifest, indent=2))
 
-        # Look for swapper executable
-        swapper_candidates = [
-            self.install_dir / 'swapper.exe',
-            self.install_dir / 'tools' / 'swapper.exe',
-            self.data_dir / 'swapper.exe',
-        ]
+        # Prefer the swapper that shipped with THIS package. A running EXE
+        # cannot replace itself, so the installed swapper could never be
+        # updated by a swap it was driving - every swapper fix needed a manual
+        # elevated install on every machine. Running a staged copy instead
+        # means the new swapper logic applies to the update that ships it, and
+        # that copy is free to overwrite install_dir/tools/swapper.exe once it
+        # has proven the swap works.
+        swapper_path = self._stage_swapper(zip_path, version)
 
-        swapper_path = None
-        for candidate in swapper_candidates:
-            if candidate.exists():
-                swapper_path = candidate
-                break
+        if not swapper_path:
+            # No swapper in the package (or extraction failed) - fall back to
+            # the installed one so the update still proceeds.
+            swapper_candidates = [
+                self.install_dir / 'swapper.exe',
+                self.install_dir / 'tools' / 'swapper.exe',
+                self.data_dir / 'swapper.exe',
+            ]
+
+            for candidate in swapper_candidates:
+                if candidate.exists():
+                    swapper_path = candidate
+                    logger.info(
+                        f"[UPDATER] Using installed swapper: {candidate}"
+                    )
+                    break
 
         if not swapper_path:
             # Fallback to Python-based swapper script

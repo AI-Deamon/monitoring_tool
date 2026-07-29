@@ -410,21 +410,70 @@ def _restart_service(install_dir: Path, service_name: str, mode: str) -> bool:
     return False
 
 
+# Relative to install_dir. tools/swapper.exe is included so a rollback also
+# restores the swapper that shipped with the version being rolled back to.
+BACKUP_ITEMS = (
+    "windiag.exe",
+    "syshealth.exe",
+    "version.json",
+    "tools/swapper.exe",
+)
+
+
 def _backup_files(install_dir: Path, backup_dir: Path) -> None:
     backup_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("windiag.exe", "syshealth.exe", "version.json"):
-        src = install_dir / filename
+    for relative in BACKUP_ITEMS:
+        src = install_dir / relative
         if src.exists():
-            shutil.copy2(src, backup_dir / filename)
-            LOGGER.info(f"Backed up {filename} -> {backup_dir}")
+            dst = backup_dir / relative
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            LOGGER.info(f"Backed up {relative} -> {backup_dir}")
 
 
 def _restore_backup(install_dir: Path, backup_dir: Path) -> None:
-    for filename in ("windiag.exe", "syshealth.exe", "version.json"):
-        src = backup_dir / filename
+    for relative in BACKUP_ITEMS:
+        src = backup_dir / relative
         if src.exists():
-            shutil.copy2(src, install_dir / filename)
-            LOGGER.info(f"Restored {filename} from backup")
+            dst = install_dir / relative
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            LOGGER.info(f"Restored {relative} from backup")
+
+
+def _promote_swapper(staging_dir: Path, install_dir: Path) -> bool:
+    """Install the new swapper into the canonical path.
+
+    A running EXE cannot replace itself, which is why swapper.exe was never
+    updated: it was always launched from the path it would have to overwrite.
+    The core now runs a copy staged out of the update package, so THIS process
+    is free to write install_dir/tools/swapper.exe.
+
+    Called only after the swap is otherwise complete and the service is back
+    to RUNNING - the new swapper earns the canonical slot by proving it can
+    drive a whole swap. Never fatal: the agent update has already succeeded by
+    this point, and a failure here just leaves the previous (working) swapper
+    in place for the next update.
+    """
+    staged = _find_required_file(staging_dir, "swapper.exe")
+    if not staged:
+        LOGGER.warning(
+            "Update package contains no swapper.exe; keeping the installed one"
+        )
+        return False
+
+    target = install_dir / "tools" / "swapper.exe"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(staged, target)
+        LOGGER.info(f"Promoted new swapper -> {target}")
+        return True
+    except Exception as exc:
+        LOGGER.warning(
+            f"Could not promote new swapper ({exc}); the previous swapper "
+            "stays in place and the agent update is unaffected"
+        )
+        return False
 
 
 def _safe_extract(zip_path: Path, staging_dir: Path) -> None:
@@ -599,6 +648,12 @@ def main() -> int:
             raise RuntimeError(
                 f"Service {service_name} failed to reach RUNNING after swap"
             )
+
+        # Last step before cleanup: the new swapper has now driven a complete
+        # swap and the service is back up, so it has earned the canonical slot.
+        # Promoting earlier would let a broken swapper overwrite the known-good
+        # one and leave no working path for the next update.
+        _promote_swapper(staging_dir, install_dir)
 
         _cleanup_path(staging_dir)
         _cleanup_path(manifest_path)
