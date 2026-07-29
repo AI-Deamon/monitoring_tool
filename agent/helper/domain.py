@@ -726,40 +726,33 @@ class ActiveDomainTracker:
         # Use correct attribute: self._current_session instead of self.current_domain
         if not self._current_session:
             return
-        
+
         try:
-            from datetime import timedelta
             now = datetime.now(timezone.utc)
-            
+
             # If current session is older than 2 hours, it's orphaned
             session_start = self._current_session.start_time
             if session_start:
                 session_age = (now - session_start).total_seconds()
                 if session_age > 7200:  # 2 hours
+                    # There is no reliable way to know how long the domain
+                    # was actually being viewed before the crash/restart
+                    # interrupted tracking - it could have been seconds or
+                    # the full gap. Reporting any fabricated duration here
+                    # would be inventing data, so the session is discarded
+                    # rather than logged with a guessed length (matching
+                    # how state_detector.py discards ambiguous interrupted
+                    # spans on restart instead of fabricating their length).
                     logger.warning(
-                        f"CLEANUP: Found orphaned domain session: {self._current_session.domain}, "
-                        f"age={session_age/3600:.1f}h, force-ending"
+                        f"CLEANUP: Discarding orphaned domain session: "
+                        f"{self._current_session.domain}, age={session_age/3600:.1f}h "
+                        f"(no reliable duration available after crash/restart)"
                     )
-                    
-                    # End the orphaned session with capped duration
-                    # Force end time to be 2 hours after start (max reasonable session)
-                    self._current_session.end_time = session_start + timedelta(seconds=7200)
-                    ended_session = {
-                        'domain': self._current_session.domain,
-                        'browser': self._current_session.browser,
-                        'url': self._current_session.url,
-                        'title': self._current_session.title,
-                        'start': self._current_session.start_time.isoformat(),
-                        'end': self._current_session.end_time.isoformat(),
-                        'duration_seconds': 7200,
-                        'reason': 'cleanup_orphaned'
-                    }
-                    self._pending_sessions.append(ended_session)
-                    
+
                     # Reset tracker state
                     self._current_session = None
                     self._tracking_active = False
-                    
+
                     logger.info("CLEANUP: Orphaned session cleaned up")
         except Exception as e:
             logger.error(f"Failed to cleanup orphaned sessions: {e}")
