@@ -136,6 +136,30 @@ def get_ist_today():
     return ist_now.date()
 
 
+def get_ist_day_range_utc(target_date):
+    """
+    Return the (start, end) naive-UTC datetime bounds covering one IST
+    calendar day, for comparing against columns that store naive UTC
+    timestamps (screen_time_spans.start_time, app_sessions.start_time,
+    domain_visits.visited_at, etc. - see
+    server_telemetry.parse_agent_timestamp, which normalizes every agent
+    timestamp to naive UTC on write).
+
+    A plain datetime.combine(target_date, ...) does NOT shift by IST's
+    +5:30 offset, so comparing it directly against UTC-stored timestamps
+    silently queries the wrong ~5.5-hour window every day. This performs
+    the actual IST -> UTC conversion before returning naive bounds.
+    """
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    ist_midnight = datetime.combine(target_date, datetime.min.time(), tzinfo=ist_tz)
+    start_dt = ist_midnight.astimezone(timezone.utc).replace(tzinfo=None)
+    end_dt = (
+        (ist_midnight + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
+        - timedelta(microseconds=1)
+    )
+    return start_dt, end_dt
+
+
 # ============================================================================
 # AUTHENTICATION IMPORTS
 # ============================================================================
@@ -2177,9 +2201,10 @@ def api_agent_full_report(agent_id):
         else:
             target_date = get_ist_today()
 
-        # Date range for queries
-        start_dt = datetime.combine(target_date, datetime.min.time())
-        end_dt = datetime.combine(target_date, datetime.max.time())
+        # Date range for queries - converted from the IST calendar day to
+        # the equivalent naive-UTC window, since every stored timestamp is
+        # normalized to naive UTC on write (see get_ist_day_range_utc).
+        start_dt, end_dt = get_ist_day_range_utc(target_date)
 
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
 
