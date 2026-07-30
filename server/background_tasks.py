@@ -187,16 +187,15 @@ def sync_yesterday_data():
         )
         logger.info("[SYNC] [OK] Domain usage synced")
 
-        # Sync screen time from sessions
-        result = db.session.execute(
-            text("""
-            SELECT * FROM sync_screen_time_from_sessions(:date)
-        """),
-            {"date": yesterday},
-        )
-
-        rows = result.fetchall()
-        logger.info(f"[SYNC] [OK] Screen time synced for {len(rows)} agents")
+        # screen_time.active_seconds is intentionally NOT synced here.
+        # process_screentime_delta (server_telemetry.py) is the documented,
+        # additive, agent-is-the-source-of-truth writer for screen_time.
+        # This job used to also call sync_screen_time_from_sessions(),
+        # which independently recomputed active_seconds from app_sessions
+        # and merged it in via GREATEST(), a one-way ratchet that could
+        # never correct itself downward - removed here too (it was already
+        # removed from the per-minute job in server_main.py, but this daily
+        # job was a second, missed caller of the same function).
 
         db.session.commit()
         logger.info(f"[SYNC] Daily sync completed successfully")
