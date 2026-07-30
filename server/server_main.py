@@ -317,7 +317,6 @@ def main():
         if config.USE_TLS:
             import ssl
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
             ssl_context.load_cert_chain(config.SSL_CERT_PATH, config.SSL_KEY_PATH)
             ssl_context.load_verify_locations(config.SSL_CA_PATH)
             ssl_context.verify_mode = ssl.CERT_REQUIRED
