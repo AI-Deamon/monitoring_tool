@@ -102,24 +102,28 @@ def sync_screen_time_background(app):
             with app.app_context():
                 from sqlalchemy import text
 
-                # Sync screen_time
-                result = db.session.execute(text(
-                    "SELECT * FROM sync_screen_time_from_sessions(CURRENT_DATE)"
-                ))
-                rows = result.fetchall()
-                
+                # screen_time.active_seconds is intentionally NOT synced here.
+                # process_screentime_delta (server_telemetry.py) is the
+                # documented, additive, agent-is-the-source-of-truth writer
+                # for screen_time - this job used to also call
+                # sync_screen_time_from_sessions(), which independently
+                # recomputed active_seconds from app_sessions and merged it
+                # in via GREATEST(), a one-way ratchet that could never
+                # correct itself downward if app_sessions ever contained
+                # overlapping/oversized rows. Removed; see plan doc.
+
                 # Sync app_usage from app_sessions
                 db.session.execute(text(
                     "SELECT sync_app_usage_from_sessions(CURRENT_DATE)"
                 ))
-                
+
                 # Sync domain_usage from domain_sessions
                 db.session.execute(text(
                     "SELECT sync_domain_usage_from_sessions(CURRENT_DATE)"
                 ))
-                
+
                 db.session.commit()
-                logger.info(f"[SYNC] Data synced: {len(rows)} agents, app_usage + domain_usage updated")
+                logger.info("[SYNC] Data synced: app_usage + domain_usage updated")
         except Exception as e:
             logger.error(f"[SYNC] Error syncing data: {e}")
 
