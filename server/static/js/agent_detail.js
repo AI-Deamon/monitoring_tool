@@ -1132,7 +1132,7 @@ function renderFlipCards(st, stateEvents) {
     }
 
     // One combined timeline for all states
-    _lastTimelineArgs = ['timeline-combined', stateEvents, ['active', 'idle', 'locked', 'away'], coreStart, coreEnd];
+    _lastTimelineArgs = ['timeline-combined', stateEvents, ['active'], coreStart, coreEnd];
     renderTimeline(..._lastTimelineArgs);
 }
 
@@ -1194,33 +1194,18 @@ function renderTimeline(containerId, stateEvents, filterStates, coreStart, coreE
     const bar = document.createElement('div');
     bar.style.cssText = `position:absolute;inset:0;background:${dark ? '#030712' : '#f9fafb'};border-radius:6px;overflow:hidden;border:1px solid ${dark ? '#1f2937' : 'rgba(0,0,0,0.08)'};box-shadow:inset 0 1px 3px rgba(0,0,0,0.06);`;
 
-    const STATE_COLORS = {
-        active: '#10b981',
-        idle: '#eab308',
-        locked: '#ef4444',
-        away: '#8b5cf6',
-    };
-
-    const STATE_LABELS = {
-        active: 'ACTIVE',
-        idle: 'IDLE',
-        locked: 'LOCKED',
-        away: 'AWAY',
-    };
-
+    // Active segments (green)
     segments.forEach(ev => {
         const startSec = spanStartSec(ev.start_time);
         const dur = Math.min(ev.duration_seconds, DAY_SEC - startSec);
         if (dur <= 0) return;
         const left = (startSec / DAY_SEC * 100).toFixed(3);
         const width = Math.max(dur / DAY_SEC * 100, 0.2).toFixed(3);
-        const color = STATE_COLORS[ev.state] || '#6b7280';
-        const label = STATE_LABELS[ev.state] || ev.state.toUpperCase();
         const seg = document.createElement('div');
-        seg.style.cssText = `position:absolute;top:0;bottom:0;left:${left}%;width:${width}%;background:${color};transition:filter 0.15s;`;
+        seg.style.cssText = `position:absolute;top:0;bottom:0;left:${left}%;width:${width}%;background:#10b981;transition:filter 0.15s;`;
         seg.onmouseenter = () => seg.style.filter = 'brightness(1.1)';
         seg.onmouseleave = () => seg.style.filter = '';
-        seg.title = `${label}  ${fmtWall(ev.start_time)} – ${fmtWall(ev.end_time)}  (${formatTime(ev.duration_seconds)})`;
+        seg.title = `ACTIVE  ${fmtWall(ev.start_time)} – ${fmtWall(ev.end_time)}  (${formatTime(ev.duration_seconds)})`;
         bar.appendChild(seg);
     });
 
@@ -1278,15 +1263,6 @@ function renderTimeline(containerId, stateEvents, filterStates, coreStart, coreE
     legendLeft.innerHTML = `
         <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:${textColor};font-weight:500;">
             <div style="width:12px;height:12px;border-radius:3px;background:#10b981;flex-shrink:0;"></div>Active
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:${textColor};font-weight:500;">
-            <div style="width:12px;height:12px;border-radius:3px;background:#eab308;flex-shrink:0;"></div>Idle
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:${textColor};font-weight:500;">
-            <div style="width:12px;height:12px;border-radius:3px;background:#ef4444;flex-shrink:0;"></div>Locked
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:${textColor};font-weight:500;">
-            <div style="width:12px;height:12px;border-radius:3px;background:#8b5cf6;flex-shrink:0;"></div>Away
         </div>
         <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:${textColor};font-weight:500;">
             <div style="width:12px;height:12px;border-radius:3px;background:${dark ? '#030712' : '#e5e7eb'};border:1px solid ${dark ? '#1f2937' : '#d1d5db'};flex-shrink:0;"></div>Offline
