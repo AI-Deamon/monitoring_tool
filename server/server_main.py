@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -112,16 +112,30 @@ def sync_screen_time_background(app):
                 # correct itself downward if app_sessions ever contained
                 # overlapping/oversized rows. Removed; see plan doc.
 
+                # Pass an explicit UTC date rather than relying on
+                # Postgres's CURRENT_DATE, which resolves to this
+                # connection's configured session timezone (IST on this
+                # database) - the stored procedures filter sessions with
+                # start_time::DATE = p_date, and start_time is always
+                # stored as naive UTC, so an IST-valued p_date silently
+                # mis-buckets sessions in the ~5.5h window after IST
+                # midnight. This must match the daily job in
+                # background_tasks.py::sync_yesterday_data(), which
+                # already computes UTC explicitly.
+                today_utc = datetime.now(timezone.utc).date()
+
                 # Sync app_usage from app_sessions
-                db.session.execute(text(
-                    "SELECT sync_app_usage_from_sessions(CURRENT_DATE)"
-                ))
+                db.session.execute(
+                    text("SELECT sync_app_usage_from_sessions(:d)"),
+                    {"d": today_utc},
+                )
 
                 # Sync domain_usage from domain_sessions
-                db.session.execute(text(
-                    "SELECT sync_domain_usage_from_sessions(CURRENT_DATE)"
-                ))
-
+                db.session.execute(
+                    text("SELECT sync_domain_usage_from_sessions(:d)"),
+                    {"d": today_utc},
+                )
+                
                 db.session.commit()
                 logger.info("[SYNC] Data synced: app_usage + domain_usage updated")
         except Exception as e:
@@ -303,6 +317,7 @@ def main():
         if config.USE_TLS:
             import ssl
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
             ssl_context.load_cert_chain(config.SSL_CERT_PATH, config.SSL_KEY_PATH)
             ssl_context.load_verify_locations(config.SSL_CA_PATH)
             ssl_context.verify_mode = ssl.CERT_REQUIRED

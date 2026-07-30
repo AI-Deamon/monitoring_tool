@@ -70,7 +70,10 @@ class TestSyncJobsAgreeOnUtcDate:
         import server_main
 
         source = inspect.getsource(server_main.sync_screen_time_background)
-        assert "CURRENT_DATE" not in source
+        # Check for the actual SQL usage pattern, not just the bare word -
+        # the fix's own explanatory comment legitimately mentions
+        # "CURRENT_DATE" by name while describing what was removed.
+        assert "(CURRENT_DATE)" not in source
 
     @pytest.fixture
     def test_agent(self, app_context):
