@@ -223,7 +223,6 @@ class ScreenTimeEngine:
                     f"({self.pending_locked_seconds:.1f}s)"
                 )
                 self.pending_locked_seconds = 0.0
-                self.transition(ScreenState.AWAY)
         elif self.current_state == ScreenState.AWAY:
             self.away_seconds += delta
 
