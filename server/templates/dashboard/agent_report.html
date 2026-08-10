@@ -289,7 +289,7 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
-<script>
+<script nonce="{{ csp_nonce() }}">
   const AGENT_ID = "{{ agent_id }}";
   let reportData = null;
 

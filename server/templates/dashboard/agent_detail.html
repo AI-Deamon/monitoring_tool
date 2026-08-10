@@ -1157,15 +1157,15 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce() }}">
     const AGENT_ID = "{{ agent.agent_id }}";
 </script>
-<script>
+<script nonce="{{ csp_nonce() }}">
     window.USER_ICON_URL = "{{ url_for('static', filename='user-setting.png') }}";
 </script>
 
 <script src="{{ url_for('static', filename='js/agent_detail.js') }}"></script>
-<script>
+<script nonce="{{ csp_nonce() }}">
 async function deleteAgent(agentId, hostname) {
     if (!confirm(`Delete agent "${hostname}"?\n\nThis will permanently remove ALL data (screen time, apps, domains, inventory, hardware, security indicators, etc.) for this agent. This cannot be undone.`)) {
         return;

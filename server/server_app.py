@@ -1,8 +1,9 @@
-from flask import Flask, jsonify, send_file, request
+from flask import Flask, jsonify, send_file, request, g
 from extensions import db
 from server_config import get_config
 import logging
 import os
+import secrets as _secrets
 from datetime import timedelta
 from pathlib import Path
 
@@ -48,15 +49,28 @@ def create_app():
     app.jinja_env.autoescape = True  # Enabled by default, but make it explicit
     
     # H-17 FIX: Add Content-Security-Policy header for defense-in-depth
+    @app.before_request
+    def _make_csp_nonce():
+        g.csp_nonce = _secrets.token_urlsafe(16)
+
+    @app.context_processor
+    def _inject_csp_nonce():
+        return {"csp_nonce": lambda: getattr(g, "csp_nonce", "")}
+
     @app.after_request
     def add_security_headers(response):
         """Add security headers to all responses."""
-        # CSP: nonce is added in a later task; this interim policy drops the
-        # stale CDN allowlist (Tailwind/Chart/fonts are vendored under static/vendor).
+        # Nonce-based CSP: inline <script>/<style> blocks must carry
+        # nonce="{{ csp_nonce() }}". 'unsafe-inline' is confined to
+        # script-src-attr (inline onclick/onchange handlers) — script-src
+        # itself has no 'unsafe-inline', so attacker-injected <script>
+        # tags are blocked.
+        nonce = getattr(g, "csp_nonce", "")
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "   # 'unsafe-inline' removed once nonce lands
-            "style-src 'self' 'unsafe-inline'; "    # removed once nonce lands
+            f"script-src 'self' 'nonce-{nonce}'; "
+            "script-src-attr 'unsafe-inline'; "
+            f"style-src 'self' 'nonce-{nonce}'; "
             "img-src 'self' data:; "
             "font-src 'self'; "
             "connect-src 'self'; "

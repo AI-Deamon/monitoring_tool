@@ -3,13 +3,13 @@
 {% block title %}Overview - SentinelEdge Dashboard{% endblock %}
 {% block content %}
 {% if current_user.role == 'admin' %}
-<div class="h-[calc(100vh-80px)] overflow-hidden flex flex-col px-5 py-3">
+<div class="px-5 py-4 space-y-4">
 
     <!-- Header -->
-    <div class="flex items-center justify-between mb-2 flex-shrink-0">
+    <div class="flex items-center justify-between">
         <div>
-            <h1 class="text-xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                <img src="{{ url_for('static', filename='dashboard.png') }}" class="w-7 h-7 mr-2" />
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                <img src="{{ url_for('static', filename='dashboard.png') }}" class="w-7 h-7 mr-1" />
                 Dashboard Overview
             </h1>
             <p class="text-gray-600 dark:text-gray-400 text-sm">
@@ -27,225 +27,251 @@
     </div>
 
     <!-- Fleet Summary Cards (4 KPIs) -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-2 flex-shrink-0">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <!-- Total Agents -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 py-4 px-3 flex items-center gap-2">
-            <img src="{{ url_for('static', filename='agents.png') }}" class="w-6 h-6" />
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='agents.png') }}" class="w-8 h-8" />
             <div>
-                <div class="text-xs font-semibold text-gray-500 uppercase">Total Agents</div>
-                <p id="total-agents" class="text-2xl font-bold">-</p>
+                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Agents</div>
+                <p id="total-agents" class="text-3xl font-bold leading-tight">-</p>
             </div>
         </div>
 
         <!-- Online Now (green accent) -->
-        <div class="bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-700 border-l-4 border-l-green-400 py-4 px-3 flex items-center gap-2">
-            <img src="{{ url_for('static', filename='online.png') }}" class="w-6 h-6" />
+        <div class="bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-700 border-l-4 border-l-green-400 p-5 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='online.png') }}" class="w-8 h-8" />
             <div>
-                <div class="text-xs font-semibold text-green-600 dark:text-green-400 uppercase">Online Now</div>
-                <p id="active-agents" class="text-2xl font-bold text-green-600 dark:text-green-400">-</p>
+                <div class="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Online Now</div>
+                <p id="active-agents" class="text-3xl font-bold leading-tight text-green-600 dark:text-green-400">-</p>
             </div>
         </div>
 
         <!-- Offline (red accent) -->
-        <div class="bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-700 border-l-4 border-l-red-400 py-4 px-3 flex items-center gap-2">
-            <img src="{{ url_for('static', filename='no.png') }}" class="w-6 h-6" />
+        <div class="bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-700 border-l-4 border-l-red-400 p-5 flex items-center gap-3">
+            <img src="{{ url_for('static', filename='no.png') }}" class="w-8 h-8" />
             <div>
-                <div class="text-xs font-semibold text-red-600 dark:text-red-400 uppercase">Offline</div>
-                <p id="offline-agents" class="text-2xl font-bold text-red-600 dark:text-red-400">-</p>
+                <div class="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Offline</div>
+                <p id="offline-agents" class="text-3xl font-bold leading-tight text-red-600 dark:text-red-400">-</p>
             </div>
         </div>
 
         <!-- Avg Productivity (with SVG icon) -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 py-4 px-3 flex items-center gap-2">
-            <svg class="w-6 h-6 text-warning-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 flex items-center gap-3">
+            <svg class="w-8 h-8 text-warning-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
             </svg>
             <div>
-                <div class="text-xs font-semibold text-gray-500 uppercase">Avg Productivity</div>
-                <p id="avg-productivity" class="text-2xl font-bold">-</p>
+                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Avg Productivity</div>
+                <p id="avg-productivity" class="text-3xl font-bold leading-tight">-</p>
             </div>
         </div>
     </div>
 
-    <!-- MAIN CONTENT - Full Height 3-Column Layout -->
-    <div class="flex flex-col flex-1 overflow-hidden min-h-0">
-        <!-- Row 1: Main Charts (fill remaining space) -->
-        <div class="grid grid-cols-1 xl:grid-cols-3 gap-3 flex-1 min-h-0">
-            <!-- Column 1: Agent Status & Risk -->
-            <div class="xl:col-span-1 grid grid-rows-2 gap-3 min-h-0">
-                <!-- Agent & Screen Time -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
-                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                        <h3 class="text-sm font-semibold">Agent & Screen Time</h3>
-                    </div>
-                    <div class="p-3 grid grid-cols-2 gap-3 min-h-0" style="height: calc(100% - 37px);">
-                        <div style="position:relative; height:100%;">
-                            <canvas id="agent-status-chart"></canvas>
-                        </div>
-                        <div style="position:relative; height:100%;">
-                            <canvas id="screentime-chart"></canvas>
-                        </div>
-                    </div>
+    <!-- Row 1: Fleet Utilization Trend (hero — full width, change-over-time) -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
+        <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl flex items-center justify-between flex-wrap gap-2">
+            <h3 class="text-sm font-semibold">Fleet Utilization Trend</h3>
+            <div class="flex items-center gap-4">
+                <!-- Legend: swatch + label so identity is never color-alone -->
+                <div class="flex items-center gap-3 text-xs">
+                    <span class="flex items-center gap-1.5"><span class="inline-block w-3.5 h-0.5 rounded-full" style="background:#10b981"></span><span class="text-gray-600 dark:text-gray-400">Active</span></span>
+                    <span class="flex items-center gap-1.5"><span class="inline-block w-3.5 h-0.5 rounded-full" style="background:#d97706"></span><span class="text-gray-600 dark:text-gray-400">Idle</span></span>
+                    <span class="flex items-center gap-1.5"><span class="inline-block w-3.5 h-0.5 rounded-full" style="background:#6b7280"></span><span class="text-gray-600 dark:text-gray-400">Locked</span></span>
                 </div>
-                <!-- EOL Risk -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
-                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700 flex justify-between items-center">
-                        <h3 class="text-sm font-semibold">Fleet Lifecycle Risk</h3>
-                        <span class="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">LIVE</span>
+                <!-- Range filter (one row, above the plot) -->
+                <div class="flex gap-1" id="trend-range" role="group" aria-label="Trend range">
+                    <button type="button" data-days="7" class="trend-range-btn px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">7d</button>
+                    <button type="button" data-days="30" class="trend-range-btn px-2 py-0.5 text-xs font-medium rounded bg-indigo-600 text-white">30d</button>
+                    <button type="button" data-days="90" class="trend-range-btn px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">90d</button>
+                </div>
+            </div>
+        </div>
+        <div class="p-4 relative" style="height: 320px;">
+            <canvas id="utilizationTrendChart"></canvas>
+            <div id="utilizationTrendEmpty"
+                 class="hidden absolute inset-0 flex items-center justify-center text-xs text-gray-400">
+                No screen-time recorded in this range
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 2: Fleet health — Agent Status | Fleet Screen Time | Lifecycle Risk -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Agent Status (donut) -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
+            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+                <h3 class="text-sm font-semibold">Agent Status</h3>
+            </div>
+            <div class="p-4 flex-1 flex items-center justify-center">
+                <div class="relative w-full" style="height: 220px;">
+                    <canvas id="agent-status-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fleet Screen Time (100%-stacked bar) -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
+            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+                <h3 class="text-sm font-semibold">Fleet Screen Time</h3>
+            </div>
+            <!-- One 100%-stacked bar: segments sum to the day's total screen time,
+                 so the states are directly comparable (part-to-whole). 2px gaps
+                 reveal the track surface between fills (mark spec). -->
+            <div class="p-4 flex-1 flex flex-col justify-center gap-4">
+                <div class="flex justify-between items-baseline">
+                    <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Fleet day split</h4>
+                    <span class="text-xs text-gray-500">Total <span id="fleet-total-time" class="font-semibold text-gray-700 dark:text-gray-200">0h 0m</span></span>
+                </div>
+                <div id="fleet-stack" class="flex w-full h-5 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-700 gap-[2px]"
+                     role="img" aria-label="Fleet screen-time split by state">
+                    <div id="fleet-active-seg" class="h-full" style="width:0%; background:#10b981"></div>
+                    <div id="fleet-idle-seg"   class="h-full" style="width:0%; background:#d97706"></div>
+                    <div id="fleet-locked-seg" class="h-full" style="width:0%; background:#6b7280"></div>
+                    <div id="fleet-away-seg"   class="h-full" style="width:0%; background:#7c3aed"></div>
+                </div>
+                <!-- Legend: swatch + label + value, so identity is never colour-alone -->
+                <div class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                    <div class="flex items-center justify-between">
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#10b981"></span><span class="text-gray-600 dark:text-gray-400">Active</span></span>
+                        <span id="fleet-active-time" class="font-medium tabular-nums">0h 0m</span>
                     </div>
-                    <div class="p-3 flex flex-col flex-1 min-h-0 items-center justify-center">
-                        <div class="relative w-full" style="height:140px;">
-                            <canvas id="eolRiskChart"></canvas>
-                        </div>
-                        <div class="mt-2 flex gap-2 text-xs">
-                            <div class="flex items-center gap-1">
-                                <span class="w-2 h-2 rounded-full bg-red-600"></span>
-                                <span>EOL: <span id="eol-counter">-</span></span>
-                            </div>
-                            <div class="flex items-center gap-1">
-                                <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                                <span>Compliant: <span id="compliance-rate">-</span></span>
-                            </div>
-                        </div>
+                    <div class="flex items-center justify-between">
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#d97706"></span><span class="text-gray-600 dark:text-gray-400">Idle</span></span>
+                        <span id="fleet-idle-time" class="font-medium tabular-nums">0h 0m</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#6b7280"></span><span class="text-gray-600 dark:text-gray-400">Locked</span></span>
+                        <span id="fleet-locked-time" class="font-medium tabular-nums">0h 0m</span>
+                    </div>
+                    <div id="fleet-away-legend" class="flex items-center justify-between" style="display:none;">
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#7c3aed"></span><span class="text-gray-600 dark:text-gray-400">Away</span></span>
+                        <span id="fleet-away-time" class="font-medium tabular-nums">0h 0m</span>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <!-- Column 2: Trends & Categories -->
-            <div class="xl:col-span-1 grid grid-rows-2 gap-3 min-h-0">
-                <!-- App Usage by Category -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
-                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                        <h3 class="text-sm font-semibold">App Usage by Category</h3>
-                    </div>
-                    <div class="p-3 flex-1 min-h-0 relative">
-                        <canvas id="appCategoryChart"></canvas>
-                        <div id="appCategoryEmpty"
-                             class="hidden absolute inset-0 flex items-center justify-center text-xs text-gray-400">
-                            No app usage recorded for this day
-                        </div>
-                    </div>
-                    <!-- Manual HTML Legend (sibling, not inside) -->
-                    <div class="flex justify-center flex-wrap gap-3 text-xs pt-1 px-3 pb-3">
-                        <div class="flex items-center gap-1">
-                            <span class="w-2 h-2 rounded-full bg-[#10b981]"></span>
-                            <span class="text-gray-600 dark:text-gray-400">Productivity</span>
-                        </div>
-                        <div class="flex items-center gap-1">
-                            <span class="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
-                            <span class="text-gray-600 dark:text-gray-400">Communication</span>
-                        </div>
-                        <div class="flex items-center gap-1">
-                            <span class="w-2 h-2 rounded-full bg-[#f59e0b]"></span>
-                            <span class="text-gray-600 dark:text-gray-400">Browsing</span>
-                        </div>
-                        <div class="flex items-center gap-1">
-                            <span class="w-2 h-2 rounded-full bg-[#8b5cf6]"></span>
-                            <span class="text-gray-600 dark:text-gray-400">Development</span>
-                        </div>
-                        <div class="flex items-center gap-1">
-                            <span class="w-2 h-2 rounded-full bg-[#9ca3af]"></span>
-                            <span class="text-gray-600 dark:text-gray-400">Other</span>
-                        </div>
-                    </div>
+        <!-- Fleet Lifecycle Risk (donut) -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
+            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl flex justify-between items-center">
+                <h3 class="text-sm font-semibold">Fleet Lifecycle Risk</h3>
+                <span class="text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-600 dark:text-gray-200 px-2 py-0.5 rounded-full font-bold inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>LIVE</span>
+            </div>
+            <div class="p-4 flex flex-col flex-1 items-center justify-center">
+                <div class="relative w-full" style="height: 180px;">
+                    <canvas id="eolRiskChart"></canvas>
                 </div>
-                <!-- Fleet Screen Time (moved from Column 1) -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
-                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                        <h3 class="text-sm font-semibold">Fleet Screen Time</h3>
+                <div class="mt-3 flex gap-4 text-xs">
+                    <div class="flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-red-600"></span>
+                        <span>EOL: <span id="eol-counter">-</span></span>
                     </div>
-                    <div class="p-4 flex-1 min-h-0 flex flex-col justify-evenly">
-                        <div id="fleet-active-row">
-                            <div class="flex justify-between text-xs mb-1">
-                                <span class="text-success-600 font-semibold">Active</span>
-                                <span id="fleet-active-time">0h 0m</span>
-                            </div>
-                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                <div id="fleet-active-bar" class="bg-success-500 h-2 rounded-full" style="width: 0%"></div>
-                            </div>
-                        </div>
-                        <div id="fleet-idle-row">
-                            <div class="flex justify-between text-xs mb-1">
-                                <span class="text-warning-600 font-semibold">Idle</span>
-                                <span id="fleet-idle-time">0h 0m</span>
-                            </div>
-                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                <div id="fleet-idle-bar" class="bg-warning-500 h-2 rounded-full" style="width: 0%"></div>
-                            </div>
-                        </div>
-                        <div id="fleet-locked-row">
-                            <div class="flex justify-between text-xs mb-1">
-                                <span class="text-gray-600 font-semibold">Locked</span>
-                                <span id="fleet-locked-time">0h 0m</span>
-                            </div>
-                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                <div id="fleet-locked-bar" class="bg-gray-500 h-2 rounded-full" style="width: 0%"></div>
-                            </div>
-                        </div>
-                        <div id="fleet-away-row" style="display: none;">
-                            <div class="flex justify-between text-xs mb-1">
-                                <span class="text-purple-600 font-semibold">Away</span>
-                                <span id="fleet-away-time">0h 0m</span>
-                            </div>
-                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                <div id="fleet-away-bar" class="bg-purple-500 h-2 rounded-full" style="width: 0%"></div>
-                            </div>
-                        </div>
+                    <div class="flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                        <span>Compliant: <span id="compliance-rate">-</span></span>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
 
-            <!-- Column 3: Performance & Lists (merged Top Apps + Domains) -->
-            <div class="xl:col-span-1 grid grid-rows-2 gap-3 min-h-0">
-                <!-- Top Performance -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0 max-h-48 overflow-hidden">
-                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                        <h3 class="text-sm font-semibold flex items-center gap-2">
-                            <img src="{{ url_for('static', filename='throphy.png') }}" class="w-3 h-3" />
-                            Top Performance
-                        </h3>
+    <!-- Row 3: Analytics — App Usage by Category | Top 10 by screen time -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- App Usage by Category -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
+            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+                <h3 class="text-sm font-semibold">App Usage by Category</h3>
+            </div>
+            <div class="p-4 relative" style="height: 260px;">
+                <canvas id="appCategoryChart"></canvas>
+                <div id="appCategoryEmpty"
+                     class="hidden absolute inset-0 flex items-center justify-center text-xs text-gray-400">
+                    No app usage recorded for this day
+                </div>
+            </div>
+            <!-- Manual HTML Legend (sibling, not inside) -->
+            <div class="flex justify-center flex-wrap gap-3 text-xs pt-1 px-3 pb-3">
+                <div class="flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-[#2a78d6]"></span>
+                    <span class="text-gray-600 dark:text-gray-400">Productivity</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-[#008300]"></span>
+                    <span class="text-gray-600 dark:text-gray-400">Communication</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-[#e87ba4]"></span>
+                    <span class="text-gray-600 dark:text-gray-400">Browsing</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-[#eda100]"></span>
+                    <span class="text-gray-600 dark:text-gray-400">Development</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-[#9ca3af]"></span>
+                    <span class="text-gray-600 dark:text-gray-400">Other</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Apps & Domains (merged with tabs) -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
+            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                        <img src="{{ url_for('static', filename='throphy.png') }}" class="w-3 h-3" />
+                        <h3 class="text-sm font-semibold">Top 10 by screen time</h3>
                     </div>
-                    <div class="p-2 grid grid-cols-3 gap-2 flex-1 min-h-0 text-xs overflow-y-auto">
-                        <div>
-                            <h4 class="text-xs font-bold text-success-600 uppercase mb-1">Active</h4>
-                            <ul id="top-active-list" class="space-y-0.5 text-[11px]"></ul>
-                        </div>
-                        <div>
-                            <h4 class="text-xs font-bold text-warning-600 uppercase mb-1">Idle</h4>
-                            <ul id="top-idle-list" class="space-y-0.5 text-[11px]"></ul>
-                        </div>
-                        <div>
-                            <h4 class="text-xs font-bold text-gray-600 uppercase mb-1">Locked</h4>
-                            <ul id="top-locked-list" class="space-y-0.5 text-[11px]"></ul>
-                        </div>
+                    <div class="flex gap-1" id="top-range" role="group" aria-label="Top range">
+                        <button type="button" data-days="1" class="top-range-btn px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">Today</button>
+                        <button type="button" data-days="7" class="top-range-btn px-2 py-0.5 text-xs font-medium rounded bg-indigo-600 text-white">7d</button>
+                        <button type="button" data-days="30" class="top-range-btn px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">30d</button>
                     </div>
                 </div>
-                <!-- Top Apps & Domains (merged with tabs) -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
-                    <div class="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
-                        <div class="flex items-center gap-2 mb-2">
-                            <img src="{{ url_for('static', filename='throphy.png') }}" class="w-3 h-3" />
-                            <h3 class="text-sm font-semibold">Top 5 Apps</h3>
-                        </div>
-                        <div class="flex gap-1">
-                            <button type="button" onclick="switchTopTab('apps')" id="tab-apps" class="flex-1 px-3 py-1 text-xs font-medium bg-indigo-600 text-white rounded transition-colors">Apps</button>
-                            <button type="button" onclick="switchTopTab('domains')" id="tab-domains" class="flex-1 px-3 py-1 text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors">Domains</button>
-                        </div>
-                    </div>
-                    <div class="overflow-y-auto flex-1 min-h-0">
-                        <table class="min-w-full text-xs" id="top-apps-table">
-                            <tbody id="top-apps-list" class="divide-y divide-gray-200 dark:divide-gray-700">
-                                <tr><td class="px-2 py-1 text-center text-gray-500">Loading...</td></tr>
-                            </tbody>
-                        </table>
-                        <div class="px-3 py-2 text-xs text-indigo-600 dark:text-indigo-400 border-t border-gray-100 dark:border-gray-700 cursor-pointer hover:underline">View all in Reports →</div>
-                        <table class="min-w-full text-xs hidden" id="top-domains-table">
-                            <tbody id="top-domains-list" class="divide-y divide-gray-200 dark:divide-gray-700">
-                                <tr><td class="px-2 py-1 text-center text-gray-500">Loading...</td></tr>
-                            </tbody>
-                        </table>
+                <div class="flex gap-1">
+                    <button type="button" onclick="switchTopTab('apps')" id="tab-apps" class="flex-1 px-3 py-1 text-xs font-medium bg-indigo-600 text-white rounded transition-colors">Apps</button>
+                    <button type="button" onclick="switchTopTab('domains')" id="tab-domains" class="flex-1 px-3 py-1 text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors">Domains</button>
+                </div>
+            </div>
+            <!-- Ranked horizontal bars: bar length encodes duration (magnitude),
+                 name is the direct label, value is a direct label at the end.
+                 Single hue — length carries the measure, not colour. -->
+            <div class="overflow-y-auto flex-1" style="max-height: 260px;">
+                <div id="top-apps-table">
+                    <div id="top-apps-list" class="py-1">
+                        <div class="px-2 py-2 text-center text-gray-500 text-xs">Loading...</div>
                     </div>
                 </div>
+                <div id="top-domains-table" class="hidden">
+                    <div id="top-domains-list" class="py-1">
+                        <div class="px-2 py-2 text-center text-gray-500 text-xs">Loading...</div>
+                    </div>
+                </div>
+            </div>
+            <a href="/dashboard/reports" class="block px-3 py-2 text-xs text-indigo-600 dark:text-indigo-400 border-t border-gray-100 dark:border-gray-700 hover:underline shrink-0">View all in Reports →</a>
+        </div>
+    </div>
+
+    <!-- Row 4: Top Performance (full-width leaderboards) -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
+        <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+            <h3 class="text-sm font-semibold flex items-center gap-2">
+                <img src="{{ url_for('static', filename='throphy.png') }}" class="w-3 h-3" />
+                Top Performance
+            </h3>
+        </div>
+        <div class="p-4 grid grid-cols-1 sm:grid-cols-3 gap-6 text-xs">
+            <div>
+                <h4 class="text-xs font-bold text-success-600 uppercase mb-2 tracking-wide">Active</h4>
+                <ul id="top-active-list" class="space-y-1 text-[11px]"></ul>
+            </div>
+            <div>
+                <h4 class="text-xs font-bold text-warning-600 uppercase mb-2 tracking-wide">Idle</h4>
+                <ul id="top-idle-list" class="space-y-1 text-[11px]"></ul>
+            </div>
+            <div>
+                <h4 class="text-xs font-bold text-gray-600 uppercase mb-2 tracking-wide">Locked</h4>
+                <ul id="top-locked-list" class="space-y-1 text-[11px]"></ul>
             </div>
         </div>
     </div>
@@ -271,15 +297,19 @@
    again here ran its DOMContentLoaded handler twice, so the two fetches it
    makes (alerts banner + risk chart) became four calls to
    /api/lifecycle/fleet-summary on every overview load. #}
-<script>
-// Color schemes for charts
-const CATEGORY_COLORS = {
-    'productivity': '#10b981',
-    'communication': '#3b82f6',
-    'browsing': '#f59e0b',
-    'development': '#8b5cf6',
-    'other': '#9ca3af'
-};
+<script nonce="{{ csp_nonce() }}">
+// Categorical palette for App Usage by Category.
+// CVD-validated (--pairs all) on both the light (#fcfcfb) and dark (#1f2937)
+// surfaces, with a separate step per theme. Deliberately drawn from hues
+// distinct from the reserved status colours (Active green / Idle amber /
+// Locked gray) so a category bar never impersonates a screen-time state.
+// Slot order is fixed and never cycled; "other" is the neutral gray.
+function categoryColors() {
+    const dark = document.documentElement.classList.contains('dark');
+    return dark
+        ? { productivity: '#3987e5', communication: '#008300', browsing: '#d55181', development: '#c98500', other: '#9ca3af' }
+        : { productivity: '#2a78d6', communication: '#008300', browsing: '#e87ba4', development: '#eda100', other: '#9ca3af' };
+}
 
 // Initialize new analytics charts.
 // overview.js refreshes the KPI block every 30s, but these analytics charts
@@ -345,6 +375,11 @@ window.switchTopTab = function(tab) {
 
 async function loadAnalyticsCharts() {
     try {
+        // Fleet utilization trend (change-over-time). Runs concurrently with the
+        // rest; it owns its own error handling so a trend failure never aborts
+        // the category chart below.
+        loadUtilizationTrend();
+
         // Load productivity metrics for Avg Productivity KPI
         const prodResp = await fetch('/dashboard/api/overview/productivity-metrics?days=7');
         const prodData = await prodResp.json();
@@ -378,6 +413,8 @@ async function loadAnalyticsCharts() {
 
             if (chartInstances.appCategory) chartInstances.appCategory.destroy();
             if (hasData) {
+                const catColors = categoryColors();
+                const catAxis = trendAxisColors();  // hoisted; shared recessive grid/tick steps
                 chartInstances.appCategory = new Chart(ctx1, {
                     type: 'bar',
                     data: {
@@ -385,16 +422,23 @@ async function loadAnalyticsCharts() {
                         datasets: [{
                             label: 'Minutes',
                             data: values,
-                            backgroundColor: order.map(k => CATEGORY_COLORS[k])
+                            backgroundColor: order.map(k => catColors[k])
                         }]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
                         scales: {
+                            x: {
+                                grid: { color: catAxis.grid, drawBorder: false },
+                                ticks: { color: catAxis.tick, font: { size: 10 } }
+                            },
                             y: {
                                 beginAtZero: true,
+                                grid: { color: catAxis.grid, drawBorder: false },
                                 ticks: {
+                                    color: catAxis.tick,
+                                    font: { size: 10 },
                                     callback: v => v >= 60
                                         ? `${Math.floor(v / 60)}h${v % 60 ? ' ' + (v % 60) + 'm' : ''}`
                                         : `${v}m`
@@ -430,81 +474,235 @@ async function loadAnalyticsCharts() {
     }
 }
 
+// ---- Fleet Utilization Trend ----------------------------------------------
+// Change-over-time line chart of fleet screen-time split. Colors are the shared
+// validated STATE_COLORS (green Active / amber Idle / neutral-gray Locked) that
+// passed the CVD + contrast checks on both the light (#fff) and dark (#1f2937)
+// dashboard surfaces; the legend adds a text label so identity is never
+// colour-alone.
+let trendDays = 30;
+let topRangeDays = 7;
+
+// Shared state palette (Active/Idle/Locked/Away). CVD-validated (--pairs all)
+// on both surfaces; Active uses the page's success token #10b981 so the entity
+// "Active" is the same colour here, in the stacked Fleet Screen Time bar, and
+// in the KPI/Top-Performance labels. Green<->amber sits in the 6-8 CVD band,
+// which is legal because every chart using it carries an always-present legend.
+const STATE_COLORS = { active: '#10b981', idle: '#d97706', locked: '#6b7280', away: '#7c3aed' };
+
+const TREND_SERIES = [
+    { key: 'active', label: 'Active', color: STATE_COLORS.active },
+    { key: 'idle',   label: 'Idle',   color: STATE_COLORS.idle },
+    { key: 'locked', label: 'Locked', color: STATE_COLORS.locked },
+];
+
+function trendAxisColors() {
+    // Recessive grid/ticks, stepped for the current theme against its surface.
+    const dark = document.documentElement.classList.contains('dark');
+    return {
+        grid: dark ? 'rgba(255,255,255,0.08)' : 'rgba(17,24,39,0.06)',
+        tick: dark ? '#9ca3af' : '#6b7280',
+    };
+}
+
+function fmtHours(v) {
+    const h = Math.floor(v);
+    const m = Math.round((v - h) * 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+async function loadUtilizationTrend() {
+    const canvas = document.getElementById('utilizationTrendChart');
+    if (!canvas) return;
+    try {
+        const resp = await fetch(`/dashboard/api/overview/utilization-trend?days=${trendDays}`);
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        const labels = (data.labels || []).map(iso => {
+            // "2026-07-20" -> "Jul 20"
+            const d = new Date(iso + 'T00:00:00');
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        });
+        const series = data.series || {};
+        const hasData = TREND_SERIES.some(s => (series[s.key] || []).some(v => v > 0));
+
+        const empty = document.getElementById('utilizationTrendEmpty');
+        if (empty) empty.classList.toggle('hidden', hasData);
+        canvas.classList.toggle('hidden', !hasData);
+
+        if (chartInstances.utilTrend) chartInstances.utilTrend.destroy();
+        if (!hasData) return;
+
+        const axis = trendAxisColors();
+        chartInstances.utilTrend = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: TREND_SERIES.map(s => ({
+                    label: s.label,
+                    data: series[s.key] || [],
+                    borderColor: s.color,
+                    backgroundColor: s.color,
+                    borderWidth: 2,           // 2px lines (mark spec)
+                    tension: 0.25,
+                    pointRadius: 0,           // thin marks; reveal on hover
+                    pointHoverRadius: 4,
+                    pointHoverBorderWidth: 2,
+                    pointHoverBorderColor: document.documentElement.classList.contains('dark') ? '#1f2937' : '#ffffff',
+                })),
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },  // crosshair-style hover
+                scales: {
+                    x: {
+                        grid: { color: axis.grid, drawBorder: false },
+                        ticks: { color: axis.tick, maxRotation: 0, autoSkip: true, maxTicksLimit: 10, font: { size: 10 } },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: axis.grid, drawBorder: false },
+                        ticks: { color: axis.tick, font: { size: 10 }, callback: v => `${v}h` },
+                        title: { display: true, text: 'Fleet hours', color: axis.tick, font: { size: 10 } },
+                    },
+                },
+                plugins: {
+                    legend: { display: false },  // rendered as HTML legend in the card header
+                    tooltip: {
+                        callbacks: { label: c => `${c.dataset.label}: ${fmtHours(c.parsed.y || 0)}` },
+                    },
+                },
+            },
+        });
+    } catch (error) {
+        console.error('Utilization trend error:', error);
+    }
+}
+
+// Range filter (7d / 30d / 90d) — repaints the button state and reloads.
+document.addEventListener('DOMContentLoaded', function () {
+    const group = document.getElementById('trend-range');
+    if (!group) return;
+    group.querySelectorAll('.trend-range-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            trendDays = parseInt(this.dataset.days, 10) || 30;
+            group.querySelectorAll('.trend-range-btn').forEach(b => {
+                const on = b === this;
+                b.className = 'trend-range-btn px-2 py-0.5 text-xs font-medium rounded ' +
+                    (on ? 'bg-indigo-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300');
+            });
+            loadUtilizationTrend();
+        });
+    });
+});
+
+// Top 10 range filter (Today / 7d / 30d) — repaints button state and reloads.
+document.addEventListener('DOMContentLoaded', function () {
+    const topGroup = document.getElementById('top-range');
+    if (!topGroup) return;
+    topGroup.querySelectorAll('.top-range-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            topRangeDays = parseInt(this.dataset.days, 10) || 7;
+            topGroup.querySelectorAll('.top-range-btn').forEach(b => {
+                const on = b === this;
+                b.className = 'top-range-btn px-2 py-0.5 text-xs font-medium rounded ' +
+                    (on ? 'bg-indigo-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300');
+            });
+            loadAnalyticsTables();
+        });
+    });
+});
+
+// Render a ranked horizontal-bar list. Bar width is the item's duration as a
+// share of the top item (magnitude), name + value are direct labels, and the
+// fill is a single validated hue (blue slot-1) — length carries the measure.
+function renderTopBars(listEl, items, nameKey) {
+    if (!listEl) return;
+    if (!Array.isArray(items) || items.length === 0) {
+        listEl.innerHTML = '<div class="px-2 py-3 text-center text-gray-500 text-xs">No data for this range</div>';
+        return;
+    }
+    const dark = document.documentElement.classList.contains('dark');
+    const bar = dark ? '#3987e5' : '#2a78d6';
+    const track = dark ? 'rgba(255,255,255,0.06)' : 'rgba(17,24,39,0.05)';
+    const esc = s => String(s == null ? '—' : s).replace(/[&<>"]/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const fmt = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
+    const max = Math.max(...items.map(x => x.total_duration_seconds || 0), 1);
+
+    listEl.innerHTML = items.map((x, i) => {
+        const secs = x.total_duration_seconds || 0;
+        const w = Math.max(2, (secs / max) * 100);   // floor so tiny bars stay visible
+        const name = esc(x[nameKey]);
+        return `<div class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded" title="${name} · ${fmt(secs)}">
+            <span class="text-[10px] text-gray-400 w-4 text-right tabular-nums shrink-0">${i + 1}</span>
+            <div class="flex-1 min-w-0">
+                <div class="flex justify-between items-baseline gap-2 mb-0.5">
+                    <span class="text-xs text-gray-900 dark:text-gray-100 truncate">${name}</span>
+                    <span class="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums shrink-0">${fmt(secs)}</span>
+                </div>
+                <div class="h-1.5 w-full rounded-full overflow-hidden" style="background:${track}">
+                    <div class="h-full rounded-full" style="width:${w.toFixed(1)}%;background:${bar}"></div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
 async function loadAnalyticsTables() {
     try {
-        // Top Apps
-        const appsResp = await fetch('/dashboard/api/overview/top-apps?limit=10&days=7');
+        // Top Apps — ranked bars (top 10 by screen time)
+        const appsResp = await fetch(`/dashboard/api/overview/top-apps?limit=10&days=${topRangeDays}`);
         const apps = await appsResp.json();
-        
-        // Populate Top 5 Apps
-        const appsList = document.getElementById('top-apps-list');
-        if (appsList) {
-            if (Array.isArray(apps) && apps.length > 0) {
-                appsList.innerHTML = apps.slice(0, 5).map((a, i) => 
-                    `<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <td class="px-2 py-2"><span class="font-bold text-gray-900 dark:text-gray-100">${i+1}.</span></td>
-                        <td class="px-2 py-2 text-gray-900 dark:text-gray-100 truncate">${a.app}</td>
-                    </tr>`
-                ).join('');
-            } else {
-                appsList.innerHTML = '<tr><td colspan="2" class="px-2 py-2 text-center text-gray-500">No data</td></tr>';
-            }
-        }
+        renderTopBars(document.getElementById('top-apps-list'), Array.isArray(apps) ? apps : [], 'app');
 
-        // Top Domains
-        const domsResp = await fetch('/dashboard/api/overview/top-domains?limit=10&days=7');
+        // Top Domains — ranked bars (top 10 by screen time)
+        const domsResp = await fetch(`/dashboard/api/overview/top-domains?limit=10&days=${topRangeDays}`);
         const doms = await domsResp.json();
-        
-        // Populate Top 5 Domains
-        const domsList = document.getElementById('top-domains-list');
-        if (domsList) {
-            if (Array.isArray(doms) && doms.length > 0) {
-                domsList.innerHTML = doms.slice(0, 5).map((d, i) => 
-                    `<tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <td class="px-2 py-2"><span class="font-bold text-gray-900 dark:text-gray-100">${i+1}.</span></td>
-                        <td class="px-2 py-2 text-gray-900 dark:text-gray-100 truncate">${d.domain}</td>
-                    </tr>`
-                ).join('');
-            } else {
-                domsList.innerHTML = '<tr><td colspan="2" class="px-2 py-2 text-center text-gray-500">No data</td></tr>';
-            }
-        }
+        renderTopBars(document.getElementById('top-domains-list'), Array.isArray(doms) ? doms : [], 'domain');
 
     } catch (error) {
         console.error('Analytics tables error:', error);
     }
 }
 
-// Override renderCharts to populate Fleet Screen Time bars from overview data
+// Override renderCharts to populate the 100%-stacked Fleet Screen Time bar.
+// Each segment's width is its share of the day's total, so a longer segment
+// always means more time — the states are directly comparable.
 const _origRenderCharts = window.renderCharts;
 window.renderCharts = function(data) {
     if (_origRenderCharts) _origRenderCharts(data);
     if (!data || !data.screen_time) return;
     const st = data.screen_time;
     const fmt = s => `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
-    const total = (st.active||0)+(st.idle||0)+(st.locked||0)+(st.away||0) || 1;
-    const pct = v => Math.min(100, Math.max(0, (v/total)*100)).toFixed(1)+'%';
-    document.getElementById('fleet-active-time').textContent = fmt(st.active||0);
-    document.getElementById('fleet-idle-time').textContent   = fmt(st.idle||0);
-    document.getElementById('fleet-locked-time').textContent = fmt(st.locked||0);
-    document.getElementById('fleet-away-time').textContent   = fmt(st.away||0);
-    document.getElementById('fleet-active-bar').style.width  = pct(st.active||0);
-    document.getElementById('fleet-idle-bar').style.width    = pct(st.idle||0);
-    document.getElementById('fleet-locked-bar').style.width  = pct(st.locked||0);
-    document.getElementById('fleet-away-bar').style.width    = pct(st.away||0);
-    
-    // Hide Away row if zero
-    const awayRow = document.getElementById('fleet-away-row');
-    if (awayRow) {
-        awayRow.style.display = (st.away||0) > 0 ? '' : 'none';
-    }
-    
+    const active = st.active||0, idle = st.idle||0, locked = st.locked||0, away = st.away||0;
+    const total = active + idle + locked + away;
+    const pct = v => total ? Math.min(100, Math.max(0, v/total*100)).toFixed(2)+'%' : '0%';
+
+    const setW = (id, v) => { const el = document.getElementById(id); if (el) el.style.width = pct(v); };
+    setW('fleet-active-seg', active);
+    setW('fleet-idle-seg', idle);
+    setW('fleet-locked-seg', locked);
+    setW('fleet-away-seg', away);
+
+    const setT = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
+    setT('fleet-active-time', active);
+    setT('fleet-idle-time', idle);
+    setT('fleet-locked-time', locked);
+    setT('fleet-away-time', away);
+    setT('fleet-total-time', total);
+
+    // Away is usually zero; only surface its legend row when there is time to show.
+    const awayRow = document.getElementById('fleet-away-legend');
+    if (awayRow) awayRow.style.display = away > 0 ? '' : 'none';
+
     // Update screentime summary
     const summary = document.getElementById('screentime-summary');
-    if (summary) {
-        const active = Math.floor((st.active||0)/3600);
-        summary.textContent = `Active: ${active}h`;
-    }
+    if (summary) summary.textContent = `Active: ${Math.floor(active/3600)}h`;
 };
 </script>
 {% endblock %}

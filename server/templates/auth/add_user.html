@@ -7,7 +7,7 @@
     <title>Add User - SentinelEdge</title>
     <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
-<style>
+<style nonce="{{ csp_nonce() }}">
   * {
     font-family: "Space Grotesk", sans-serif !important;
   }
@@ -195,7 +195,7 @@
             </form>
         </div>
     </div>
-<script>
+<script nonce="{{ csp_nonce() }}">
   function togglePasswordField() {
     const authType = document.getElementById('auth_type').value;
     const passwordField = document.getElementById('password_field');
@@ -213,7 +213,7 @@
   // Initialize on page load
   document.addEventListener('DOMContentLoaded', togglePasswordField);
 </script>
-<script>
+<script nonce="{{ csp_nonce() }}">
   const passwordInput = document.getElementById("password");
   const togglePassword = document.getElementById("togglePassword");
 
@@ -236,7 +236,7 @@
     });
   }
 </script>
-<script>
+<script nonce="{{ csp_nonce() }}">
 
   document.querySelectorAll("[data-no-emoji]").forEach((input) => {
     input.addEventListener("input", () => {

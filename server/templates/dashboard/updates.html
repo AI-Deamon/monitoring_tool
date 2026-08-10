@@ -3,7 +3,7 @@
 {% block title %}Updates Dashboard - SentinelEdge{% endblock %}
 
 {% block extra_head %}
-<style>
+<style nonce="{{ csp_nonce() }}">
     .update-card {
         transition: all 0.2s ease-in-out;
     }
@@ -355,7 +355,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce() }}">
     let allAgents = [];
 
     async function initUpdates() {

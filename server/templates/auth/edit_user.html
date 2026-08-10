@@ -7,12 +7,12 @@
     <title>Edit User - SentinelEdge</title>
     <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
-<style>
+<style nonce="{{ csp_nonce() }}">
   * {
     font-family: "Space Grotesk", sans-serif !important;
   }
   </style>
-    <style>
+    <style nonce="{{ csp_nonce() }}">
         :root {
             --bg-color: #f4f7f9;
             --primary-color: #4a90e2;
@@ -371,7 +371,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce() }}">
   function togglePasswordField() {
     const authType = document.getElementById('auth_type').value;
     const passwordField = document.getElementById('password_field');

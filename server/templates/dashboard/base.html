@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="/static/css/dashboard.css?v=20260619">
 
     <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
-    <style>
+    <style nonce="{{ csp_nonce() }}">
         * {
     font-family: "Space Grotesk", sans-serif !important;
             font-optical-sizing: auto;
@@ -19,7 +19,7 @@
             font-style: normal;
         }
     </style>
-<style>
+<style nonce="{{ csp_nonce() }}">
 /* ================= PRINT MODE ================= */
 @media print {
 
@@ -81,7 +81,7 @@
 
     <!-- Chart.js -->
     <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
-    <style>
+    <style nonce="{{ csp_nonce() }}">
         /* Global Print Styles */
         @media print {
             .no-print {
@@ -325,7 +325,7 @@
     </footer>
 
     <!-- Custom JS -->
-    <script>
+    <script nonce="{{ csp_nonce() }}">
         // ── Local calendar date (YYYY-MM-DD) ──────────────────────────────
         // Date.toISOString() returns the UTC day. East of Greenwich that is
         // YESTERDAY for the first hours after local midnight (in IST, until

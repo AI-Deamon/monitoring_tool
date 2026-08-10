@@ -1,6 +1,6 @@
 import os, sys, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
-os.environ.setdefault('FLASK_ENV', 'development')
+os.environ['FLASK_ENV'] = 'development'
 os.environ.setdefault('SECRET_KEY', 'x'*40)
 
 
@@ -36,6 +36,17 @@ class TestSecurityHeaders(unittest.TestCase):
         h = self._resp_headers()
         self.assertEqual(h.get('X-Content-Type-Options'), 'nosniff')
         self.assertEqual(h.get('X-Frame-Options'), 'SAMEORIGIN')
+
+    def test_csp_uses_nonce_not_unsafe_inline(self):
+        csp = self._resp_headers().get('Content-Security-Policy', '')
+        self.assertNotIn("'unsafe-eval'", csp)
+        self.assertIn("'nonce-", csp)
+        # 'unsafe-inline' is confined to script-src-attr (for the template's
+        # first-party inline onclick/onchange handlers); script-src itself
+        # must never fall back to it, or the nonce is bypassable.
+        self.assertIn("script-src-attr 'unsafe-inline'", csp)
+        script_src = csp.split(';')[1].strip()
+        self.assertNotIn("'unsafe-inline'", script_src)
 
 
 if __name__ == "__main__":

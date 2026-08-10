@@ -2,7 +2,7 @@
 {% block title %}Activity Report - {{ agent_id }} - SentinelEdge{% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce() }}">
     /* ===== PRINT & SCREEN STYLES ===== */
     @media print {
         body {
@@ -565,7 +565,7 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/timezone_utils.js') }}"></script>
-<script>
+<script nonce="{{ csp_nonce() }}">
     // ===== CONFIGURATION =====
     const AGENT_ID = "{{ agent_id }}";
     const API_URL = `/dashboard/api/agent/${AGENT_ID}/full-report`;

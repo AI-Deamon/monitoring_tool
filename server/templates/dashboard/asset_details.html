@@ -3,7 +3,7 @@
 {% block title %}Asset Details - {{ agent_id }} - SentinelEdge{% endblock %}
 
 {% block extra_head %}
-<style>
+<style nonce="{{ csp_nonce() }}">
     .tab-active {
         border-bottom: 2px solid #3b82f6;
         color: #3b82f6;
@@ -409,7 +409,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce() }}">
     const agentId = "{{ agent_id }}";
     let assetData = null;
 
