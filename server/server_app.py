@@ -51,18 +51,34 @@ def create_app():
     @app.after_request
     def add_security_headers(response):
         """Add security headers to all responses."""
-        # CSP: Allow external fonts and CDN resources for dashboard
+        # CSP: nonce is added in a later task; this interim policy drops the
+        # stale CDN allowlist (Tailwind/Chart/fonts are vendored under static/vendor).
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "script-src 'self' 'unsafe-inline'; "   # 'unsafe-inline' removed once nonce lands
+            "style-src 'self' 'unsafe-inline'; "    # removed once nonce lands
             "img-src 'self' data:; "
-            "font-src 'self' https://fonts.gstatic.com; "
-            "connect-src 'self'"
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "frame-ancestors 'self'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
+            "object-src 'none'"
         )
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+        if config.USE_TLS:
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
         return response
+    
+    @app.before_request
+    def _enforce_https():
+        if os.getenv('FORCE_HTTPS', 'false').lower() == 'true' and not request.is_secure \
+                and request.headers.get('X-Forwarded-Proto', 'http') != 'https':
+            from flask import redirect
+            return redirect(request.url.replace('http://', 'https://', 1), code=308)
     
     # ================================================================
     # ISSUE-001 FIX: Enforce strong SECRET_KEY in production
