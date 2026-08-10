@@ -753,7 +753,82 @@ def api_overview():
 
     except Exception as e:
         logger.error(f"Overview API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@bp.route("/api/overview/utilization-trend", methods=["GET"])
+@login_required
+@api_rate_limit
+def api_utilization_trend():
+    """Fleet screen-time split (active/idle/locked/away) aggregated per day
+    over the last N days, in hours. Powers the utilization trend line chart
+    on the overview page.
+
+    Unlike /api/overview (a single-day snapshot), this returns a dense series
+    with one point per calendar day in the window, zero-filled for days with
+    no telemetry, so the front-end can draw a continuous line.
+    """
+    try:
+        try:
+            days = int(request.args.get("days", 30))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 90))
+
+        end_date = get_ist_today()
+        start_date = end_date - timedelta(days=days - 1)
+
+        q = db.session.query(
+            server_models.ScreenTime.date,
+            func.sum(server_models.ScreenTime.active_seconds),
+            func.sum(server_models.ScreenTime.idle_seconds),
+            func.sum(server_models.ScreenTime.locked_seconds),
+            func.sum(server_models.ScreenTime.away_seconds),
+        ).filter(
+            server_models.ScreenTime.date >= start_date,
+            server_models.ScreenTime.date <= end_date,
+        )
+
+        # Multi-tenant: non-admins only see their own org's agents.
+        if g.current_user.role != "admin":
+            q = q.join(
+                server_models.Agent,
+                server_models.ScreenTime.agent_id == server_models.Agent.agent_id,
+            ).filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        q = q.group_by(server_models.ScreenTime.date).order_by(
+            server_models.ScreenTime.date
+        )
+        rows = {r[0]: r for r in q.all()}
+
+        labels = []
+        active, idle, locked, away = [], [], [], []
+        for i in range(days):
+            d = start_date + timedelta(days=i)
+            labels.append(d.isoformat())
+            r = rows.get(d)
+            # seconds -> hours, 2dp; zero-fill days with no data
+            active.append(round((r[1] or 0) / 3600, 2) if r else 0)
+            idle.append(round((r[2] or 0) / 3600, 2) if r else 0)
+            locked.append(round((r[3] or 0) / 3600, 2) if r else 0)
+            away.append(round((r[4] or 0) / 3600, 2) if r else 0)
+
+        return jsonify(
+            {
+                "labels": labels,
+                "unit": "hours",
+                "series": {
+                    "active": active,
+                    "idle": idle,
+                    "locked": locked,
+                    "away": away,
+                },
+            }
+        ), 200
+
+    except Exception as e:
+        logger.error(f"Utilization trend error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/assets", methods=["GET"])
@@ -847,7 +922,7 @@ def get_assets_data():
         return jsonify({"data": assets})
     except Exception as e:
         logger.error(f"[DASHBOARD] Error fetching assets: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/assets/<path:agent_id>", methods=["GET"])
@@ -959,7 +1034,7 @@ def get_single_asset_data(agent_id):
         return jsonify(data)
     except Exception as e:
         logger.error(f"[DASHBOARD] Error fetching asset detail for {agent_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -981,7 +1056,7 @@ def api_lifecycle_fleet_summary():
         return jsonify(summary)
     except Exception as e:
         logger.error(f"[LIFECYCLE] Fleet summary error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/lifecycle/agent/<path:agent_id>", methods=["GET"])
@@ -1029,7 +1104,7 @@ def api_lifecycle_agent(agent_id):
         )
     except Exception as e:
         logger.error(f"[LIFECYCLE] Agent lifecycle error for {agent_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/lifecycle/sync", methods=["POST"])
@@ -1046,7 +1121,7 @@ def api_lifecycle_sync():
         return jsonify({"status": "ok", "synced": results})
     except Exception as e:
         logger.error(f"[LIFECYCLE] Sync error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/lifecycle/evaluate", methods=["POST"])
@@ -1063,7 +1138,7 @@ def api_lifecycle_evaluate():
         return jsonify({"status": "ok", "summary": summary})
     except Exception as e:
         logger.error(f"[LIFECYCLE] Evaluate error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/lifecycle/fleet-export", methods=["GET"])
@@ -1469,7 +1544,7 @@ def api_agents():
         return jsonify({"data": result}), 200
     except Exception as e:
         logger.error(f"Agents API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/screentime", methods=["GET"])
@@ -1533,7 +1608,7 @@ def api_agent_screentime(agent_id):
         return jsonify(data), 200
     except Exception as e:
         logger.error(f"Agent Screentime API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/apps", methods=["GET"])
@@ -1674,7 +1749,7 @@ def api_agent_apps(agent_id):
         ), 200
     except Exception as e:
         logger.error(f"Agent Apps API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/domains", methods=["GET"])
@@ -1797,7 +1872,7 @@ def api_agent_domains(agent_id):
         ), 200
     except Exception as e:
         logger.error(f"Agent Domains API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/inventory", methods=["GET"])
@@ -1832,7 +1907,7 @@ def api_agent_inventory(agent_id):
         return jsonify({"data": result}), 200
     except Exception as e:
         logger.error(f"Agent Inventory API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/inventory/fleet-export", methods=["GET"])
@@ -1875,7 +1950,7 @@ def api_inventory_fleet_export():
         return jsonify({"data": data}), 200
     except Exception as e:
         logger.error(f"Fleet Inventory Export API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/hardware", methods=["GET"])
@@ -1904,7 +1979,7 @@ def api_agent_hardware(agent_id):
         return jsonify({"data": asset.to_dict()}), 200
     except Exception as e:
         logger.error(f"Agent Hardware API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/extended-inventory", methods=["GET"])
@@ -2037,7 +2112,7 @@ def api_agent_extended_inventory(agent_id):
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Agent Extended Inventory API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/security-indicators", methods=["GET"])
@@ -2091,7 +2166,7 @@ def api_agent_security_indicators(agent_id):
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Agent Security Indicators API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/system-visibility", methods=["GET"])
@@ -2169,7 +2244,7 @@ def api_agent_system_visibility(agent_id):
 
     except Exception as e:
         logger.error(f"Agent System Visibility API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/full-report", methods=["GET"])
@@ -2577,7 +2652,7 @@ def api_agent_full_report(agent_id):
                 "domain": v.domain,
                 "url": v.url,
                 "browser": v.browser,
-                "visited_at": v.visited_at.isoformat() if v.visited_at else None,
+                "visited_at": (v.visited_at.isoformat() + "Z") if v.visited_at else None,
             }
             for v in filtered_visits
         ]
@@ -2702,7 +2777,7 @@ def api_agent_full_report(agent_id):
 
     except Exception as e:
         logger.error(f"Agent Full Report API error: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/activity-timeline", methods=["GET"])
@@ -2783,7 +2858,7 @@ def api_agent_activity_timeline(agent_id):
 
     except Exception as e:
         logger.error(f"Activity Timeline API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -2870,7 +2945,7 @@ def api_agent_domain_visits(agent_id):
         return jsonify({"data": result}), 200
     except Exception as e:
         logger.error(f"Agent Domain Visits API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/app-sessions", methods=["GET"])
@@ -2955,7 +3030,7 @@ def api_agent_app_sessions(agent_id):
         return jsonify({"data": result}), 200
     except Exception as e:
         logger.error(f"Agent App Sessions API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/today", methods=["GET"])
@@ -3142,7 +3217,7 @@ def api_agent_today(agent_id):
 
     except Exception as e:
         logger.error(f"Agent Today API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -3235,7 +3310,7 @@ def get_agent_current_activity(agent_id):
 
     except Exception as e:
         logger.error(f"Error fetching current activity: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/recent-activities")
@@ -3317,12 +3392,22 @@ def get_agent_recent_activities(agent_id):
 
     except Exception as e:
         logger.error(f"Error fetching recent activities: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
 # ANALYTICS API ENDPOINTS (Materialized Views)
 # ============================================================================
+
+
+def _parse_limit(raw, default=10, lo=1, hi=100):
+    """Parse a user-supplied limit safely. Never raises; clamps to [lo, hi]
+    and falls back to `default` on any bad/missing input. Prevents the raw
+    value from reaching an exception message that gets echoed to the client."""
+    try:
+        return max(lo, min(int(raw), hi))
+    except (TypeError, ValueError):
+        return default
 
 
 def _parse_overview_date_range():
@@ -3453,7 +3538,7 @@ def api_overview_productivity_metrics():
         )
     except Exception as e:
         logger.error(f"[DASHBOARD] productivity-metrics error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 
@@ -3466,7 +3551,7 @@ def api_overview_top_apps():
     """Top applications with category data from app_usage + mv_app_category_breakdown."""
     try:
         start_date, end_date = _parse_overview_date_range()
-        limit = max(1, min(int(request.args.get("limit", 10)), 100))
+        limit = _parse_limit(request.args.get("limit", 10))
         visibility_clause, visibility_params = _build_username_filter_sql("au.username")
 
         rows = db.session.execute(
@@ -3507,7 +3592,7 @@ def api_overview_top_apps():
         )
     except Exception as e:
         logger.error(f"[DASHBOARD] top-apps error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/top-domains", methods=["GET"])
@@ -3517,7 +3602,7 @@ def api_overview_top_domains():
     """Top domains with classification data from domain_usage + mv_domain_classified."""
     try:
         start_date, end_date = _parse_overview_date_range()
-        limit = max(1, min(int(request.args.get("limit", 10)), 100))
+        limit = _parse_limit(request.args.get("limit", 10))
         visibility_clause, visibility_params = _build_username_filter_sql("du.username")
 
         rows = db.session.execute(
@@ -3563,7 +3648,7 @@ def api_overview_top_domains():
         )
     except Exception as e:
         logger.error(f"[DASHBOARD] top-domains error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/after-hours-leaderboard", methods=["GET"])
@@ -3573,7 +3658,7 @@ def api_overview_after_hours_leaderboard():
     """Top after-hours workers from mv_after_hours_activity."""
     try:
         start_date, end_date = _parse_overview_date_range()
-        limit = max(1, min(int(request.args.get("limit", 10)), 100))
+        limit = _parse_limit(request.args.get("limit", 10))
         visibility_clause, visibility_params = _build_username_filter_sql("username")
 
         rows = db.session.execute(
@@ -3616,7 +3701,7 @@ def api_overview_after_hours_leaderboard():
         )
     except Exception as e:
         logger.error(f"[DASHBOARD] after-hours-leaderboard error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -3667,7 +3752,7 @@ def api_productivity_score():
         )
     except Exception as e:
         logger.error(f"Productivity score error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 def _unwrap_panel(view_func):
@@ -3728,7 +3813,10 @@ def api_category_breakdown():
     try:
         date_str = request.args.get("date")
         if date_str:
-            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                target_date = datetime.now(timezone.utc).date()
         else:
             target_date = datetime.now(timezone.utc).date()
 
@@ -3790,7 +3878,7 @@ def api_category_breakdown():
         return jsonify(breakdown)
     except Exception as e:
         logger.error(f"Category breakdown error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/idle-analysis", methods=["GET"])
@@ -3850,7 +3938,7 @@ def api_idle_analysis():
         )
     except Exception as e:
         logger.error(f"Idle analysis error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/activity-heatmap", methods=["GET"])
@@ -3911,7 +3999,7 @@ def api_activity_heatmap():
         )
     except Exception as e:
         logger.error(f"Activity heatmap error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -3948,7 +4036,7 @@ def api_os_distribution():
         return jsonify(distribution)
     except Exception as e:
         logger.error(f"OS distribution error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/app-categories", methods=["GET"])
@@ -4040,7 +4128,7 @@ def api_app_categories():
         return jsonify(categories)
     except Exception as e:
         logger.error(f"App categories error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/browser-usage", methods=["GET"])
@@ -4085,7 +4173,7 @@ def api_browser_usage():
         return jsonify(usage)
     except Exception as e:
         logger.error(f"Browser usage error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/database/status", methods=["GET"])
@@ -4128,7 +4216,7 @@ def api_database_status():
         )
     except Exception as e:
         logger.error(f"Database status error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/monitoring/failed-events", methods=["GET"])
@@ -4229,7 +4317,7 @@ def api_agent_versions():
         return jsonify(versions)
     except Exception as e:
         logger.error(f"Agent versions error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/database/table-sizes", methods=["GET"])
@@ -4261,7 +4349,7 @@ def api_table_sizes():
         return jsonify(tables)
     except Exception as e:
         logger.error(f"Table sizes error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -4311,17 +4399,35 @@ def api_set_target_version():
             )
         agent_id = data.get("agent_id")
 
+        # Manually re-targeting an agent only touches the agents row here -
+        # it does NOT go through the agent's own poll response, which is the
+        # only other place a 'pending' update_history row gets written. If
+        # this agent has an old, never-terminally-resolved row for the SAME
+        # target_version sitting in update_history (e.g. a prior episode
+        # that was cleared via retryUpdate() without ever recording success/
+        # failed/rolled_back), the stale-update watchdog's episode-scoping
+        # logic has nothing newer to anchor on and can auto-reset this fresh
+        # trigger within its next cycle, before the agent even gets a chance
+        # to poll. Writing a fresh 'pending' row here - mirroring exactly
+        # what /api/v1/updates/latest does for an agent-initiated poll -
+        # closes that gap.
+        from server_updates import _log_update_event
+
         if agent_id:
             # Single agent
             agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
             if not agent:
                 return jsonify({"error": "Agent not found"}), 404
 
+            queuing_update = agent.version != target
             agent.target_version = target
-            agent.update_status = "pending" if agent.version != target else "up_to_date"
+            agent.update_status = "pending" if queuing_update else "up_to_date"
             agent.update_attempts = 0
             agent.last_update_error = None
             db.session.commit()
+            if queuing_update:
+                _log_update_event(agent_id, 'version_check', target,
+                                  f'manual retarget from={agent.version}')
 
             logger.info(f"[UPDATES] Target set to {target} for agent {agent_id}")
             return jsonify({"updated": 1, "target_version": target})
@@ -4330,13 +4436,15 @@ def api_set_target_version():
             agents = server_models.Agent.query.all()
             updated = 0
             for agent in agents:
+                queuing_update = agent.version != target
                 agent.target_version = target
-                agent.update_status = (
-                    "pending" if agent.version != target else "up_to_date"
-                )
+                agent.update_status = "pending" if queuing_update else "up_to_date"
                 agent.update_attempts = 0
                 agent.last_update_error = None
                 updated += 1
+                if queuing_update:
+                    _log_update_event(str(agent.agent_id), 'version_check',
+                                      target, f'manual retarget from={agent.version}')
 
             db.session.commit()
 
@@ -4346,7 +4454,7 @@ def api_set_target_version():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Set target version error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/updates/summary", methods=["GET"])
@@ -4435,7 +4543,7 @@ def api_updates_summary():
 
     except Exception as e:
         logger.error(f"Updates summary error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/updates/retry", methods=["POST"])
@@ -4472,7 +4580,7 @@ def api_retry_update():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Retry update error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/updates/canary-deploy", methods=["POST"])
@@ -4555,7 +4663,7 @@ def api_canary_deploy():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Canary deploy error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/delete", methods=["POST"])
@@ -4584,4 +4692,4 @@ def delete_agent(agent_id):
     except Exception as e:
         db.session.rollback()
         logger.error(f"[DASHBOARD] delete-agent error for {agent_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
