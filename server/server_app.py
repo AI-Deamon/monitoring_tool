@@ -15,6 +15,21 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def resolve_cors_origins():
+    """CORS allowlist from env. Default is EMPTY (same-origin only) — never
+    '*'. An explicit '*' is refused in production to avoid arbitrary-origin
+    trust, especially with credentialed /api/* requests."""
+    raw = os.getenv('CORS_ORIGINS', '').strip()
+    if not raw:
+        return []
+    if raw == '*':
+        if os.getenv('FLASK_ENV', 'production') == 'production':
+            raise RuntimeError("CORS_ORIGINS='*' is not permitted in production")
+        return '*'
+    return [o.strip() for o in raw.split(',') if o.strip()]
+
+
 def create_app():
     """Create and configure the Flask application"""
     config = get_config()
@@ -148,10 +163,8 @@ def create_app():
     # Fix #11: Configure CORS for cross-origin requests
     # ================================================================
     if CORS_AVAILABLE:
-        # Get allowed origins from environment (comma-separated) or allow all
-        allowed_origins = os.getenv('CORS_ORIGINS', '*')
-        if allowed_origins != '*':
-            allowed_origins = [o.strip() for o in allowed_origins.split(',')]
+        # Get allowed origins from environment (comma-separated) or same-origin only
+        allowed_origins = resolve_cors_origins()
         
         CORS(app, resources={
             r"/api/*": {
