@@ -16,10 +16,9 @@ import sys
 import psycopg2
 
 def get_connection():
-    db_url = os.environ.get(
-        'DATABASE_URL',
-        'postgresql://sentinelserver:sentinel_edge_secure@localhost:5432/sentinel_edge_v1'
-    )
+    db_url = os.environ.get('DATABASE_URL')
+    if not db_url:
+        raise SystemExit("DATABASE_URL environment variable must be set")
     # Parse: postgresql://user:pass@host:port/dbname
     url = db_url.replace('postgresql://', '')
     userpass, hostdb = url.split('@')

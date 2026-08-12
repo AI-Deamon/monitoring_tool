@@ -84,3 +84,4 @@ htmlcov/
 graphify-out/cache
 server/graphify-out/cache
 server/graphify-out
+.gstack/

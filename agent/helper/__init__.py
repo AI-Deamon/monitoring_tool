@@ -3,5 +3,5 @@ SentinelEdge Helper Package
 User-level telemetry collection
 """
 
-__version__ = '4.2.0'
+__version__ = '4.2.2'
 __author__ = 'SentinelEdge Team'

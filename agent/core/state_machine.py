@@ -81,11 +81,21 @@ class ScreenTimeEngine:
     - reset_daily() is idempotent — only fires once per calendar day
     """
 
-    def __init__(self, data_dir: Path, agent_id: str = "unknown"):
+    def __init__(
+        self,
+        data_dir: Path,
+        agent_id: str = "unknown",
+        user_active_fn: Optional[Callable[[], bool]] = None,
+    ):
         self.agent_id = agent_id
         self.current_state = ScreenState.ACTIVE
         self.last_timestamp = time.time()
         self.last_event = LastEvent.NORMAL
+
+        # US1 (anti-fabrication): input-recentcy predicate. When set and
+        # reporting unattended while ACTIVE, tick() credits IDLE instead of
+        # ACTIVE. None => legacy behavior (Core service, no input sensing).
+        self.user_active_fn = user_active_fn
 
         # RACE-002 FIX: Thread lock for state mutation safety
         self._lock = threading.RLock()
@@ -207,13 +217,17 @@ class ScreenTimeEngine:
                 "event_type": event_type.value,
             }
 
-    def _add_to_current_bucket(self, delta: float):
-        """Add delta seconds to the current state's bucket."""
-        if self.current_state == ScreenState.ACTIVE:
+    def _add_to_current_bucket(
+        self, delta: float, state: Optional[ScreenState] = None
+    ):
+        """Add delta seconds to the given state's bucket (default: current)."""
+        if state is None:
+            state = self.current_state
+        if state == ScreenState.ACTIVE:
             self.active_seconds += delta
-        elif self.current_state == ScreenState.IDLE:
+        elif state == ScreenState.IDLE:
             self.idle_seconds += delta
-        elif self.current_state == ScreenState.LOCKED:
+        elif state == ScreenState.LOCKED:
             self.pending_locked_seconds += delta
             AWAY_THRESHOLD = 7200  # 2 hours
             if self.pending_locked_seconds >= AWAY_THRESHOLD:
@@ -223,8 +237,20 @@ class ScreenTimeEngine:
                     f"({self.pending_locked_seconds:.1f}s)"
                 )
                 self.pending_locked_seconds = 0.0
-        elif self.current_state == ScreenState.AWAY:
+        elif state == ScreenState.AWAY:
             self.away_seconds += delta
+
+    def _route_to_idle(self) -> bool:
+        """True when tick() must credit IDLE instead of the current state.
+
+        US1 (anti-fabrication): an ACTIVE state with an input-recentcy
+        predicate reporting the user unattended must not accrue ACTIVE time.
+        """
+        return (
+            self.current_state == ScreenState.ACTIVE
+            and self.user_active_fn is not None
+            and not self.user_active_fn()
+        )
 
     def tick(self):
         """
@@ -234,10 +260,20 @@ class ScreenTimeEngine:
         state transitions. Must be called before get_daily_totals().
 
         Called every heartbeat (~30s) by state_detector.get_cumulative_totals().
+
+        US1: when `user_active_fn` is set and reports unattended while ACTIVE,
+        the whole delta (including any IST-midnight split segment) is credited
+        to IDLE. `current_state` is never mutated.
         """
         with self._lock:
             now = time.time()
             delta = now - self.last_timestamp
+
+            # Evaluate the predicate ONCE so both midnight-split segments below
+            # share the same routing decision.
+            bucket_state = (
+                ScreenState.IDLE if self._route_to_idle() else self.current_state
+            )
 
             # Sanity check: cap delta at 24 hours (clock jump protection)
             if delta > 86400:
@@ -269,11 +305,11 @@ class ScreenTimeEngine:
                     + 86400
                 )
                 pre_midnight_delta = max(0.0, midnight_ts - self.last_timestamp)
-                self._add_to_current_bucket(pre_midnight_delta)
+                self._add_to_current_bucket(pre_midnight_delta, bucket_state)
                 self.last_timestamp = midnight_ts
                 delta = now - midnight_ts
 
-            self._add_to_current_bucket(delta)
+            self._add_to_current_bucket(delta, bucket_state)
 
             # Update timestamp
             self.last_timestamp = now

@@ -81,9 +81,9 @@ def main():
         print(f"  - {agent_id}")
     print()
     
-    # Set database URL from environment
-    os.environ['DATABASE_URL'] = 'postgresql://sentinelserver:sentinel_edge_secure@localhost:5432/sentinel_edge_v1'
-    
+    if not os.environ.get('DATABASE_URL'):
+        raise SystemExit("DATABASE_URL environment variable must be set")
+
     # Create app once
     app = create_app()
     

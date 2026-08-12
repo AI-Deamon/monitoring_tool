@@ -664,6 +664,44 @@ def report_update_health():
                 f"FAILED: {json.dumps(details)}"
             )
 
+        # Dedup guard: report_health() retries on transport failures, so a
+        # request the server already committed can arrive twice if only the
+        # ack was lost. Without this, a retried call would double-write
+        # UpdateHistory and double-increment update_attempts.
+        mapped_status = {
+            'healthy': 'success', 'failed': 'failed', 'rolled_back': 'rolled_back'
+        }.get(status)
+        is_duplicate = False
+        if mapped_status:
+            try:
+                import server_models as _sm
+                last = (
+                    _sm.UpdateHistory.query.filter_by(agent_id=agent_id)
+                    .order_by(_sm.UpdateHistory.created_at.desc())
+                    .first()
+                )
+                if (
+                    last
+                    and last.to_version == version
+                    and last.status == mapped_status
+                    and last.created_at
+                    and (datetime.now(timezone.utc) - last.created_at.replace(tzinfo=timezone.utc))
+                        < timedelta(minutes=2)
+                ):
+                    is_duplicate = True
+                    logger.info(
+                        f"[UPDATES] Duplicate health report for agent={agent_id} "
+                        f"version={version} status={status} - acknowledging without re-applying"
+                    )
+            except Exception as e:
+                logger.warning(f"[UPDATES] Dedup check failed, proceeding normally: {e}")
+
+        if is_duplicate:
+            return jsonify({
+                'acknowledged': True,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
+
         _log_update_event(agent_id, f'health_{status}', version,
                           json.dumps(details))
 
@@ -969,8 +1007,26 @@ def get_update_history():
             server_models.UpdateHistory.created_at.desc()
         ).limit(limit).all()
 
+        # D21 / FR-026: the payload carried only agent_id, so the update history
+        # table could not show a human-readable name however it was rendered —
+        # it displayed the first eight characters of a UUID. Resolve the agent's
+        # name here so the client has one to show, with the id kept alongside.
+        # One query for the whole page rather than one per row.
+        rows = [h.to_dict() for h in history]
+        agent_ids = {r.get('agent_id') for r in rows if r.get('agent_id')}
+        names = {}
+        if agent_ids:
+            for agent in server_models.Agent.query.filter(
+                server_models.Agent.agent_id.in_(agent_ids)
+            ).all():
+                names[str(agent.agent_id)] = (
+                    getattr(agent, 'agent_name', None) or agent.hostname or ''
+                )
+        for r in rows:
+            r['hostname'] = names.get(str(r.get('agent_id') or ''), '')
+
         return jsonify({
-            'history': [h.to_dict() for h in history],
+            'history': rows,
             'total': total
         })
 

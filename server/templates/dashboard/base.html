@@ -76,11 +76,12 @@
 }
 </style>
 
-    <!-- Tailwind CSS (precompiled) -->
+    <!-- Tailwind CSS (precompiled; JS-built utility classes are literal strings
+         captured by the content scan of static/js at build time) -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
 
     <!-- Chart.js -->
-    <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}" nonce="{{ csp_nonce() }}"></script>
     <style nonce="{{ csp_nonce() }}">
         /* Global Print Styles */
         @media print {
@@ -114,6 +115,75 @@
             .bg-white {
                 page-break-inside: avoid;
                 break-inside: avoid;
+            }
+
+            /* ---- D09 / FR-024: keep printed reports aligned and unclipped ----
+               NOTE: this file carries a second @media print block above (the
+               "PRINT MODE" block). These rules live here, in the later block,
+               so they win on cascade order. Consolidating the two blocks is
+               worth doing, but deliberately not done inside a defect release. */
+
+            /* Tailwind's overflow-x-auto scrolls on screen but CLIPS on paper,
+               silently cutting off the right-hand columns of every wide table.
+               This was the primary cause of "alignment is not proper". */
+            .overflow-x-auto,
+            .overflow-y-auto,
+            .overflow-auto,
+            .overflow-hidden {
+                overflow: visible !important;
+            }
+
+            /* Constrain tables to the printable width and let long cell values
+               wrap rather than force the table wider than the page. */
+            table {
+                width: 100% !important;
+                max-width: 100% !important;
+                table-layout: fixed !important;
+                border-collapse: collapse !important;
+            }
+
+            th,
+            td {
+                white-space: normal !important;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+            }
+
+            /* A table spanning a page break must carry its header onto the next
+               page, or the continuation reads as unlabelled, misaligned columns. */
+            thead {
+                display: table-header-group;
+            }
+
+            tfoot {
+                display: table-footer-group;
+            }
+
+            tr {
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }
+
+            /* Multi-column dashboard grids squeeze unreadably at A4 width. */
+            .grid {
+                display: block !important;
+            }
+
+            .grid > * {
+                margin-bottom: 12px;
+            }
+
+            /* Nothing inside the report may exceed the printable width. */
+            #report-container,
+            #report-container * {
+                max-width: 100% !important;
+            }
+
+            img,
+            canvas,
+            svg {
+                max-width: 100% !important;
+                height: auto !important;
             }
         }
 
@@ -316,15 +386,41 @@
                 <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                     <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
                     <span>System Time: <span class="font-mono" id="footer-clock"></span></span>
-                    <span
-                        class="px-2 py-1 text-xs bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300 rounded-full ml-2">IST
-                        (UTC+5:30)</span>
+                    <!-- FR-008: the timezone every date on this page is rendered in.
+                         Was a hardcoded "IST (UTC+5:30)" badge, which became actively
+                         misleading once display moved to the viewer's timezone. Filled
+                         in at runtime so it always names the zone actually in use, and
+                         satisfies FR-008 page-wide without repeating the zone on every
+                         individual timestamp. -->
+                    <span id="footer-timezone" title="All dates and times on this page are shown in this timezone"
+                        class="px-2 py-1 text-xs bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300 rounded-full ml-2"></span>
                 </div>
             </div>
         </div>
     </footer>
 
     <!-- Custom JS -->
+    <!-- Shared date/time formatter (feature 037, FR-007). Must load before any
+         page script that renders a date. Never use toLocaleDateString() directly:
+         it follows the browser's locale, so the same screen renders differently
+         for different users. -->
+    {# Per-tab authentication (D01 / FR-002a). Loaded before anything that
+       fetches, so the tab token is attached to every request. The bootstrap
+       value below appears exactly once, on the first authenticated response
+       after sign-in; it has already been removed from the session cookie by
+       then, so a tab opened later receives nothing and must sign in. #}
+    <script src="{{ url_for('static', filename='js/tab_session.js') }}"></script>
+    {% if g.get('tab_bootstrap_token') %}
+    <script nonce="{{ csp_nonce() }}">
+        TabSession.setToken({{ g.tab_bootstrap_token | tojson }});
+    </script>
+    {% endif %}
+    <script src="{{ url_for('static', filename='js/datetime_format.js') }}"></script>
+    {# Shared agent identity display (D21 / FR-026a-d). Loaded here for the same
+       reason as the date formatter: every screen that names an agent must apply
+       one rule, or each invents its own truncation and the defect returns. #}
+    <script src="{{ url_for('static', filename='js/agent_display.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
     <script nonce="{{ csp_nonce() }}">
         // ── Local calendar date (YYYY-MM-DD) ──────────────────────────────
         // Date.toISOString() returns the UTC day. East of Greenwich that is
@@ -383,9 +479,15 @@
         function updateFooterClock() {
             const clockEl = document.getElementById('footer-clock');
             if (clockEl) {
-                const now = new Date();
-                const istTime = now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true });
-                clockEl.textContent = istTime;
+                // FR-007: 24-hour clock in the VIEWER's timezone, not a hardcoded
+                // IST 12-hour clock.
+                clockEl.textContent = DateFmt.formatDateTime(new Date());
+            }
+            // FR-008: name the zone every date on this page uses, so the viewer
+            // never has to guess which clock a value is expressed in.
+            const tzEl = document.getElementById('footer-timezone');
+            if (tzEl) {
+                tzEl.textContent = DateFmt.timezoneLabel();
             }
         }
         setInterval(updateFooterClock, 1000);
@@ -398,7 +500,8 @@
                 if (data && data.data && data.data.length > 0) {
                     // Find the agent for current user
                     const userAgent = data.data[0]; // Get first agent for this user
-                    window.location.href = `/dashboard/agent/${userAgent.agent_id}`;
+                    const agentId = safeAgentId(userAgent.agent_id);
+                    if (agentId) window.location.assign(`/dashboard/agent/${agentId}`);
                 } else {
                     console.error('No agent found for current user');
                 }
@@ -436,10 +539,11 @@
 
                     // Add change event listener
                     agentSelect.addEventListener('change', (e) => {
-                        if (e.target.value) {
-                            window.location.href = `/dashboard/agent/${e.target.value}`;
+                        const agentId = safeAgentId(e.target.value);
+                        if (agentId) {
+                            window.location.assign(`/dashboard/agent/${agentId}`);
                         } else {
-                            window.location.href = '/dashboard/';
+                            window.location.assign('/dashboard/');
                         }
                     });
                 } else {
@@ -488,15 +592,17 @@
             return `${s}s`;
         }
 
+        // Retained under its historical name for existing callers, but no longer
+        // IST-specific: renders DD-MM-YYYY HH:mm in the viewer's zone (FR-007).
         function getCurrentTimeIST() {
-            return new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+            return DateFmt.formatDateTime(new Date());
         }
 
         document.addEventListener('DOMContentLoaded', () => {
             initTheme();
         });
     </script>
-    <script src="{{ url_for('static', filename='js/eol-dashboard.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/eol-dashboard.js') }}" nonce="{{ csp_nonce() }}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 

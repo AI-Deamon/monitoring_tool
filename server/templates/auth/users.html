@@ -6,6 +6,7 @@
   <title>User Management • SentinelEdge</title>
 
   <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
+  <!-- Tailwind (precompiled) -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
   <style nonce="{{ csp_nonce() }}">
       * {
@@ -173,7 +174,7 @@
               </td>
 
               <td class="px-6 py-4 text-slate-700">
-              {{ user.last_login.strftime('%d-%m-%Y %I:%M %p') if user.last_login else 'Never' }}
+              {{ user.last_login | fmt_datetime if user.last_login else 'Never' }}
 
               </td>
 

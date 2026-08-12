@@ -348,30 +348,26 @@ def update_raw_event_error(raw_event_id, error_message):
 def telemetry_screentime():
     """
     ✅ AGENT-AUTHORITATIVE SCREEN TIME ENDPOINT
-    
-    This is the ONLY legal write path for screen_time table.
-    
-    DATA FLOW:
-    1. Agent's state_machine.py calculates cumulative totals (ONLY place)
-    2. Agent sends totals to this endpoint
-    3. Server validates (non-negative, sum ≤ 86400)
-    4. Server stores the incoming cumulative bucket set when the same-session
-       total is non-regressing, preserving agent-side reclassification
-       such as LOCKED -> AWAY after a continuous 2-hour lock.
-    
-    FORBIDDEN:
-    - Server MUST NOT calculate, infer, recover, or repair screen time
-    - Server MUST NOT aggregate spans into screen_time
-    - Server MUST NOT compute deltas or durations
-    - Server MUST NOT reconstruct or repair gaps
-    
+
+    Two distinct write paths (FR-006/FR-011):
+
+    1. IN-PROGRESS DAY (is_final_day=False): the cumulative daily totals are
+       the live estimate for the day the payload's UTC timestamp falls in.
+       The server validates (non-negative, sum ≤ 86400) and persists the
+       latest authoritative same-session bucket set via
+       process_screentime_event.
+
+    2. FULLY-ELAPSED DAY (is_final_day=True): the sent cumulative totals are
+       DIAGNOSTIC ONLY and are NOT persisted. The resolved day
+       (UTC date of the payload timestamp, or final_day_date) is
+       reconcile-and-set from screen_time_spans via
+       sync_screen_time_from_spans — spans are the sanctioned elapsed-day
+       writer. An inline reconcile failure is logged and accepted-and-deferred
+       to the scheduled reconcile + daily sweep (still returns 200).
+
     CRITICAL: Under-counting is acceptable; fabricated time is forbidden.
-    
-    The agent is the single source of truth.
-    
-    Process screen time updates from Core's LiveTelemetryTracker.
-    Accepts cumulative daily totals and persists the latest authoritative
-    same-session bucket set.
+    Spans are authoritative for elapsed days; the cumulative counter is the
+    in-progress-day live estimate only.
     """
     data = request.get_json() or {}
     agent_id = str(g.current_agent.agent_id) if g.current_agent else None
@@ -504,36 +500,73 @@ def telemetry_screentime():
                 session_start_naive = parse_agent_timestamp(session_start_str, agent_id)
             except Exception:
                 logger.warning(f"[{short_id}] Failed to parse session_start: {session_start_str}")
-        
-        # Call stored procedure to update screen_time table
-        result = db.session.execute(
-            text("""
-                SELECT * FROM process_screentime_event(
-                    :agent_id,
-                    :timestamp,
-                    :active,
-                    :idle,
-                    :locked,
-                    :away,
-                    :state,
-                    :session_start
+
+        if is_final_day:
+            # Final-day report: the cumulative totals are DIAGNOSTIC ONLY. The
+            # fully-elapsed day is derived from spans (reconcile-and-set) —
+            # the totals are NOT persisted. Spans are the sanctioned
+            # elapsed-day writer (FR-006); on reconcile failure we log ERROR
+            # and accept-and-defer to the scheduled reconcile + daily sweep.
+            try:
+                span_totals = db.session.execute(
+                    text("""
+                        SELECT
+                            COALESCE(SUM(CASE WHEN state = 'active' THEN duration_seconds ELSE 0 END), 0),
+                            COALESCE(SUM(CASE WHEN state = 'idle'   THEN duration_seconds ELSE 0 END), 0),
+                            COALESCE(SUM(CASE WHEN state = 'locked' THEN duration_seconds ELSE 0 END), 0),
+                            COALESCE(SUM(CASE WHEN state = 'away'   THEN duration_seconds ELSE 0 END), 0)
+                        FROM screen_time_spans
+                        WHERE agent_id = :a AND start_time::DATE = :d
+                    """),
+                    {'a': agent_id, 'd': day},
+                ).fetchone()
+                logger.info(
+                    f"[{short_id}] [DIAG] Final-day totals NOT persisted: sent="
+                    f"A={active_seconds} I={idle_seconds} L={locked_seconds} W={away_seconds} "
+                    f"resolved_day={day}; span-derived="
+                    f"A={span_totals[0]} I={span_totals[1]} L={span_totals[2]} W={span_totals[3]}"
                 )
-            """),
-            {
-                'agent_id': agent_id,
-                'timestamp': ts_naive,
-                'active': active_seconds,
-                'idle': idle_seconds,
-                'locked': locked_seconds,
-                'away': away_seconds,
-                'state': current_state,
-                'session_start': session_start_naive
-            }
-        ).fetchone()
-        
-        if result and result[0] == 'error':
-            logger.error(f"[{short_id}] Stored procedure error: {result[1]}")
-            raise Exception(result[1])
+                db.session.execute(
+                    text("SELECT sync_screen_time_from_spans(:d)"),
+                    {'d': day},
+                )
+            except Exception:
+                db.session.rollback()
+                logger.error(
+                    f"[{short_id}] [DIAG] Inline reconcile failed for final day {day}; "
+                    "accept-and-defer to scheduled reconcile", exc_info=True
+                )
+        else:
+            # In-progress day: cumulative counter is the live estimate.
+            # Call stored procedure to update screen_time table
+            result = db.session.execute(
+                text("""
+                    SELECT * FROM process_screentime_event(
+                        :agent_id,
+                        :timestamp,
+                        :active,
+                        :idle,
+                        :locked,
+                        :away,
+                        :state,
+                        :session_start
+                    )
+                """),
+                {
+                    'agent_id': agent_id,
+                    'timestamp': ts_naive,
+                    'active': active_seconds,
+                    'idle': idle_seconds,
+                    'locked': locked_seconds,
+                    'away': away_seconds,
+                    'state': current_state,
+                    'session_start': session_start_naive
+                }
+            ).fetchone()
+
+            if result and result[0] == 'error':
+                logger.error(f"[{short_id}] Stored procedure error: {result[1]}")
+                raise Exception(result[1])
         
         # Update AgentCurrentStatus for live dashboard
         status = server_models.AgentCurrentStatus.query.filter_by(agent_id=agent_id).first()

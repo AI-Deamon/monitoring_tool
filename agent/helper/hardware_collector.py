@@ -45,6 +45,9 @@ class AssetIdentity:
     manufacturer: str = ""
     model: str = ""
     bios_uuid: str = ""
+    # Firmware version string (SMBIOSBIOSVersion). Distinct from bios_uuid, which
+    # is an identifier — conflating the two is defect D06.
+    bios_version: str = ""
     system_uuid: str = ""
     asset_tag: str = ""  # Often same as serial or custom
     domain: str = ""
@@ -59,8 +62,18 @@ class GPUInfo:
 
 
 @dataclass
+class BatteryInfo:
+    """Battery health and charge information (laptops only)."""
+    name: str = ""
+    health_percent: float = 0.0
+    charge_percent: float = 0.0
+    cycle_count: int = 0
+
+
+@dataclass
 class HardwareSpecs:
-    """Hardware specifications"""
+    """Hardware specifications and peripheral information."""
+
     cpu_name: str = ""
     cpu_cores: int = 0
     cpu_threads: int = 0
@@ -71,6 +84,7 @@ class HardwareSpecs:
     gpus: List[GPUInfo] = field(default_factory=list)  # List of all GPUs
     disks: List[Dict] = field(default_factory=list)  # [{name, size_gb, type, interface}]
     motherboard: str = ""
+    battery: Optional[BatteryInfo] = None  # Battery health (laptops only)
 
 
 @dataclass
@@ -367,6 +381,14 @@ class HardwareCollector:
                 identity.manufacturer = data.get('Manufacturer', '') or ''
                 identity.model = data.get('Model', '') or ''
                 identity.serial_number = data.get('SerialNumber', '') or ''
+                # D06 / FR-015: SMBIOSBIOSVersion was already queried but never
+                # read here, so the firmware version never reached the server and
+                # the dashboard field stayed a placeholder. Some OEM hardware
+                # returns it as an array, which _normalize_powershell_scalar
+                # collapses to the first entry.
+                identity.bios_version = self._normalize_powershell_scalar(
+                    data.get('BIOSVersion')
+                )
                 identity.bios_uuid = data.get('UUID', '') or ''
                 identity.system_uuid = data.get('UUID', '') or ''
                 identity.asset_tag = data.get('AssetTag', '') or identity.serial_number
@@ -441,6 +463,44 @@ class HardwareCollector:
         # Motherboard - use Get-CimInstance
         $mb = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product
 
+        # Battery - MSBatteryClass in root\\WMI carries design/full capacity and
+        # cycle count (Win32_Battery only exposes the current charge %). Only
+        # present on systems with a battery, so $battery stays $null on desktops.
+        $battery = $null
+        try {
+            $batteryStatic = @(Get-CimInstance -Namespace root\\WMI -ClassName MSBatteryClassStaticData -ErrorAction SilentlyContinue)
+            if ($batteryStatic.Count -gt 0) {
+                $bs = $batteryStatic[0]
+                $batteryStatus = @(Get-CimInstance -Namespace root\\WMI -ClassName MSBatteryClassStatus -ErrorAction SilentlyContinue) |
+                    Where-Object { $_.InstanceName -eq $bs.InstanceName } |
+                    Select-Object -First 1
+
+                $design = [double]$bs.DesignedCapacity
+                $full = [double]$bs.FullChargedCapacity
+                $remaining = 0
+                if ($null -ne $batteryStatus -and $null -ne $batteryStatus.RemainingCapacity) {
+                    $remaining = [double]$batteryStatus.RemainingCapacity
+                }
+
+                # Health = full charge capacity vs. design capacity. Charge = remaining
+                # vs. full charge capacity (reported capacity degrades over time).
+                $health = 0
+                $charge = 0
+                if ($design -gt 0) { $health = [math]::Round($full / $design * 100, 1) }
+                if ($full -gt 0)  { $charge = [math]::Round($remaining / $full * 100, 1) }
+
+                $battery = @{
+                    Name           = [string]$bs.DeviceName
+                    HealthPercent  = $health
+                    ChargePercent  = $charge
+                    CycleCount     = [int]$bs.CycleCount
+                }
+            }
+        }
+        catch {
+            # Battery query unsupported - leave $battery = $null
+        }
+
         @{
             CPU_Name = $cpu.Name
             CPU_Cores = $cpu.NumberOfCores
@@ -471,6 +531,7 @@ class HardwareCollector:
                 }
             }
             Motherboard = "$($mb.Manufacturer) $($mb.Product)"
+            Battery = $battery
         } | ConvertTo-Json -Depth 3
         '''
 
@@ -503,6 +564,16 @@ class HardwareCollector:
 
                 hardware.motherboard = (data.get('Motherboard', '') or '').strip()
 
+                # Parse battery health (laptops only; None on desktops)
+                battery_data = data.get('Battery')
+                if battery_data:
+                    hardware.battery = BatteryInfo(
+                        name=battery_data.get('Name', '') or '',
+                        health_percent=float(battery_data.get('HealthPercent', 0) or 0),
+                        charge_percent=float(battery_data.get('ChargePercent', 0) or 0),
+                        cycle_count=int(battery_data.get('CycleCount', 0) or 0),
+                    )
+
                 # Parse disks
                 disks_data = data.get('Disks', [])
                 if disks_data:
@@ -523,11 +594,22 @@ class HardwareCollector:
         # Python fallback for basic CPU info
         if not hardware.cpu_name:
             hardware.cpu_name = platform.processor()
+
+        # D07 / FR-016a: cpu_cores is PHYSICAL cores. There is deliberately no
+        # fallback here. os.cpu_count() reports LOGICAL processors on Windows, so
+        # using it made the "Cores" field equal the thread count whenever the CIM
+        # query failed or returned 0 — the dashboard showed "16 Cores / 16 Threads"
+        # on a hyperthreaded machine. A wrong value presented as fact is worse than
+        # an absent one, so an undeterminable core count is left at 0 and rendered
+        # as explicitly unknown (FR-017).
+        #
+        # os.cpu_count() is still a valid source for cpu_threads if that is ever
+        # needed, but it must never populate cpu_cores.
         if hardware.cpu_cores == 0:
-            try:
-                hardware.cpu_cores = os.cpu_count() or 1
-            except:
-                pass
+            logger.debug(
+                "[HARDWARE] Physical core count unavailable; leaving unknown "
+                "rather than substituting the logical-processor count"
+            )
 
         return hardware
 
@@ -548,11 +630,24 @@ class HardwareCollector:
         $macs = @()
         $ips = @()
         $dns = @()
+        $adapterMap = @()
 
         foreach ($adapter in $adapters) {
             if ($adapter.MACAddress) { $macs += $adapter.MACAddress }
             if ($adapter.IPAddress) { $ips += $adapter.IPAddress }
             if ($adapter.DNSServerSearchOrder) { $dns += $adapter.DNSServerSearchOrder }
+            if ($adapter.MACAddress) {
+                $adapterMap += @{
+                    MAC = $adapter.MACAddress
+                    IPs = @($adapter.IPAddress | Where-Object { $_ -and $_ -notmatch ':' })
+                    # D22: Description identifies virtual/tunnel adapters, and a
+                    # default gateway identifies the adapter actually carrying the
+                    # current connection. Both are needed to pick the right IP
+                    # without asking "what routes to the internet?".
+                    Description = $adapter.Description
+                    DefaultGateway = @($adapter.DefaultIPGateway)
+                }
+            }
         }
 
         $ipv4 = @($ips | Where-Object { $_ -and $_ -notmatch ':' } | Select-Object -Unique)
@@ -567,10 +662,12 @@ class HardwareCollector:
             DNSServers = $uniqueDns
             DomainJoined = $cs.PartOfDomain
             DomainName = if ($cs.PartOfDomain) { $cs.Domain } else { "" }
-        } | ConvertTo-Json -Depth 2
+            AdapterMap = $adapterMap
+        } | ConvertTo-Json -Depth 5
         '''
 
         output = self._run_powershell(script)
+        adapter_map: Any = []
         if output:
             try:
                 data = json.loads(output)
@@ -581,19 +678,134 @@ class HardwareCollector:
                 network.dns_servers = self._normalize_powershell_list(data.get('DNSServers'))
                 network.domain_joined = bool(data.get('DomainJoined', False))
                 network.domain_name = self._normalize_powershell_scalar(data.get('DomainName'))
+                adapter_map = data.get('AdapterMap', [])
             except json.JSONDecodeError:
                 logger.debug("[HARDWARE] Failed to parse network JSON")
 
-        # Python fallback (always overrides PowerShell — socket connects to routing interface)
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            network.primary_ip = s.getsockname()[0]
-            s.close()
-        except:
-            network.primary_ip = network.primary_ip or "127.0.0.1"
+        # D22 / FR-031: report the address of the physical adapter carrying the
+        # current connection, not the address that happens to route to the internet.
+        #
+        # This previously ran socket.connect(("8.8.8.8", 80)) and took the local
+        # address — labelled a "fallback" but executed unconditionally, overwriting
+        # the CIM-derived value every time. That answers a different question: on
+        # VPN it yields the tunnel address, on a multi-adapter host whichever holds
+        # the default route, and with no route at all it fell through to 127.0.0.1.
+        selected = self._select_primary_ip(adapter_map, network.all_ips)
+        if selected:
+            network.primary_ip = selected
+        elif not network.primary_ip:
+            # Nothing usable from CIM at all. The routing interface is now a true
+            # last resort rather than the primary source.
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                network.primary_ip = s.getsockname()[0]
+                s.close()
+            except Exception:
+                logger.debug("[HARDWARE] No adapter address and no route; primary IP unknown")
+
+        # Re-pair the MAC with the adapter that actually owns the routing IP above.
+        # PrimaryMAC/PrimaryIP from PowerShell can come from different adapters
+        # when more than one is IP-enabled at once (e.g. Wi-Fi + Ethernet both up),
+        # since PrimaryMAC is just "first enumerated" while PrimaryIP is forced
+        # to the adapter actually used for outbound routing.
+        matched_mac = self._find_mac_for_ip(adapter_map, network.primary_ip)
+        if matched_mac:
+            network.primary_mac = matched_mac
 
         return network
+
+    # Adapter descriptions that are virtual, tunnel, or host-only interfaces.
+    # These regularly hold a default route (VPN especially) but their address does
+    # not identify the machine on its network — D22.
+    _VIRTUAL_ADAPTER_MARKERS = (
+        'vpn', 'tunnel', 'tap-windows', 'wintun', 'openvpn', 'wireguard',
+        'virtual', 'hyper-v', 'vmware', 'virtualbox', 'vethernet', 'wsl',
+        'docker', 'loopback', 'teredo', 'isatap', 'pseudo-interface',
+    )
+
+    @classmethod
+    def _select_primary_ip(cls, adapter_map: Any, all_ips: Any) -> str:
+        """
+        Pick the IPv4 address of the physical adapter carrying the current
+        connection (D22 / FR-031).
+
+        Preference order:
+          1. Physical adapter that has a default gateway — the one actually
+             carrying traffic (Ethernet on cable, Wi-Fi when wireless).
+          2. Any physical adapter with an IPv4 address.
+          3. Any known IPv4 address at all.
+          4. Empty string — never a loopback address while a real one is known.
+
+        Virtual and tunnel adapters are deprioritised, not excluded: a VPN-only
+        host still reports something rather than nothing.
+        """
+        if isinstance(adapter_map, dict):
+            adapter_map = [adapter_map]
+        elif not isinstance(adapter_map, list):
+            adapter_map = []
+
+        def ipv4s(adapter):
+            ips = adapter.get('IPs')
+            if not isinstance(ips, list):
+                ips = [ips] if ips else []
+            return [
+                str(ip).strip() for ip in ips
+                if ip and ':' not in str(ip) and not str(ip).startswith('127.')
+            ]
+
+        def is_virtual(adapter):
+            desc = str(adapter.get('Description') or '').lower()
+            return any(marker in desc for marker in cls._VIRTUAL_ADAPTER_MARKERS)
+
+        def has_gateway(adapter):
+            gw = adapter.get('DefaultGateway')
+            if not isinstance(gw, list):
+                gw = [gw] if gw else []
+            return any(g for g in gw)
+
+        candidates = [a for a in adapter_map if isinstance(a, dict) and ipv4s(a)]
+        physical = [a for a in candidates if not is_virtual(a)]
+
+        for group in (
+            [a for a in physical if has_gateway(a)],   # 1
+            physical,                                  # 2
+            [a for a in candidates if has_gateway(a)],  # VPN-only host
+            candidates,
+        ):
+            if group:
+                return ipv4s(group[0])[0]
+
+        # 3: nothing in the adapter map was usable — fall back to the flat list.
+        if isinstance(all_ips, list):
+            for ip in all_ips:
+                text = str(ip).strip()
+                if text and ':' not in text and not text.startswith('127.'):
+                    return text
+
+        # 4: report unknown rather than a misleading loopback address.
+        return ''
+
+    @staticmethod
+    def _find_mac_for_ip(adapter_map: Any, target_ip: str) -> str:
+        """Find the MAC address of the adapter that owns the given IP, if any."""
+        if not target_ip:
+            return ""
+        if isinstance(adapter_map, dict):
+            adapter_map = [adapter_map]
+        elif not isinstance(adapter_map, list):
+            return ""
+        for adapter in adapter_map:
+            if not isinstance(adapter, dict):
+                continue
+            mac = str(adapter.get('MAC') or "").strip()
+            ips = adapter.get('IPs')
+            if not isinstance(ips, list):
+                ips = [ips] if ips else []
+            ips = [str(ip).strip() for ip in ips if ip]
+            if mac and target_ip in ips:
+                return mac
+        return ""
 
     def _collect_security(self) -> SecurityInfo:
         """Collect security posture information"""
@@ -649,12 +861,18 @@ class HardwareCollector:
         # Get Windows version from registry (DisplayVersion like "23H2", "24H2", "25H2")
         $regPath = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion'
         $displayVersion = ""
+        $ubr = $null
         try {
             $reg = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
             $displayVersion = $reg.DisplayVersion
             if ([string]::IsNullOrEmpty($displayVersion)) {
                 $displayVersion = $reg.ReleaseId
             }
+            # D05: UBR (Update Build Revision) lives in the same registry key we
+            # already read. Win32_OperatingSystem.BuildNumber omits it, but it is
+            # the component that distinguishes patch levels — what winver shows as
+            # 26100.4061 is BuildNumber.UBR.
+            $ubr = $reg.UBR
         } catch {}
 
         @{
@@ -670,6 +888,7 @@ class HardwareCollector:
             OSEdition = $osEdition
             OSSKU = $osSku
             DisplayVersion = $displayVersion
+            OSUBR = $ubr
         } | ConvertTo-Json
         '''
 
@@ -691,7 +910,16 @@ class HardwareCollector:
                     security.os_version = display_ver.strip()
                 else:
                     security.os_version = data.get('OSVersion') or security.os_version
-                security.os_build = str(data.get('OSBuild') or security.os_build)
+                # D05 / FR-014: report the build the way Windows itself does —
+                # BuildNumber.UBR (e.g. "26100.4061"). BuildNumber alone omits the
+                # revision, which is exactly the part that identifies the patch
+                # level and makes the value useful for an audit.
+                base_build = str(data.get('OSBuild') or security.os_build or '')
+                ubr = data.get('OSUBR')
+                if base_build and ubr not in (None, '') and '.' not in base_build:
+                    security.os_build = f"{base_build}.{ubr}"
+                else:
+                    security.os_build = base_build
                 security.os_architecture = data.get('OSArchitecture') or security.os_architecture
 
                 # Windows edition and SKU for EOL matching
@@ -735,7 +963,16 @@ class HardwareCollector:
             'all_ips': sorted(network.all_ips),
             'dns_servers': sorted(network.dns_servers),
             'domain_joined': network.domain_joined,
-            'domain_name': network.domain_name
+            'domain_name': network.domain_name,
+            # D23 / FR-034: primary_ip and primary_mac MUST participate in the hash.
+            # Without them, a host with Ethernet and Wi-Fi both active has an
+            # unchanged address SET when the connection moves between adapters — the
+            # hash matched, the upload was skipped, and the server kept the stale
+            # address indefinitely. That is exactly the reported switch case.
+            # All sites computing this hash must agree, or one will suppress what
+            # another reports.
+            'primary_ip': network.primary_ip,
+            'primary_mac': network.primary_mac,
         }
         current_network_hash = hashlib.sha256(
             json.dumps(network_hash_data, sort_keys=True).encode()
@@ -766,7 +1003,16 @@ class HardwareCollector:
             'all_ips': sorted(network.all_ips),
             'dns_servers': sorted(network.dns_servers),
             'domain_joined': network.domain_joined,
-            'domain_name': network.domain_name
+            'domain_name': network.domain_name,
+            # D23 / FR-034: primary_ip and primary_mac MUST participate in the hash.
+            # Without them, a host with Ethernet and Wi-Fi both active has an
+            # unchanged address SET when the connection moves between adapters — the
+            # hash matched, the upload was skipped, and the server kept the stale
+            # address indefinitely. That is exactly the reported switch case.
+            # All sites computing this hash must agree, or one will suppress what
+            # another reports.
+            'primary_ip': network.primary_ip,
+            'primary_mac': network.primary_mac,
         }
         current_network_hash = hashlib.sha256(
             json.dumps(network_hash_data, sort_keys=True).encode()

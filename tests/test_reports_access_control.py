@@ -61,10 +61,23 @@ def _make_user(role, linked_username=None):
 
 
 def _login(client, user):
+    """
+    Simulate a completed sign-in.
+
+    Feature 037 / FR-002a: authentication is now bound to a tab, not just to the
+    cookie, so login_required requires a live tab_session row as well as the
+    session cookie. Issuing one here mirrors exactly what the real sign-in path
+    does; without it every request in these tests is redirected to the sign-in
+    page before reaching the authorization check under test.
+    """
+    from auth import issue_tab_session
+
+    raw_token = issue_tab_session(user)
     with client.session_transaction() as sess:
         sess['user_id'] = user.id
         sess['username'] = user.username
         sess['session_version'] = user.session_version
+        sess['tab_token'] = raw_token
 
 
 DATES = {'start_date': '2026-07-01', 'end_date': '2026-07-07'}

@@ -1,6 +1,6 @@
 SentinelEdge Agent
-Version: 4.2.0
-Build Date: 20260728
+Version: 4.2.2
+Build Date: 20260807
 
 Installation:
   1. Extract all files

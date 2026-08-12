@@ -75,7 +75,7 @@
     <header>
         <h1>Team Weekly Activity Report</h1>
         <div class="report-meta">
-            <span>📅 {{ start_date.strftime('%B %d, %Y') }} - {{ end_date.strftime('%B %d, %Y') }}</span>
+            <span>📅 {{ start_date | fmt_date }} - {{ end_date | fmt_date }}</span>
             <span>👥 {{ active_members }} Active Members</span>
         </div>
     </header>
@@ -132,7 +132,10 @@
                     <div class="member-avatar">{{ initials }}</div>
                     <div>
                         <div class="member-name">{{ m.username }}</div>
-                        <div class="member-meta">{{ m.screen_time.days_worked }} days worked</div>
+                        {# D16 / FR-023 scenario 3: a multi-agent report must attribute
+                           each section to its own agent, not carry one identity for the
+                           whole document. #}
+                        <div class="member-meta">{{ m.agent_info.agent_name or m.agent_info.hostname or 'Unnamed agent' }} &middot; {{ m.screen_time.days_worked }} days worked</div>
                     </div>
                 </div>
                 <div class="member-stats">
@@ -227,7 +230,7 @@
     </div>
 
     <footer>
-        Generated on {{ generated_at.strftime('%Y-%m-%d at %H:%M') }} | SentinelEdge Monitoring System
+        Generated on {{ generated_at | fmt_datetime_tz }} | SentinelEdge Monitoring System
     </footer>
 </div>
 </body>

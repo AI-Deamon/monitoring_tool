@@ -192,7 +192,11 @@
 
     function getRelativeTimeIST(timestamp) {
         const now = new Date();
-        const time = new Date(timestamp);
+        // parseStored, not new Date(): a naive ISO string with no offset is read
+        // as LOCAL time by JavaScript, but the API serves naive UTC — so every
+        // "x minutes ago" was wrong by the viewer's UTC offset.
+        const time = DateFmt.parseStored(timestamp);
+        if (!time) return DateFmt.EMPTY_DISPLAY;
         const diffMs = now - time;
         const diffMins = Math.floor(diffMs / 60000);
         const diffHours = Math.floor(diffMins / 60);
@@ -202,7 +206,7 @@
         if (diffMins < 60) return `${diffMins}m ago`;
         if (diffHours < 24) return `${diffHours}h ago`;
         if (diffDays < 7) return `${diffDays}d ago`;
-        return time.toLocaleDateString();
+        return DateFmt.formatDate(timestamp);
     }
 
     function formatTime(seconds) {
@@ -535,12 +539,29 @@
                 Delete
             </button>`;
 
+            // Device model, e.g. "HP Laptop 15-bs1xx". Collected already and shown
+            // on the asset views, but the agents list identified a machine only by
+            // hostname, so you could not tell what kind of device a row was without
+            // opening it. Vendors often repeat their own name in the model string
+            // ("HP" + "HP Laptop 15-bs1xx"), so the manufacturer is only prepended
+            // when the model does not already start with it.
+            let modelHtml = '';
+            if (agent.model) {
+                const mfr = (agent.manufacturer || '').trim();
+                const model = String(agent.model).trim();
+                const label = (mfr && !model.toLowerCase().startsWith(mfr.toLowerCase()))
+                    ? `${mfr} ${model}`
+                    : model;
+                modelHtml = `<br><small class="text-gray-500 dark:text-gray-400 text-xs" title="${AgentFmt.escapeHtml(label)}">${AgentFmt.escapeHtml(label)}</small>`;
+            }
+
             tr.innerHTML = `
                 <td class="px-6 py-4 whitespace-nowrap">
                     <a href="/dashboard/agent/${agent.agent_id}" class="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">
                         <strong>${agent.hostname || 'Unknown'}</strong>
                     </a>
-                    <br><small class="text-gray-500 dark:text-gray-400 font-mono text-xs">${agent.agent_id.slice(0, 12)}...</small>
+                    ${modelHtml}
+                    <br><small class="text-gray-500 dark:text-gray-400 font-mono text-xs" title="${agent.agent_id}" tabindex="0">${agent.agent_id.slice(0, 12)}…</small>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.username || '-'}</td>
                 <td class="px-6 py-4 whitespace-nowrap">${statusHtml}</td>

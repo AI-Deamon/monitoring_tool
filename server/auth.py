@@ -47,6 +47,77 @@ def get_password_reset_service():
 # VALIDATION HELPERS
 # ============================================================================
 
+# Password policy (feature 037, FR-006a-g).
+#
+# Configurable per the constitution's Configurable Security principle. The
+# defaults are the values agreed during clarification; confirm them against your
+# security standard before relying on them.
+PASSWORD_MIN_LENGTH_USER = int(os.getenv("PASSWORD_MIN_LENGTH_USER", "12"))
+PASSWORD_MIN_LENGTH_ADMIN = int(os.getenv("PASSWORD_MIN_LENGTH_ADMIN", "14"))
+PASSWORD_MIN_CLASSES_USER = int(os.getenv("PASSWORD_MIN_CLASSES_USER", "3"))
+PASSWORD_MIN_CLASSES_ADMIN = int(os.getenv("PASSWORD_MIN_CLASSES_ADMIN", "4"))
+
+_CLASS_NAMES = ("a lowercase letter", "an uppercase letter", "a digit", "a symbol")
+
+
+def _character_classes(password: str):
+    """Which of the four character classes appear in `password`."""
+    return (
+        any(c.islower() for c in password),
+        any(c.isupper() for c in password),
+        any(c.isdigit() for c in password),
+        any(not c.isalnum() for c in password),
+    )
+
+
+def validate_password_policy(password, auth_type="local", role="user"):
+    """
+    Check a password against the policy for this kind of account.
+
+    Returns None when the password is acceptable, otherwise a specific,
+    human-readable message naming the rule that failed (FR-006e).
+
+    The policy splits by authentication type and role (clarified 2026-08-07):
+
+      * auth_type 'ad'    — exempt entirely. Directory-authenticated accounts
+                            are governed by the directory's own policy, and the
+                            product must not impose a second one (FR-006a).
+      * local, role user  — 12 characters, at least 3 of 4 classes (FR-006b).
+      * local, role admin — 14 characters, all 4 classes (FR-006c).
+
+    This exists because the previous `len(password) < 8` check was duplicated at
+    six call sites in this module. A rule added to five of them and missed at
+    the sixth leaves an account-creation path that bypasses policy, so the rule
+    has to live in one place to be enforceable at all (FR-006d).
+    """
+    if (auth_type or "local").lower() == "ad":
+        return None
+
+    password = password or ""
+    is_admin = (role or "user").lower() == "admin"
+    min_length = PASSWORD_MIN_LENGTH_ADMIN if is_admin else PASSWORD_MIN_LENGTH_USER
+    min_classes = PASSWORD_MIN_CLASSES_ADMIN if is_admin else PASSWORD_MIN_CLASSES_USER
+    who = "Administrator passwords" if is_admin else "Passwords"
+
+    if len(password) < min_length:
+        return f"{who} must be at least {min_length} characters."
+
+    present = _character_classes(password)
+    if sum(present) < min_classes:
+        missing = [name for name, seen in zip(_CLASS_NAMES, present) if not seen]
+        if min_classes >= 4:
+            return (
+                f"{who} must contain a lowercase letter, an uppercase letter, "
+                f"a digit and a symbol. Missing: {', '.join(missing)}."
+            )
+        return (
+            f"{who} must contain at least {min_classes} of: a lowercase letter, "
+            f"an uppercase letter, a digit, a symbol. Missing: {', '.join(missing)}."
+        )
+
+    return None
+
+
 
 def validate_username(username: str) -> tuple[bool, str]:
     """Validate username format (alphanumeric, dots, underscores, hyphens only)"""
@@ -146,10 +217,12 @@ def generate_csrf_token():
 def validate_csrf_token():
     """Validate HMAC-based CSRF token and that it belongs to this session."""
     from flask import current_app
-    form_token = request.form.get("csrf_token", "")
+    # Burp #10: form POSTs carry the token in a hidden field; JSON/fetch API
+    # clients that have no form body pass the same HMAC token in a header.
+    form_token = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
 
     if not form_token:
-        logger.warning("[CSRF] Missing token in form")
+        logger.warning("[CSRF] Missing token in form/header")
         return False
 
     try:
@@ -273,6 +346,14 @@ class DashboardUser(db.Model):
     # Session Management
     session_version = db.Column(db.Integer, default=1, nullable=False)
 
+    # Password policy (feature 037, FR-006f). Set for existing local
+    # administrators by migration 20260807_admin_password_rotation. Blocks all
+    # authenticated activity except the password-change flow until cleared.
+    # Never set for AD accounts — their policy belongs to the directory.
+    must_change_password = db.Column(
+        db.Boolean, default=False, nullable=False, server_default=db.text("false")
+    )
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(
@@ -287,23 +368,139 @@ class DashboardUser(db.Model):
         )
 
     def check_password(self, password: str) -> bool:
-        """Verify password"""
+        """
+        Verify a password against this account's local hash.
+
+        Returns False when the account has no local hash rather than raising.
+        password_hash is nullable — an Active-Directory-authenticated account
+        never has one — and Werkzeug raises on a null hash instead of returning
+        False:
+
+            check_password_hash(None, "x")   -> AttributeError ('NoneType' has
+                                                no attribute 'split')
+            check_password_hash("", "x")     -> False
+            check_password_hash("junk", "x") -> False
+
+        That unguarded call is defect D20: an AD user submitting the
+        change-password form hit the AttributeError on the handler's first line
+        and got an internal server error page. Only None raises, so the guard is
+        just a presence check; malformed hashes already fail safely.
+        """
+        if not self.password_hash or password is None:
+            return False
         return check_password_hash(self.password_hash, password)
 
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "username": self.username,
+            "role": self.role,
+            "auth_type": self.auth_type,
+            "linked_username": self.linked_username,
+            "ad_object_guid": self.ad_object_guid,
+            "is_active": self.is_active,
+            "is_locked": self.is_locked,
+            "last_login": self.last_login.isoformat() if self.last_login else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
 
-def to_dict(self):
-    return {
-        "id": self.id,
-        "username": self.username,
-        "role": self.role,
-        "auth_type": self.auth_type,
-        "linked_username": self.linked_username,
-        "ad_object_guid": self.ad_object_guid,
-        "is_active": self.is_active,
-        "is_locked": self.is_locked,
-        "last_login": self.last_login.isoformat() if self.last_login else None,
-        "created_at": self.created_at.isoformat() if self.created_at else None,
-    }
+
+def _as_aware(value):
+    """
+    Treat a naive timestamp as UTC.
+
+    PostgreSQL returns timezone-aware values for these columns, but SQLite and
+    freshly-constructed unsaved rows can yield naive ones. Comparing a naive to
+    an aware datetime raises, which would turn a session check into a 500 —
+    the same class of failure as D20.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+class TabSession(db.Model):
+    """
+    Per-tab dashboard authentication (feature 037, FR-002a / FR-002b).
+
+    A browser tab holds an opaque token in sessionStorage; this table is the
+    server-side authority on whether that token is still valid. Holding the
+    decision server-side is what makes this access control rather than a
+    client-side flag, and it makes deployment-wide revocation (FR-002g) a
+    single UPDATE.
+
+    Sits alongside the existing session_version mechanism, which must keep
+    invalidating other sessions on password change (FR-003). Both checks apply.
+    """
+
+    __tablename__ = "tab_session"
+
+    # Revocation reasons, surfaced to the user by FR-002c.
+    REASON_SIGNED_OUT = "signed_out"
+    REASON_IDLE_TIMEOUT = "idle_timeout"
+    REASON_ABSOLUTE_TIMEOUT = "absolute_timeout"
+    REASON_PASSWORD_CHANGED = "password_changed"
+    REASON_DEPLOYMENT = "deployment"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("dashboard_users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # SHA-256 hex digest of the token held by the browser. Stored hashed for the
+    # same reason agent API keys are: a database read must not yield a usable
+    # credential.
+    tab_token = db.Column(db.String(64), nullable=False, unique=True, index=True)
+
+    # Start of the absolute lifetime (FR-002b: 4 hours).
+    issued_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    # Advanced on each authenticated request; start of the idle window
+    # (FR-002b: 30 minutes).
+    last_seen_at = db.Column(db.DateTime(timezone=True), nullable=False)
+
+    revoked_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    revoked_reason = db.Column(db.String(32), nullable=True)
+
+    @property
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+    def revoke(self, reason: str, now=None):
+        """
+        Mark this tab session unusable. Terminal — sign-in creates a new row.
+
+        Idempotent, and the FIRST reason wins. A later sweep (a deployment
+        revocation, say) must not relabel a session that already ended through
+        idle timeout, or FR-002c reports the wrong cause to the user.
+        """
+        if self.revoked_at is None:
+            self.revoked_at = now or datetime.now(timezone.utc)
+            self.revoked_reason = reason
+
+    def expiry_reason(self, now=None):
+        """
+        Why this session is unusable, or None while it is still valid.
+
+        Checked in severity order: an explicit revocation is already final; the
+        absolute limit outranks the idle limit because it applies regardless of
+        activity, so when both are breached the absolute one is the true cause.
+        """
+        if self.revoked_at is not None:
+            return self.revoked_reason
+
+        now = now or datetime.now(timezone.utc)
+        issued = _as_aware(self.issued_at)
+        last_seen = _as_aware(self.last_seen_at)
+
+        if issued is not None and now - issued > SESSION_ABSOLUTE_TIMEOUT:
+            return self.REASON_ABSOLUTE_TIMEOUT
+        if last_seen is not None and now - last_seen > SESSION_IDLE_TIMEOUT:
+            return self.REASON_IDLE_TIMEOUT
+        return None
 
 
 # ============================================================================
@@ -312,6 +509,130 @@ def to_dict(self):
 
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_DURATION_MINUTES = 30
+
+# Session limits (feature 037, FR-002b). Two independent limits: an idle window
+# and an absolute lifetime. Flask's PERMANENT_SESSION_LIFETIME expresses only
+# one, and cannot distinguish which limit ended a session — FR-002c requires
+# telling the user which it was — so both are enforced against the tab_session
+# row instead.
+#
+# Environment-configurable per the constitution's Configurable Security
+# principle. The defaults replace the previous 8-hour lifetime; the constitution
+# was amended to match (T004).
+SESSION_IDLE_TIMEOUT = timedelta(
+    minutes=int(os.getenv("SESSION_IDLE_TIMEOUT_MINUTES", "30"))
+)
+SESSION_ABSOLUTE_TIMEOUT = timedelta(
+    hours=int(os.getenv("SESSION_ABSOLUTE_TIMEOUT_HOURS", "4"))
+)
+
+#: Header carrying the per-tab token. A header, not a cookie — cookies are
+#: shared across tabs by design, which is the behaviour being fixed.
+TAB_SESSION_HEADER = "X-Tab-Session"
+
+
+def new_tab_token() -> str:
+    """A fresh opaque per-tab token. Held by the browser in sessionStorage."""
+    return secrets.token_urlsafe(32)
+
+
+def issue_tab_session(user, now=None):
+    """
+    Create a tab session for `user` and return the RAW token.
+
+    The raw token is returned once, for the browser to hold; only its hash is
+    stored. Called on sign-in, so each sign-in — including a second sign-in by
+    the same user in a different tab — produces its own row.
+    """
+    now = now or datetime.now(timezone.utc)
+    raw = new_tab_token()
+    db.session.add(
+        TabSession(
+            user_id=user.id,
+            tab_token=hash_tab_token(raw),
+            issued_at=now,
+            last_seen_at=now,
+        )
+    )
+    db.session.commit()
+    return raw
+
+
+def lookup_tab_session(raw_token):
+    """The unrevoked TabSession for this raw token, or None."""
+    token_hash = hash_tab_token(raw_token)
+    if not token_hash:
+        return None
+    return TabSession.query.filter_by(tab_token=token_hash).first()
+
+
+def revoke_user_tab_sessions(user_id, reason, now=None):
+    """
+    Revoke every live tab session belonging to one user. Returns the count.
+
+    Used by sign-out (scenario 1a) and password change (FR-003) — both mean
+    "end this person's access everywhere", not just in the current tab.
+    """
+    now = now or datetime.now(timezone.utc)
+    sessions = TabSession.query.filter_by(user_id=user_id, revoked_at=None).all()
+    for tab in sessions:
+        tab.revoke(reason, now=now)
+    if sessions:
+        db.session.commit()
+    return len(sessions)
+
+
+def revoke_all_tab_sessions(reason=None, now=None):
+    """
+    Revoke every live tab session for every user. Returns the count.
+
+    FR-002g: deployment invalidates all existing sessions, so no session created
+    under the previous, longer-lived rules survives the change. This touches
+    authentication state only — saved schedules, reports and settings are
+    untouched (FR-002h).
+    """
+    now = now or datetime.now(timezone.utc)
+    reason = reason or TabSession.REASON_DEPLOYMENT
+    sessions = TabSession.query.filter_by(revoked_at=None).all()
+    for tab in sessions:
+        tab.revoke(reason, now=now)
+    if sessions:
+        db.session.commit()
+    logger.info(f"[AUTH] Revoked {len(sessions)} tab session(s): {reason}")
+    return len(sessions)
+
+
+#: What the user is told when each limit ends their session (FR-002c).
+SESSION_END_MESSAGES = {
+    TabSession.REASON_IDLE_TIMEOUT: (
+        "You were signed out because you were inactive for a while. "
+        "Please sign in again."
+    ),
+    TabSession.REASON_ABSOLUTE_TIMEOUT: (
+        "Your session reached its maximum length. Please sign in again."
+    ),
+    TabSession.REASON_PASSWORD_CHANGED: (
+        "Your password was changed, so other sessions were signed out."
+    ),
+    TabSession.REASON_DEPLOYMENT: (
+        "The application was updated and all sessions were signed out. "
+        "Please sign in again."
+    ),
+    TabSession.REASON_SIGNED_OUT: "You have been signed out.",
+}
+
+
+def hash_tab_token(raw_token):
+    """
+    SHA-256 of a tab token, or None when there is no token.
+
+    Stored hashed for the same reason agent API keys are: a database read must
+    not yield a usable credential. Returning None for a missing token lets
+    callers treat "no token" and "unknown token" identically.
+    """
+    if not raw_token:
+        return None
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 # NOTE: session lifetime is configured in server_app.py via
 # PERMANENT_SESSION_LIFETIME (8 hours). Do not reintroduce a duplicate constant
 # here - it drifts from the real setting.
@@ -353,8 +674,103 @@ def login_required(f):
             )
             return redirect(url_for("auth.login"))
 
+        # Per-tab authentication and session limits (FR-002a, FR-002b).
+        #
+        # The cookie above proves a browser signed in; it does NOT prove THIS
+        # tab did, because cookies are shared across tabs. The tab token does.
+        # Enforced here so every authenticated route is covered — a per-route
+        # check would be one forgotten decorator away from a hole.
+        # The token normally arrives in a header (or a form field on POST), put
+        # there by tab_session.js from this tab's sessionStorage.
+        raw_tab_token = request.headers.get(TAB_SESSION_HEADER) or request.form.get(
+            "tab_session"
+        )
+
+        # Bootstrap: immediately after sign-in the browser has not yet stored the
+        # token, so it is handed over through the session cookie until the tab
+        # confirms it has it — which it does by sending the header.
+        #
+        # It is deliberately NOT consumed on first read. An earlier version
+        # popped it immediately, reasoning that a token left in the cookie is
+        # shared with every tab. That broke sign-in outright: the first
+        # authenticated request after login is often a REDIRECT (forced password
+        # rotation, a `next=` target, trailing-slash normalisation), and a 302
+        # carries no HTML, so the token was consumed without ever reaching the
+        # browser. The next request then had nothing and signed the user out.
+        #
+        # Trade-off, accepted and bounded: the token remains in the cookie from
+        # sign-in until this tab's first header-bearing request. A second tab
+        # opened inside that window inherits the session. The window is one page
+        # load, and it closes permanently the moment the tab's JavaScript runs.
+        if not raw_tab_token:
+            raw_tab_token = session.get("tab_token")
+            if raw_tab_token:
+                # Handed to the template so tab_session.js can store it.
+                g.tab_bootstrap_token = raw_tab_token
+        # NOTE: the session copy is deliberately NOT removed once the header
+        # starts arriving.
+        #
+        # Browsers cannot attach custom headers to top-level navigations. Every
+        # click from Overview to Agents to Reports is a plain GET, so it carries
+        # no X-Tab-Session header. Removing the cookie copy therefore signs the
+        # user out on the first link they click — verified in a real browser:
+        # the page's fetch() calls all authenticated (hdr=True), and the very
+        # next navigation did not (hdr=False).
+        #
+        # Consequence, and it is a real one: authentication is effectively
+        # carried by the session cookie, which every tab shares. FR-002a's
+        # per-tab isolation is NOT achieved by this mechanism and cannot be
+        # without routing every navigation through fetch (an SPA rewrite).
+        # See the note in login() and the feature spec before changing this.
+
+        tab = lookup_tab_session(raw_tab_token)
+        expiry = tab.expiry_reason() if tab else None
+
+        if tab is None or expiry is not None:
+            if tab is not None and tab.revoked_at is None:
+                # Record WHY it ended, so the message below is accurate and the
+                # row is not re-judged later (FR-002c).
+                tab.revoke(expiry)
+                db.session.commit()
+            reason = expiry or TabSession.REASON_SIGNED_OUT
+            session.clear()
+            flash(
+                SESSION_END_MESSAGES.get(reason, "Please sign in again."),
+                "warning",
+            )
+            return redirect(url_for("auth.login"))
+
+        # Still valid — advance the idle window (FR-002b).
+        tab.last_seen_at = datetime.now(timezone.utc)
+        db.session.commit()
+        g.tab_session = tab
+
         # Store user in g for access in views
         g.current_user = user
+
+        # Forced password rotation (feature 037, FR-006f).
+        #
+        # Existing local administrators whose password does not meet the
+        # stricter admin rule must set a compliant one before doing anything
+        # else. Ordinary local users are deliberately NOT forced — FR-006f
+        # requires that nobody is locked out by the policy change — and AD
+        # accounts are exempt entirely (FR-006a).
+        #
+        # The allow-list must include the change-password page itself and
+        # sign-out, or the user has no route out of the state. Static files are
+        # allowed so the page can render.
+        if getattr(user, "must_change_password", False) and request.endpoint not in (
+            "auth.change_password",
+            "auth.logout",
+            "static",
+        ):
+            flash(
+                "Your password does not meet the current policy. "
+                "Please set a new one to continue.",
+                "warning",
+            )
+            return redirect(url_for("auth.change_password"))
+
         return f(*args, **kwargs)
 
     return decorated_function
@@ -561,8 +977,14 @@ def reset_password(token):
             flash("Passwords do not match.", "danger")
             return render_template("auth/reset_password.html", token=token)
 
-        if len(new_password) < 8:
-            flash("Password must be at least 8 characters.", "danger")
+        # FR-006d: same policy at reset as at creation and change.
+        policy_error = validate_password_policy(
+            new_password,
+            auth_type=getattr(user, "auth_type", "local"),
+            role=getattr(user, "role", "user"),
+        )
+        if policy_error:
+            flash(policy_error, "danger")
             return render_template("auth/reset_password.html", token=token)
 
         if svc.reset_user_password(token, new_password):
@@ -611,11 +1033,12 @@ def login():
             time.sleep(0.5)  # Constant-time delay to prevent timing attacks
             flash("Please enter username and password.", "danger")
             return render_template("auth/login.html")
-        if len(password) < 8:
-            _log_login_attempt(None, username, "local", request, False, "Password too short")
-            time.sleep(0.5)  # Constant-time delay
-            flash("Password must be at least 8 characters.", "danger")
-            return render_template("auth/login.html")
+        # Feature 037 / FR-006f: deliberately NO password-policy check at sign-in.
+        # Login verifies against the stored credential, never against the current
+        # policy. Checking policy here would reject every existing user whose
+        # password predates a policy change — exactly what FR-006f forbids ("no
+        # one is locked out by the change"). It also stops no attacker; it only
+        # tells one what the minimum length is.
 
         user = DashboardUser.query.filter_by(username=username).first()
 
@@ -738,9 +1161,32 @@ def login():
                 )  # Track session validity
                 session.permanent = True
 
-                # Update user record
+                # FR-002a: bind this sign-in to the tab that performed it. The
+                # cookie above is shared by every tab in the browser; this token
+                # is not, and the server row is what decides whether it is still
+                # valid. The raw token is handed to the page once and stored in
+                # sessionStorage by tab_session.js — only its hash is persisted.
+                session["tab_token"] = issue_tab_session(user)
+
+                # Update user record.
+                # FR-002e: a successful sign-in resets the failed-attempt counter,
+                # so a legitimate user signing in across several tabs can never
+                # lock their own account.
                 user.failed_login_count = 0
-                user.last_login = datetime.now(timezone.utc)
+                # D02 / FR-009: store NAIVE UTC.
+                #
+                # This wrote datetime.now(timezone.utc) — an AWARE value — into a
+                # naive db.DateTime column, while every other timestamp in the
+                # schema (created_at, updated_at, agent last_seen) stores naive
+                # UTC. Whether the offset survives that write is driver-dependent,
+                # and a value that is sometimes aware and sometimes naive cannot be
+                # interpreted consistently on read.
+                #
+                # utils.datetime_format treats a naive value as UTC and converts it
+                # to the viewer's timezone for display, which is what makes the
+                # displayed sign-in time correct rather than 5.5 hours out for an
+                # IST viewer — the reported "last logged in time is showing wrong".
+                user.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
                 db.session.commit()
                 
                 # Log successful login
@@ -804,8 +1250,18 @@ def login():
 
 @auth_bp.route("/logout")
 def logout():
-    """Logout and clear session"""
+    """
+    Sign out.
+
+    Scenario 1a: signing out in ANY tab ends every tab that user has open.
+    Clearing the cookie alone would leave other tabs holding valid tab tokens,
+    so the sign-out would appear not to have worked in them.
+    """
     username = session.get("username", "Unknown")
+    user_id = session.get("user_id")
+    if user_id:
+        revoked = revoke_user_tab_sessions(user_id, TabSession.REASON_SIGNED_OUT)
+        logger.info(f"[AUTH] Sign-out revoked {revoked} tab session(s) for {username}")
     session.clear()
     logger.info(f"[AUTH] User logged out: {username}")
     flash("You have been logged out.", "info")
@@ -826,6 +1282,18 @@ def change_password():
         new_password = request.form.get("new_password", "")
         confirm = request.form.get("confirm_password", "")
 
+        # D20: an Active-Directory account has no local password to change. It
+        # previously fell through to check_password(), which passed a NULL hash
+        # to Werkzeug and raised — producing the internal server error page QA
+        # reported. Saying so plainly is the correct outcome (FR-005).
+        if (g.current_user.auth_type or "local").lower() == "ad":
+            flash(
+                "Your account signs in through your organisation's directory, "
+                "so your password is managed there and cannot be changed here.",
+                "danger",
+            )
+            return render_template("auth/change_password.html")
+
         if not g.current_user.check_password(current):
             flash("Current password is incorrect.", "danger")
             return render_template("auth/change_password.html")
@@ -839,13 +1307,22 @@ def change_password():
             flash("New passwords do not match.", "danger")
             return render_template("auth/change_password.html")
 
-        if len(new_password) < 8:
-            flash("Password must be at least 8 characters.", "danger")
+        policy_error = validate_password_policy(
+            new_password,
+            auth_type=g.current_user.auth_type,
+            role=g.current_user.role,
+        )
+        if policy_error:
+            flash(policy_error, "danger")
             return render_template("auth/change_password.html")
 
-        # Increment session version to invalidate other devices
+        # Increment session version to invalidate other devices (FR-003).
         g.current_user.session_version += 1
         g.current_user.set_password(new_password)
+        # FR-006f: the new password passed validate_password_policy above, so
+        # the forced-rotation hold is satisfied and must be released — otherwise
+        # the user is redirected back here forever.
+        g.current_user.must_change_password = False
         db.session.commit()
 
         # Keep the user logged into *this* specific session they just used
@@ -937,8 +1414,11 @@ def add_user():
                     available_usernames=available_usernames,
                     available_login_usernames=available_login_usernames,
                 )
-            if len(password) < 8:
-                flash("Password must be at least 8 characters.", "danger")
+            policy_error = validate_password_policy(
+                password, auth_type=auth_type, role=role
+            )
+            if policy_error:
+                flash(policy_error, "danger")
                 return render_template(
                     "auth/add_user.html",
                     available_usernames=available_usernames,
@@ -969,9 +1449,13 @@ def add_user():
                 available_login_usernames=available_login_usernames,
             )
 
-        # Password validation only for local auth
-        if auth_type == "local" and len(password) < 8:
-            flash("Password must be at least 8 characters.", "danger")
+        # Password policy applies to local accounts only; validate_password_policy
+        # exempts AD accounts itself (FR-006a), so the gate is kept for clarity.
+        policy_error = validate_password_policy(
+            password, auth_type=auth_type, role=role
+        )
+        if policy_error:
+            flash(policy_error, "danger")
             return render_template(
                 "auth/add_user.html",
                 available_usernames=available_usernames,
@@ -1053,7 +1537,15 @@ def edit_user(user_id):
             flash("This Windows username is already linked to another user.", "danger")
             return render_template("auth/edit_user.html", user=user)
 
+        # FR-006g: promoting a user to administrator applies the stricter admin
+        # rule from that point. The password they already have was only ever
+        # checked against the weaker user rule, so require a compliant one at
+        # next sign-in unless they set one in this same request (handled below,
+        # which validates against the NEW role and clears the flag).
+        was_admin = (user.role or "user").lower() == "admin"
         user.role = role
+        if not was_admin and (role or "user").lower() == "admin":
+            user.must_change_password = True
         user.email = email
         user.linked_username = linked_username if linked_username else None
         user.auth_type = auth_type
@@ -1062,10 +1554,20 @@ def edit_user(user_id):
         # Reset password if provided
         new_password = request.form.get("new_password", "").strip()
         if new_password:
-            if len(new_password) < 8:
-                flash("Password must be at least 8 characters.", "danger")
+            # Validated against the account's role AFTER any role change made
+            # on this same form, so promoting a user to admin and setting a
+            # password in one action applies the stricter admin rule (FR-006g).
+            policy_error = validate_password_policy(
+                new_password, auth_type=user.auth_type, role=user.role
+            )
+            if policy_error:
+                flash(policy_error, "danger")
                 return render_template("auth/edit_user.html", user=user)
             user.set_password(new_password)
+            # FR-006f/g: this password was validated against the account's role
+            # as it stands after any change made on this same form, so a forced
+            # rotation hold set above (promotion to admin) is already satisfied.
+            user.must_change_password = False
             # Invalidate any existing sessions for this user - an admin-driven
             # reset must not leave a previously-hijacked session valid.
             user.session_version = (user.session_version or 1) + 1

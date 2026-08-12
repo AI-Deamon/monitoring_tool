@@ -587,7 +587,11 @@
             body.innerHTML = history.map(h => `
                 <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
                     <td class="px-6 py-3 text-xs text-gray-500">${formatRelativeTime(h.created_at)}</td>
-                    <td class="px-6 py-3 text-xs font-mono text-gray-700 dark:text-gray-300">${h.agent_id.slice(0, 8)}...</td>
+                    {# D21 / FR-026: this showed only the first 8 characters of the
+                       agent UUID and no name at all, so a row could not be tied to
+                       a machine. Now the human-readable name leads, with the full
+                       identifier beneath it and both retrievable in full. #}
+                    <td class="px-6 py-3 text-xs text-gray-700 dark:text-gray-300 max-w-[220px]">${AgentFmt.nameWithIdHtml(h)}</td>
                     <td class="px-6 py-3 text-xs font-mono">
                         <span class="text-gray-500">${h.from_version || '?'}</span>
                         <span class="text-gray-400 mx-1">→</span>
@@ -701,12 +705,15 @@
 
     function formatRelativeTime(isoStr) {
         if (!isoStr) return 'Never';
-        const d = new Date(isoStr);
+        // parseStored, not new Date(): naive ISO from the API is UTC, but JS
+        // would read it as local time and skew every relative age.
+        const d = DateFmt.parseStored(isoStr);
+        if (!d) return 'Never';
         const diff = Math.floor((new Date() - d) / 1000);
         if (diff < 60) return 'Just now';
         if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
         if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-        return d.toLocaleDateString();
+        return DateFmt.formatDate(isoStr);
     }
 
     function resultError(data) {

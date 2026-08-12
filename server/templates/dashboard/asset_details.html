@@ -443,7 +443,24 @@
         document.getElementById('header-hostname').textContent = data.identity.hostname;
         document.getElementById('header-os').innerHTML = `<i class="fab fa-windows"></i> ${data.identity.os_name} ${data.identity.os_version}`;
         document.getElementById('header-serial').textContent = `S/N: ${data.identity.serial_number || 'UNKNOWN'}`;
-        document.getElementById('header-ip').textContent = data.network.primary_ip;
+        // FR-031/FR-032: the primary address is the physical adapter carrying the
+        // current connection. Where the endpoint holds more than one, the others
+        // are made available rather than hidden behind a single value.
+        (function () {
+            const el = document.getElementById('header-ip');
+            const primary = data.network.primary_ip;
+            el.textContent = (!primary || primary === '127.0.0.1') ? 'Unknown' : primary;
+            const all = Array.isArray(data.network.all_ips) ? data.network.all_ips : [];
+            const others = all.filter((ip) => ip && ip !== primary);
+            if (others.length) {
+                el.title = `Also on this endpoint: ${others.join(', ')}`;
+                el.setAttribute('tabindex', '0');
+                const extra = document.createElement('span');
+                extra.className = 'block text-[10px] font-normal opacity-80';
+                extra.textContent = `+${others.length} more address${others.length > 1 ? 'es' : ''}`;
+                el.appendChild(extra);
+            }
+        })();
         document.getElementById('header-last-seen').textContent = formatTime(data.identity.last_seen);
         document.getElementById('header-version').textContent = data.identity.agent_version;
         document.getElementById('header-domain').textContent = data.identity.domain || data.identity.workgroup || 'WORKGROUP';
@@ -460,7 +477,17 @@
 
         // Hardware Card
         document.getElementById('hw-cpu-name').textContent = data.hardware.cpu_name;
-        document.getElementById('hw-cpu-cores').textContent = `${data.hardware.cpu_cores} Cores / ${data.hardware.cpu_threads} Threads`;
+        // FR-016a / FR-017: an undeterminable core count is shown as unknown, never
+        // backfilled from the logical-processor count. The agent used to fill cores
+        // from os.cpu_count() whenever the CIM query failed, which made cores and
+        // threads read identically (D07) — a wrong value presented as fact.
+        (function () {
+            const cores = data.hardware.cpu_cores;
+            const threads = data.hardware.cpu_threads;
+            const show = (v) => (v === null || v === undefined || v === 0 ? 'Unknown' : v);
+            document.getElementById('hw-cpu-cores').textContent =
+                `${show(cores)} Cores / ${show(threads)} Threads`;
+        })();
         document.getElementById('hw-cpu-speed').textContent = `${(data.hardware.cpu_speed_mhz / 1000).toFixed(2)} GHz`;
         document.getElementById('hw-ram-total').textContent = `${Math.round(data.hardware.ram_total_gb)} GB`;
         document.getElementById('hw-ram-slots').textContent = `${data.hardware.ram_slots_used} / ${data.hardware.ram_slots_total}`;
@@ -629,8 +656,10 @@
 
     function formatTime(isoStr) {
         if (!isoStr) return '--';
-        const date = new Date(isoStr);
-        return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        // FR-007: was a browser-locale short form competing with the canonical
+        // format. toLocaleString([]) follows the viewer's locale, so this rendered
+        // differently for different users.
+        return DateFmt.formatDateTime(isoStr);
     }
 
     // Software Search

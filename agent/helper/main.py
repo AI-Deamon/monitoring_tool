@@ -21,6 +21,7 @@ from helper.collector import DataCollector
 from helper.comm import CoreCommunicator
 from helper.identity_sync import IdentitySynchronizer
 from helper.state_detector import StateDetector, SystemState
+from helper.network_watcher import NetworkChangeWatcher
 from helper.performance import (
     get_cpu_throttler,
     get_memory_enforcer,
@@ -44,6 +45,7 @@ class SentinelHelper:
         self.collector = DataCollector(self.config, buffer_db=self.buffer)
         self.communicator = CoreCommunicator(self.config)
         self.identity_sync = IdentitySynchronizer(self.config)
+        self.network_watcher = NetworkChangeWatcher(on_change=self._on_network_change_event)
 
         # Runtime state
         self.running = False
@@ -357,6 +359,12 @@ class SentinelHelper:
         watchdog_thread.start()
         self.logger.info("[WATCHDOG] Watchdog thread started")
 
+        # Start real-time network change detection (OS-level notification,
+        # not polling). The periodic network check further below still runs
+        # as a fallback safety net in case this can't be started or misses
+        # an edge case.
+        self.network_watcher.start()
+
         # STEP 1: Sync identity from Core first
         self.logger.info("[SYNC] Syncing identity from Core...")
 
@@ -575,7 +583,7 @@ class SentinelHelper:
                     last_ext_inventory_check = now
 
                 # Network change check (every 5 minutes)
-                network_check_interval = 300  # 5 min
+                network_check_interval = 1800  # 30 min fallback (NetworkChangeWatcher handles real-time detection)
                 if now - last_network_change_check >= network_check_interval:
                     if self.core_connected:
                         self._check_network_change()
@@ -1073,10 +1081,24 @@ class SentinelHelper:
         except Exception as e:
             self.logger.error(f"Hardware check error: {e}", exc_info=True)
     
+    def _on_network_change_event(self):
+        """
+        Callback from NetworkChangeWatcher — fired by the OS the instant the
+        IP address/route table changes (Wi-Fi/Ethernet switch, DHCP renewal,
+        VPN connect, adapter up/down), instead of waiting for the periodic
+        poll below to notice it.
+        """
+        if not self.core_connected:
+            self.logger.debug("[NETWATCH] Change detected but Core not connected, skipping")
+            return
+        self.logger.info("[NETWATCH] OS reported a network change, checking immediately")
+        self._check_network_change()
+
     def _check_network_change(self):
         """
         Check if network adapters have changed and send partial update.
-        This is called every 5 minutes to detect WiFi/Ethernet switches.
+        Primarily triggered in real time by NetworkChangeWatcher; also
+        called periodically below as a fallback safety net.
         """
         try:
             network_data = self.collector.collect_network_partial()
@@ -1097,6 +1119,13 @@ class SentinelHelper:
         self.logger.info("Stopping helper...")
         self.running = False
         self.shutdown_event.set()
+
+        # Stop network change watcher
+        try:
+            self.network_watcher.stop()
+            self.logger.info("[NETWATCH] Network change watcher stopped")
+        except Exception as e:
+            self.logger.error(f"Error stopping network watcher: {e}")
 
         # Mark stop reason in state machine BEFORE stopping state detector.
         try:

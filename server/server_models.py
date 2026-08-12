@@ -508,8 +508,19 @@ class AppInventory(db.Model):
     estimated_size_kb = db.Column(db.BigInteger, nullable=True)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Feature 037 / FR-019: uniqueness was (agent_id, name), which collapsed two
+    # genuinely distinct installations of one application — different versions,
+    # or per-machine vs per-user locations — into a single row. Version and
+    # install location are part of the identity so those stay distinguishable.
+    # Must stay in step with server_api.inventory_dedup_key().
     __table_args__ = (
-        db.UniqueConstraint("agent_id", "name", name="uq_app_inventory_agent_name"),
+        db.UniqueConstraint(
+            "agent_id",
+            "name",
+            "version",
+            "install_location",
+            name="uq_app_inventory_agent_name_version_location",
+        ),
     )
 
     def to_dict(self):
@@ -933,6 +944,10 @@ class AssetInfo(db.Model):
     manufacturer = db.Column(db.String(255), nullable=True)
     model = db.Column(db.String(255), nullable=True)
     bios_uuid = db.Column(db.String(255), nullable=True)
+    # Firmware version string reported by the hardware (SMBIOSBIOSVersion).
+    # Distinct from bios_uuid, which is an identifier, not a version — conflating
+    # the two is defect D06.
+    bios_version = db.Column(db.String(255), nullable=True)
     system_uuid = db.Column(db.String(255), nullable=True)
     asset_tag = db.Column(db.String(255), nullable=True)
     domain = db.Column(db.String(255), nullable=True)
@@ -951,6 +966,14 @@ class AssetInfo(db.Model):
     gpus_json = db.Column(db.Text, nullable=True)  # JSON array of {name, memory_gb}
     disks_json = db.Column(db.Text, nullable=True)  # JSON array of disk info
     motherboard = db.Column(db.Text, nullable=True)
+
+    # ================================================================
+    # BATTERY HEALTH (laptops only; NULL on desktops)
+    # ================================================================
+    battery_name = db.Column(db.String(255), nullable=True)
+    battery_health_percent = db.Column(db.Float, nullable=True)
+    battery_charge_percent = db.Column(db.Float, nullable=True)
+    battery_cycle_count = db.Column(db.Integer, nullable=True)
 
     # ================================================================
     # NETWORK
@@ -997,6 +1020,7 @@ class AssetInfo(db.Model):
             "manufacturer": self.manufacturer,
             "model": self.model,
             "bios_uuid": self.bios_uuid,
+            "bios_version": self.bios_version,
             "system_uuid": self.system_uuid,
             "asset_tag": self.asset_tag,
             "domain": self.domain,
@@ -1011,6 +1035,14 @@ class AssetInfo(db.Model):
             "gpus": _json.loads(self.gpus_json) if self.gpus_json else [],
             "disks": _json.loads(self.disks_json) if self.disks_json else [],
             "motherboard": self.motherboard,
+            "battery": {
+                "name": self.battery_name,
+                "health_percent": self.battery_health_percent,
+                "charge_percent": self.battery_charge_percent,
+                "cycle_count": self.battery_cycle_count,
+            }
+            if self.battery_name
+            else None,
             "primary_mac": self.primary_mac,
             "primary_ip": self.primary_ip,
             "all_macs": _json.loads(self.all_macs_json) if self.all_macs_json else [],

@@ -20,8 +20,17 @@ AD_CONFIG = {
     "bind_dn": os.getenv("AD_BIND_DN", ""),
     "bind_password": os.getenv("AD_BIND_PASSWORD", ""),
     "verify_ssl": os.getenv("AD_VERIFY_SSL", "true").lower() == "true",
+    "ca_cert_path": os.getenv("AD_CA_CERT_PATH", ""),
     "domain": os.getenv("AD_DOMAIN", ""),  # Optional: for UPN format
 }
+
+if not AD_CONFIG["verify_ssl"] and not AD_CONFIG["ca_cert_path"]:
+    logger.warning(
+        "[AD_AUTH] TLS certificate validation is fully disabled for LDAPS "
+        "(AD_VERIFY_SSL=false with no AD_CA_CERT_PATH set). Set AD_CA_CERT_PATH "
+        "to your AD server's CA certificate to validate against it instead of "
+        "disabling verification entirely."
+    )
 
 
 def is_ad_enabled() -> bool:
@@ -124,16 +133,25 @@ def authenticate_ldap(
             "connect_timeout": timeout,
         }
 
-        # Add TLS configuration for LDAPS if SSL verification disabled
+        # Add TLS configuration for LDAPS
         if use_ssl:
             from ldap3 import Tls
 
-            tls_config = Tls(
-                validate=ssl.CERT_NONE
-                if not AD_CONFIG["verify_ssl"]
-                else ssl.CERT_REQUIRED,
-                version=ssl.PROTOCOL_TLS_CLIENT,
-            )
+            if AD_CONFIG["ca_cert_path"]:
+                # Validate against the configured CA instead of disabling
+                # verification, even when AD_VERIFY_SSL is off.
+                tls_config = Tls(
+                    validate=ssl.CERT_REQUIRED,
+                    version=ssl.PROTOCOL_TLS_CLIENT,
+                    ca_certs_file=AD_CONFIG["ca_cert_path"],
+                )
+            else:
+                tls_config = Tls(
+                    validate=ssl.CERT_NONE
+                    if not AD_CONFIG["verify_ssl"]
+                    else ssl.CERT_REQUIRED,
+                    version=ssl.PROTOCOL_TLS_CLIENT,
+                )
             server_kwargs["tls"] = tls_config
 
         # Create server
@@ -215,11 +233,19 @@ def test_ad_connection() -> Tuple[bool, str]:
         }
 
         # Add TLS configuration for LDAPS
-        if use_ssl and not AD_CONFIG["verify_ssl"]:
+        if use_ssl:
             tls_config = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            tls_config.check_hostname = False
-            tls_config.verify_mode = ssl.CERT_NONE
-            server_kwargs["tls"] = tls_config
+            tls_config.minimum_version = ssl.TLSVersion.TLSv1_2
+            if AD_CONFIG["ca_cert_path"]:
+                # Validate against the configured CA instead of disabling
+                # verification, even when AD_VERIFY_SSL is off.
+                tls_config.load_verify_locations(cafile=AD_CONFIG["ca_cert_path"])
+                tls_config.verify_mode = ssl.CERT_REQUIRED
+                server_kwargs["tls"] = tls_config
+            elif not AD_CONFIG["verify_ssl"]:
+                tls_config.check_hostname = False
+                tls_config.verify_mode = ssl.CERT_NONE
+                server_kwargs["tls"] = tls_config
 
         # Create server
         server = Server(server_url, use_ssl=use_ssl, **server_kwargs)

@@ -37,6 +37,33 @@ def _make_jinja_env():
     )
     env.filters['format_duration'] = _fmt_duration
     env.filters['format_hours'] = _fmt_hours
+
+    # FR-007: the single canonical date presentation. Report templates carried
+    # seven competing strftime formats between them ('%B %d, %Y',
+    # '%Y-%m-%d at %H:%M', '%A, %B %d', '%d-%m-%Y %I:%M %p' and more), which is
+    # the same missing-abstraction problem the dashboard had.
+    from utils.datetime_format import format_date as _fmt_date
+    from utils.datetime_format import format_datetime as _fmt_datetime
+    env.filters['fmt_date'] = _fmt_date
+    env.filters['fmt_datetime'] = _fmt_datetime
+    from utils.datetime_format import format_datetime_labelled as _fmt_dt_lbl
+    env.filters['fmt_datetime_tz'] = _fmt_dt_lbl
+
+    # Report templates share the CSP hardening applied to dashboard templates and
+    # call csp_nonce() on inline <style>/<script> tags. In a request, that global
+    # comes from the Flask context processor in server_app.py. This environment is
+    # standalone — reports are rendered for email and PDF outside any request — so
+    # the global is absent and every render raises UndefinedError.
+    #
+    # This is defect D12 ("Not able to generate the report"): the failure is total
+    # and affects every report type, because all five templates call it.
+    #
+    # An empty nonce is the correct value here, not a workaround: the output is a
+    # standalone document, not a response served under a CSP header, so there is no
+    # policy for a nonce to match. Emitting nonce="" keeps the markup valid and the
+    # template shared between both paths.
+    env.globals['csp_nonce'] = lambda: ''
+
     return env
 
 
@@ -443,6 +470,22 @@ def get_job(db, job_id):
     }
 
 
+# Report failure reasons (feature 037, FR-021).
+#
+# These were previously one message — "No data found for the selected period" —
+# used for every unsuccessful outcome. An agent that does not exist and an agent
+# with a genuinely quiet week produced identical text, so a user could not tell
+# a mistake from an empty week. FR-021 requires a specific stated reason.
+REASON_AGENT_NOT_FOUND = (
+    "That agent could not be found. It may have been removed, or you may not "
+    "have access to it."
+)
+REASON_NO_DATA = (
+    "No activity was recorded for the selected period."
+)
+REASON_UNKNOWN_SCOPE = "That report scope is not recognised."
+
+
 def run_report_job(app, db, job_id, report_type, scope, agent_id, start_date, end_date, auto_email=False, recipients=None, include_pdf=False):
     """Run report generation synchronously. Caller is responsible for running in a background thread."""
     try:
@@ -457,7 +500,13 @@ def run_report_job(app, db, job_id, report_type, scope, agent_id, start_date, en
             ctx = build_individual_report(db, agent_id, start_date, end_date)
 
         if not ctx:
-            fail_job(db, job_id, 'No data found for the selected period')
+            # FR-021: name the actual cause. build_individual_report returns
+            # None only when the agent itself cannot be found — an agent with no
+            # activity still returns a context and renders an empty-state report
+            # (FR-022), so reaching here for an individual scope means the agent
+            # is missing, not that the week was quiet.
+            reason = REASON_AGENT_NOT_FOUND if scope != 'team' else REASON_NO_DATA
+            fail_job(db, job_id, reason)
             return
 
         html = render_report_html(report_type, scope, ctx)
@@ -503,3 +552,160 @@ def run_report_job(app, db, job_id, report_type, scope, agent_id, start_date, en
     except Exception as e:
         logger.exception(f"[REPORTS] Job {job_id} failed: {e}")
         fail_job(db, job_id, str(e))
+
+
+# ── Multi-sheet inventory export (feature 037, D15 / FR-025b–h) ───────────────
+#
+# QA reported the combined app-inventory download as "agents app inventories are
+# displaying again and again". The cause is presentation, not data: the combined
+# export flattened every agent's inventory into one undivided list, so every
+# application common to the fleet appeared once per agent with nothing marking
+# where one agent ended and the next began. QA's own suggestion was one sheet per
+# agent, which is what this produces.
+
+#: Maximum agents in a single combined export.
+#:
+#: FR-025f/g. The export runs inside the request, and gunicorn kills a worker at
+#: 120 seconds (gunicorn_config.py). Refusing an oversized request with a clear
+#: message beats letting it run into a timeout the user cannot interpret.
+#:
+#: Derived by measurement (T119, recorded in investigation-findings.md). At 120
+#: applications per agent, workbook generation is close to linear at roughly
+#: 20 ms per agent: 750 agents 16.3 s, 1000 agents 18.9 s, 1500 agents 30.5 s.
+#: 1000 agents therefore costs ~19 s of the 120 s budget, leaving the rest for
+#: the database query and transfer, which are not included in that figure.
+#:
+#: Measured on a dev machine against synthetic data. Re-measure against the real
+#: fleet before relying on the headroom. Background job infrastructure is
+#: deliberately out of scope (FR-025h) — this cap is what keeps the synchronous
+#: implementation honest.
+MAX_COMBINED_EXPORT_AGENTS = 1000
+
+#: Excel's own limits, not ours.
+_SHEET_NAME_MAX = 31
+_SHEET_NAME_ILLEGAL = set(r':\/?*[]')
+
+_INVENTORY_HEADERS = ["Application", "Version", "Publisher", "Source", "Install Date"]
+
+
+class InventoryExportTooLarge(Exception):
+    """Raised when a combined export would exceed MAX_COMBINED_EXPORT_AGENTS."""
+
+
+def safe_sheet_name(raw_name, used):
+    r"""
+    Derive a legal, unique worksheet name from an agent name.
+
+    Excel caps names at 31 characters, forbids : \ / ? * [ ], and requires
+    uniqueness within a workbook. Real agent names break all three — a
+    domain-qualified name contains a backslash, and fleet naming conventions
+    routinely produce names longer than 31 characters that share a prefix.
+
+    FR-025c forbids the two failure modes that a naive implementation produces:
+    silently colliding (two agents landing on one sheet, so one agent's data is
+    invisible) and failing the export outright. Both are worse than a slightly
+    ugly name, so this always returns something usable.
+
+    `used` is the set of names already taken in this workbook; the caller adds
+    the returned value to it.
+    """
+    name = ''.join(c for c in str(raw_name or '') if c not in _SHEET_NAME_ILLEGAL).strip()
+    # Excel also rejects a leading or trailing apostrophe.
+    name = name.strip("'")
+    if not name:
+        name = "Unnamed agent"
+
+    candidate = name[:_SHEET_NAME_MAX]
+    if candidate not in used:
+        return candidate
+
+    # Disambiguate with a numeric suffix, trimming the stem so the total still
+    # fits. Distinct agents whose names share a long prefix land here.
+    for n in range(2, 1000):
+        suffix = f" ({n})"
+        candidate = f"{name[:_SHEET_NAME_MAX - len(suffix)]}{suffix}"
+        if candidate not in used:
+            return candidate
+
+    # Pathological fallback — cannot collide because `used` is finite.
+    return f"Sheet {len(used) + 1}"[:_SHEET_NAME_MAX]
+
+
+def _group_rows_by_agent(rows):
+    """Group fleet-export rows by agent, preserving first-seen agent order."""
+    grouped = {}
+    for row in rows or []:
+        agent_id = str(row.get('agent_id') or '')
+        hostname = row.get('agent_hostname') or ''
+        key = (agent_id, hostname)
+        grouped.setdefault(key, []).append(row)
+    return grouped
+
+
+def build_inventory_workbook(rows):
+    """
+    Build a multi-sheet inventory workbook, one worksheet per agent.
+
+    `rows` is the shape /dashboard/api/inventory/fleet-export returns:
+    agent_id, agent_hostname, name, version, publisher, source, install_date.
+
+    Raises InventoryExportTooLarge when the selection exceeds
+    MAX_COMBINED_EXPORT_AGENTS (FR-025f).
+    """
+    from openpyxl import Workbook
+
+    grouped = _group_rows_by_agent(rows)
+
+    if len(grouped) > MAX_COMBINED_EXPORT_AGENTS:
+        raise InventoryExportTooLarge(
+            f"This export covers {len(grouped)} agents, above the limit of "
+            f"{MAX_COMBINED_EXPORT_AGENTS} for a single combined download. "
+            f"Narrow the selection and try again."
+        )
+
+    wb = Workbook()
+    wb.remove(wb.active)  # drop the default sheet; we add one per agent
+
+    used_titles = set()
+    for (agent_id, hostname), agent_rows in grouped.items():
+        title = safe_sheet_name(hostname or agent_id, used_titles)
+        used_titles.add(title)
+        ws = wb.create_sheet(title=title)
+
+        # FR-025c: identifiable by sheet name AND inside the sheet, so a single
+        # printed or copied sheet still says which machine it describes.
+        ws.append([f"Application Inventory — {hostname or 'Unnamed agent'}"])
+        ws.append([f"Agent ID: {agent_id}"])
+        ws.append([])
+        ws.append(list(_INVENTORY_HEADERS))
+
+        # FR-025d: the de-duplication required by FR-018 applies to this format
+        # equally, keyed the same way as ingestion (name + version + location).
+        seen = set()
+        for row in agent_rows:
+            app_name = (row.get('name') or '').strip()
+            if not app_name:
+                continue
+            key = (app_name.casefold(), (row.get('version') or '').strip())
+            if key in seen:
+                continue
+            seen.add(key)
+            ws.append([
+                app_name,
+                row.get('version') or '',
+                row.get('publisher') or '',
+                row.get('source') or '',
+                row.get('install_date') or '',
+            ])
+
+        widths = [42, 18, 30, 18, 14]
+        for idx, width in enumerate(widths, start=1):
+            ws.column_dimensions[ws.cell(row=1, column=idx).column_letter].width = width
+        ws.freeze_panes = "A5"
+
+    if not wb.worksheets:
+        # An empty selection is an empty-state document, not a failure.
+        ws = wb.create_sheet(title="No data")
+        ws.append(["No application inventory was recorded for this selection."])
+
+    return wb

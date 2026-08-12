@@ -198,6 +198,149 @@ class TestDownloadVerification(UpdaterTestBase):
         self.assertIsNone(result, "a package failing SHA256 must never be applied")
 
 
+class TestRejectionIsReported(UpdaterTestBase):
+    """
+    check_for_update() returning None used to be treated as uniformly
+    silent. An explicit local rejection (e.g. signature verification
+    failure) after a valid server response was received must be reported
+    to the server - otherwise agents.update_status is stuck at 'pending'
+    forever, since /health is the only thing that ever moves it out.
+    """
+
+    def test_signature_rejection_reports_health_failed(self):
+        self.updater._last_update_check_reason = 'signature_verification_failed'
+        self.updater._last_rejected_version = '4.1.0'
+        self.updater.check_for_update = MagicMock(return_value=None)
+        self.updater.report_health = MagicMock()
+
+        result = self.updater.run_update_cycle()
+
+        self.assertFalse(result)
+        self.updater.report_health.assert_called_once()
+        args = self.updater.report_health.call_args[0]
+        self.assertEqual(args[0], 'failed')
+        self.assertEqual(args[1], '4.1.0')
+        self.assertIn('signature_verification_failed', args[3])
+
+    def test_update_check_error_reports_health_failed(self):
+        self.updater._last_update_check_reason = 'update_check_error: boom'
+        self.updater._last_rejected_version = None
+        self.updater.check_for_update = MagicMock(return_value=None)
+        self.updater.report_health = MagicMock()
+
+        self.updater.run_update_cycle()
+
+        self.updater.report_health.assert_called_once()
+        args = self.updater.report_health.call_args[0]
+        self.assertEqual(args[1], 'unknown', "no version was ever parsed - must not fabricate one")
+
+    def test_no_update_available_does_not_report(self):
+        self.updater._last_update_check_reason = 'no_update_available'
+        self.updater.check_for_update = MagicMock(return_value=None)
+        self.updater.report_health = MagicMock()
+
+        self.updater.run_update_cycle()
+
+        self.updater.report_health.assert_not_called()
+
+    def test_already_up_to_date_does_not_report(self):
+        self.updater._last_update_check_reason = 'already_up_to_date'
+        self.updater.check_for_update = MagicMock(return_value=None)
+        self.updater.report_health = MagicMock()
+
+        self.updater.run_update_cycle()
+
+        self.updater.report_health.assert_not_called()
+
+    def test_server_unreachable_does_not_report(self):
+        self.updater._last_update_check_reason = 'server_unreachable: [Errno 111] refused'
+        self.updater.check_for_update = MagicMock(return_value=None)
+        self.updater.report_health = MagicMock()
+
+        self.updater.run_update_cycle()
+
+        self.updater.report_health.assert_not_called(
+        )
+
+    def test_not_checked_does_not_report(self):
+        """Never even attempted a check this cycle (e.g. blocked earlier) -
+        nothing to report."""
+        self.updater._last_update_check_reason = 'not_checked'
+        self.updater.check_for_update = MagicMock(return_value=None)
+        self.updater.report_health = MagicMock()
+
+        self.updater.run_update_cycle()
+
+        self.updater.report_health.assert_not_called()
+
+
+class TestReportHealthRetry(UpdaterTestBase):
+    """
+    report_health() is the ONLY call that moves the server's update_status
+    out of pending/downloading/installing. A single lost request under
+    thread-pool contention must not permanently strand the dashboard.
+    """
+
+    def test_retries_on_transport_failure_then_succeeds(self):
+        import urllib.error
+
+        class _Resp:
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *exc):
+                return False
+
+            def read(self_inner):
+                return b'{"acknowledged": true}'
+
+        calls = {'n': 0}
+
+        def fake_urlopen(*args, **kwargs):
+            calls['n'] += 1
+            if calls['n'] < 3:
+                raise urllib.error.URLError('timed out')
+            return _Resp()
+
+        with patch('core.updater.urllib.request.urlopen', side_effect=fake_urlopen), \
+                patch('core.updater.time.sleep') as mock_sleep:
+            self.updater.report_health('healthy', '4.1.0', '4.0.0')
+
+        self.assertEqual(calls['n'], 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+
+    def test_gives_up_after_max_retries_without_raising(self):
+        import urllib.error
+
+        with patch('core.updater.urllib.request.urlopen',
+                   side_effect=urllib.error.URLError('timed out')), \
+                patch('core.updater.time.sleep'):
+            # Must not raise - a lost report is logged and swallowed, same
+            # as before, just after exhausting retries instead of on the
+            # first failure.
+            self.updater.report_health('healthy', '4.1.0', '4.0.0')
+
+    def test_not_acknowledged_is_not_retried(self):
+        """A definitive response means the server already answered -
+        retrying it only risks duplicate work, not recovering anything."""
+        class _Resp:
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *exc):
+                return False
+
+            def read(self_inner):
+                return b'{"acknowledged": false}'
+
+        with patch('core.updater.urllib.request.urlopen', return_value=_Resp()) as mock_open, \
+                patch('core.updater.time.sleep') as mock_sleep:
+            self.updater.report_health('healthy', '4.1.0', '4.0.0')
+
+        self.assertEqual(mock_open.call_count, 1)
+        mock_sleep.assert_not_called()
+
+
 class TestSignatureVerification(UpdaterTestBase):
     def test_unsigned_metadata_rejected_when_key_configured(self):
         self.config.config['updates'] = {'signing_key': 'secret'}

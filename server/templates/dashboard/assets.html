@@ -466,7 +466,7 @@
                     '<span class="px-2 py-1 bg-emerald-500/10 text-emerald-500 text-[10px] font-bold rounded uppercase">🟢 Healthy</span>';
 
             return `
-                <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer" onclick="window.location.href='/dashboard/assets/${asset.agent_id}'">
+                <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer" onclick="window.location.assign('/dashboard/assets/${safeAgentId(asset.agent_id)}')">
                     <td class="px-6 py-4">
                         <div class="font-medium text-gray-900 dark:text-white">${asset.hostname || 'Unknown'}</div>
                         <div class="text-xs text-gray-500 dark:text-gray-400">${asset.username}</div>
@@ -496,7 +496,7 @@
                     </td>
                     <td class="px-6 py-4 text-right">
                         <div class="text-xs font-medium text-gray-700 dark:text-gray-300">${formatRelativeTime(asset.last_collected)}</div>
-                        <div class="text-[10px] text-gray-500 dark:text-gray-500 uppercase">${new Date(asset.last_collected).toLocaleDateString()}</div>
+                        <div class="text-[10px] text-gray-500 dark:text-gray-500 uppercase">${DateFmt.formatDate(asset.last_collected)}</div>
                     </td>
                 </tr>
             `;

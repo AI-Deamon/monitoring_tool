@@ -19,6 +19,7 @@ from flask import (
     url_for,
     g,
     session,
+    send_file,
 )
 from sqlalchemy import func, desc, case, text
 from extensions import db
@@ -158,6 +159,34 @@ def get_ist_day_range_utc(target_date):
         - timedelta(microseconds=1)
     )
     return start_dt, end_dt
+
+
+# ─── Viewer-timezone day boundaries (feature 037, D04 / FR-011) ───────────────
+#
+# get_ist_day_range_utc above is deliberately left unchanged: it is IST-only, it
+# has a dedicated regression test, and nothing is gained by making the shipped
+# helper's behaviour depend on request state. The two functions below are the
+# viewer-aware path, and they resolve the day using the SAME timezone the
+# timestamps are displayed in — so a selected date can never return records
+# whose displayed times contradict it.
+
+
+def get_viewer_today():
+    """Today's date in the viewer's timezone. 'Today' means the viewer's today."""
+    from utils.datetime_format import today_in, viewer_timezone
+    return today_in(viewer_timezone())
+
+
+def get_viewer_day_range_utc(target_date):
+    """
+    Naive-UTC (start, end) bounds covering one calendar day in the viewer's
+    timezone, for comparison against columns storing naive UTC.
+
+    Generalises get_ist_day_range_utc. Adjacent days neither overlap nor leave a
+    gap, so every record falls on exactly one day (FR-011a).
+    """
+    from utils.datetime_format import day_range_utc, viewer_timezone
+    return day_range_utc(target_date, tz=viewer_timezone())
 
 
 # ============================================================================
@@ -538,9 +567,9 @@ def api_overview():
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = get_ist_today()
+                target_date = get_viewer_today()
         else:
-            target_date = get_ist_today()
+            target_date = get_viewer_today()
 
         # 1. Agent Counts (Current State - ALWAYS Real-time)
         agent_query = server_models.Agent.query
@@ -775,7 +804,7 @@ def api_utilization_trend():
             days = 30
         days = max(1, min(days, 90))
 
-        end_date = get_ist_today()
+        end_date = get_viewer_today()
         start_date = end_date - timedelta(days=days - 1)
 
         q = db.session.query(
@@ -982,6 +1011,9 @@ def get_single_asset_data(agent_id):
                 "domain": info.domain,
                 "workgroup": info.workgroup,
                 "bios_uuid": info.bios_uuid,
+                # D06 / FR-015: the dashboard's "BIOS Version" field needs the
+                # firmware version, not the hardware GUID above.
+                "bios_version": info.bios_version,
                 "system_uuid": info.system_uuid,
                 "asset_tag": info.asset_tag,
                 "agent_version": agent.version,
@@ -1000,6 +1032,14 @@ def get_single_asset_data(agent_id):
                 "gpus": json.loads(info.gpus_json or "[]"),
                 "motherboard": info.motherboard,
                 "disks": json.loads(info.disks_json or "[]"),
+                "battery": {
+                    "name": info.battery_name,
+                    "health_percent": info.battery_health_percent,
+                    "charge_percent": info.battery_charge_percent,
+                    "cycle_count": info.battery_cycle_count,
+                }
+                if info.battery_name
+                else None,
             },
             "network": {
                 "primary_mac": info.primary_mac,
@@ -1228,9 +1268,9 @@ def api_agents():
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = get_ist_today()
+                target_date = get_viewer_today()
         else:
-            target_date = get_ist_today()
+            target_date = get_viewer_today()
 
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
 
@@ -1423,6 +1463,17 @@ def api_agents():
         )
         live_map = {l.agent_id: l for l in live_records}
 
+        # Hardware model for the agents list. Collected already, and shown on
+        # the asset views, but the agents list identified a machine only by
+        # hostname — so you could not tell what kind of device a row was
+        # without opening it. One query for the page, not one per row.
+        asset_map = {}
+        if agent_ids:
+            for info in server_models.AssetInfo.query.filter(
+                server_models.AssetInfo.agent_id.in_(agent_ids)
+            ).all():
+                asset_map[info.agent_id] = info
+
         # ================================================================
         # BUILD RESULT
         # ================================================================
@@ -1500,6 +1551,20 @@ def api_agents():
                     "agent_id": str(agent.agent_id),
                     "hostname": agent.hostname or "Unknown",
                     "os": agent.os,
+                    # Device model, e.g. "HP Laptop 15-bs1xx". Manufacturer is
+                    # sent separately rather than concatenated, because vendors
+                    # often repeat their own name in the model string ("HP" +
+                    # "HP Laptop 15-bs1xx"), and the display layer can decide.
+                    "manufacturer": (
+                        asset_map[agent.agent_id].manufacturer
+                        if agent.agent_id in asset_map
+                        else None
+                    ),
+                    "model": (
+                        asset_map[agent.agent_id].model
+                        if agent.agent_id in asset_map
+                        else None
+                    ),
                     "username": username,
                     "status": "online" if is_online else "offline",
                     "is_online": is_online,
@@ -1558,9 +1623,9 @@ def api_agent_screentime(agent_id):
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = get_ist_today()
+                target_date = get_viewer_today()
         else:
-            target_date = get_ist_today()
+            target_date = get_viewer_today()
 
         start_date = target_date - timedelta(days=6)
 
@@ -1953,6 +2018,75 @@ def api_inventory_fleet_export():
         return jsonify({"error": "Internal server error"}), 500
 
 
+@bp.route("/api/inventory/fleet-export.xlsx", methods=["GET"])
+@login_required
+def api_inventory_fleet_export_xlsx():
+    """
+    Combined app inventory as a multi-sheet spreadsheet, one worksheet per agent.
+
+    Feature 037 / D15 / FR-025b. The CSV form of this export concatenates every
+    agent's inventory into one undivided list, so applications common to the
+    fleet appear once per agent with nothing separating them — what QA reported
+    as inventories "displaying again and again". One sheet per agent is the fix
+    QA themselves suggested.
+
+    Reuses the same query and the same multi-tenant scoping as the CSV export
+    above, so the two formats cannot diverge in what data they expose (FR-025d).
+    """
+    from io import BytesIO
+
+    from report_engine import InventoryExportTooLarge, build_inventory_workbook
+
+    try:
+        query = db.session.query(
+            server_models.AppInventory, server_models.Agent.hostname
+        ).join(
+            server_models.Agent,
+            server_models.AppInventory.agent_id == server_models.Agent.agent_id,
+        )
+
+        # Multi-tenant scoping — identical to the CSV export. A non-admin must
+        # not reach another org's inventory through the new format.
+        if g.current_user.role != "admin":
+            query = query.filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        rows = [
+            {
+                "agent_id": str(inv.agent_id),
+                "agent_hostname": hostname,
+                "name": inv.name,
+                "version": inv.version,
+                "publisher": inv.publisher,
+                "source": inv.source,
+                "install_date": inv.install_date.isoformat()
+                if inv.install_date
+                else None,
+            }
+            for inv, hostname in query.all()
+        ]
+
+        workbook = build_inventory_workbook(rows)
+    except InventoryExportTooLarge as too_large:
+        # FR-025f: refuse with a message stating the limit, rather than letting
+        # the request run into the worker timeout with nothing to explain it.
+        logger.info(f"Combined inventory export refused: {too_large}")
+        return jsonify({"error": str(too_large)}), 413
+    except Exception as e:
+        logger.error(f"Fleet Inventory XLSX Export error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    filename = f"inventory_fleet_{datetime.now().strftime('%d-%m-%Y')}.xlsx"
+    return send_file(
+        buffer,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=filename,
+    )
+
+
 @bp.route("/api/agent/<path:agent_id>/hardware", methods=["GET"])
 @api_rate_limit
 def api_agent_hardware(agent_id):
@@ -2272,14 +2406,14 @@ def api_agent_full_report(agent_id):
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = get_ist_today()
+                target_date = get_viewer_today()
         else:
-            target_date = get_ist_today()
+            target_date = get_viewer_today()
 
         # Date range for queries - converted from the IST calendar day to
         # the equivalent naive-UTC window, since every stored timestamp is
         # normalized to naive UTC on write (see get_ist_day_range_utc).
-        start_dt, end_dt = get_ist_day_range_utc(target_date)
+        start_dt, end_dt = get_viewer_day_range_utc(target_date)
 
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
 
@@ -2399,7 +2533,7 @@ def api_agent_full_report(agent_id):
             "last_seen_today": last_seen_today,
             "total_tracked_seconds": total_tracked_seconds,
             "last_seen": utc_to_ist(agent.last_seen),
-            "is_viewing_today": target_date == get_ist_today(),
+            "is_viewing_today": target_date == get_viewer_today(),
         }
 
         # ================================================================
@@ -3040,7 +3174,7 @@ def api_agent_today(agent_id):
     Includes: agent info, screen time, top apps, domains used, sites opened.
     """
     try:
-        today = get_ist_today()
+        today = get_viewer_today()
 
         # 1. Agent Info
         # Try to find agent by UUID first, then by numeric ID (for backwards compatibility)

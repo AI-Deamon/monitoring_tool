@@ -1,3 +1,12 @@
+// Only accept an ISO date (YYYY-MM-DD); reject anything else.
+function safeDateParam(v) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(v || "") ? v : "";
+}
+// Only accept a UUID agent id.
+function safeAgentId(v) {
+    return /^[0-9a-fA-F-]{36}$/.test(v || "") ? v : "";
+}
+
 // Status Badge Generator
 function getStatusBadge(lastSeen) {
     if (!lastSeen) return '<span class="badge badge-danger">🔴 Offline</span>';

@@ -1,6 +1,7 @@
 """Tests for report scheduling — BUG-001, BUG-003, BUG-015."""
 import pytest
 from datetime import datetime, timezone
+import re
 from unittest.mock import MagicMock, patch
 
 
@@ -48,3 +49,79 @@ class TestRunScheduledReports:
             run_scheduled_reports()
         assert captured.get("hour") == 14
         assert captured.get("dow") == 2
+
+
+# ── T101 / D13 / FR-029, FR-030 — the new-schedule form starts empty ──────────
+
+from pathlib import Path as _Path
+
+REPORTS_TEMPLATE = (
+    _Path(__file__).parent.parent / "server" / "templates" / "dashboard" / "reports.html"
+)
+
+
+def _reports_html():
+    return REPORTS_TEMPLATE.read_text(encoding="utf-8")
+
+
+class TestNewScheduleFormStartsEmpty:
+    """
+    D13: create a schedule, save it, delete it, then click New Schedule — the
+    deleted schedule's values are pre-filled, so a user can unknowingly recreate
+    the schedule they just removed.
+
+    Root cause (T102): purely client-side DOM state. toggleNewScheduleForm()
+    only flips `style.display`, and the save path calls it again to hide the
+    form without ever clearing the inputs. The values therefore survive in the
+    DOM and reappear when the form is next shown. It is *not* a server-side
+    default — a hard refresh clears it, which is what distinguishes the two.
+
+    Asserted against the template source: there is no JavaScript test runner in
+    this repo, and the behaviour lives entirely in the page's inline script.
+    """
+
+    def test_a_reset_helper_exists(self):
+        html = _reports_html()
+        assert "resetScheduleForm" in html, (
+            "no helper clears the schedule form, so values persist in the DOM "
+            "between openings (D13, FR-029)"
+        )
+
+    def test_opening_the_form_clears_it(self):
+        """
+        FR-029: the form must be empty when opened for a *new* schedule.
+        Clearing on open (rather than on close) also covers the case where the
+        page was left with a half-filled form.
+        """
+        html = _reports_html()
+        match = re.search(
+            r"function\s+toggleNewScheduleForm\s*\([^)]*\)\s*\{(.*?)\n    \}",
+            html,
+            re.S,
+        )
+        assert match, "toggleNewScheduleForm is no longer present"
+        assert "resetScheduleForm" in match.group(1), (
+            "opening the new-schedule form does not clear it (D13, FR-029)"
+        )
+
+    @pytest.mark.parametrize(
+        "field",
+        ["sch-name", "sch-recipients", "sch-type", "sch-scope", "sch-freq", "sch-hour"],
+    )
+    def test_every_field_is_reset(self, field):
+        html = _reports_html()
+        match = re.search(r"function\s+resetScheduleForm\s*\([^)]*\)\s*\{(.*?)\n    \}", html, re.S)
+        assert match, "resetScheduleForm is not defined"
+        assert field in match.group(1), (
+            f"{field} is not cleared when the form is reset, so its previous "
+            f"value carries over (D13, FR-029)"
+        )
+
+    def test_agent_selection_is_cleared(self):
+        """
+        The agent picker is the field most likely to silently recreate a
+        deleted schedule against the wrong machine.
+        """
+        html = _reports_html()
+        match = re.search(r"function\s+resetScheduleForm\s*\([^)]*\)\s*\{(.*?)\n    \}", html, re.S)
+        assert "sch-agent" in match.group(1), "the agent selection is not cleared (D13)"

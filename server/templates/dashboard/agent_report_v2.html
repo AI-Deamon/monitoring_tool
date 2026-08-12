@@ -592,8 +592,9 @@
 
     // ===== CHANGE DATE =====
     function changeReportDate() {
-        const newDate = document.getElementById('report-date-input').value;
-        window.location.href = `/dashboard/agent/${AGENT_ID}/report-v2?date=${newDate}`;
+        const newDate = safeDateParam(document.getElementById('report-date-input').value);
+        const agentId = safeAgentId(AGENT_ID);
+        window.location.assign(`/dashboard/agent/${agentId}/report-v2?date=${newDate}`);
     }
 
     // ===== LOAD REPORT DATA =====

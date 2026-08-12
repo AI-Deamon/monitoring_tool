@@ -84,6 +84,7 @@ class AgentUpdater:
 
         self._current_version = self._read_current_version()
         self._last_update_check_reason = "not_checked"
+        self._last_rejected_version = None
         logger.info(f"[UPDATER] Initialized. Version={self._current_version}, "
                      f"Install={self.install_dir}")
 
@@ -257,6 +258,7 @@ class AgentUpdater:
                 return None
 
             server_version = data.get('version', '0.0.0')
+            self._last_rejected_version = server_version
 
             # Version comparison
             if self.compare_versions(server_version, self._current_version) <= 0:
@@ -856,40 +858,65 @@ class AgentUpdater:
 
     def report_health(self, status: str, version: str,
                       previous_version: str, details: str = ''):
-        """Report update health status to server."""
-        try:
-            url = f"{self.config.server_url}/api/v1/updates/health"
-            token = self.config.api_token or self.config.api_key
-            payload = {
-                'agent_id': self.config.agent_id,
-                'version': version,
-                'previous_version': previous_version,
-                'status': status,
-                'details': {
-                    'message': details,
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                },
-            }
+        """Report update health status to server.
 
-            data = json.dumps(payload).encode('utf-8')
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {token}',
-                'X-Agent-ID': self.config.agent_id,
-            }
+        This is the ONLY call that moves the server's update_status out of
+        pending/downloading/installing, so a silently-lost report leaves the
+        dashboard permanently stuck even though the agent itself is done.
+        Retries on transport failures (we don't know if the server ever saw
+        the request); a definitive response (including "not acknowledged")
+        is not retried - the server already answered.
+        """
+        url = f"{self.config.server_url}/api/v1/updates/health"
+        token = self.config.api_token or self.config.api_key
+        payload = {
+            'agent_id': self.config.agent_id,
+            'version': version,
+            'previous_version': previous_version,
+            'status': status,
+            'details': {
+                'message': details,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+            },
+        }
 
-            req = urllib.request.Request(url, data=data, headers=headers,
-                                         method='POST')
-            with urllib.request.urlopen(req, timeout=15) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                if result.get('acknowledged'):
-                    logger.info(f"[UPDATER] Health report sent: {status}")
-                    return
+        data = json.dumps(payload).encode('utf-8')
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {token}',
+            'X-Agent-ID': self.config.agent_id,
+        }
 
-            logger.warning("[UPDATER] Health report not acknowledged")
+        max_retries = 4
+        for attempt in range(1, max_retries + 1):
+            try:
+                req = urllib.request.Request(url, data=data, headers=headers,
+                                             method='POST')
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    if result.get('acknowledged'):
+                        logger.info(f"[UPDATER] Health report sent: {status}")
+                        return
 
-        except Exception as e:
-            logger.error(f"[UPDATER] Failed to report health: {e}")
+                logger.warning("[UPDATER] Health report not acknowledged")
+                return
+
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+                logger.warning(
+                    f"[UPDATER] Health report attempt {attempt}/{max_retries} "
+                    f"failed: {e}"
+                )
+                if attempt < max_retries:
+                    wait_seconds = min(2 ** attempt, 30)
+                    logger.info(f"[UPDATER] Retrying health report in {wait_seconds}s...")
+                    time.sleep(wait_seconds)
+                else:
+                    logger.error(
+                        f"[UPDATER] Health report failed after {max_retries} attempts"
+                    )
+            except Exception as e:
+                logger.error(f"[UPDATER] Failed to report health: {e}")
+                return
 
     def report_status(self, status: str, version: str = '', details: str = ''):
         """Report update progress to dashboard (downloading/installing)."""
@@ -1198,10 +1225,32 @@ class AgentUpdater:
             if metadata is None:
                 metadata = self.check_for_update()
             if not metadata:
+                reason = self._last_update_check_reason
                 logger.info(
                     f"[UPDATER] Update cycle complete - no update applied "
-                    f"(reason={self._last_update_check_reason})"
+                    f"(reason={reason})"
                 )
+                # Most rejection reasons are benign silence (nothing to do, or
+                # the server was unreachable this cycle - the next poll will
+                # just try again). But an explicit local rejection AFTER a
+                # valid server response was received (e.g. signature
+                # verification failure) must not stay silent: the server has
+                # no other way to learn about it, and agents.update_status
+                # only ever leaves 'pending' via a /health report. Without
+                # this, such an agent polls forever, is told "update
+                # available" every time, and never tells the server why it
+                # never proceeds.
+                benign = (
+                    reason in ("no_update_available", "already_up_to_date")
+                    or reason.startswith("server_unreachable")
+                )
+                if not benign and reason != "not_checked":
+                    self.report_health(
+                        'failed',
+                        self._last_rejected_version or 'unknown',
+                        self._current_version,
+                        f'Update check rejected: {reason}'
+                    )
                 return False
 
             version = metadata['version']

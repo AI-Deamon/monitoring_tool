@@ -1,8 +1,13 @@
+import os
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
+PG_SUPERUSER_PASSWORD = os.environ.get("PGPASSWORD")
+if not PG_SUPERUSER_PASSWORD:
+    raise SystemExit("PGPASSWORD environment variable must be set (local postgres superuser password)")
+
 # Step 1: Drop and recreate the database as superuser
-conn = psycopg2.connect(dbname="postgres", user="postgres", password="moon", host="localhost", port=5432)
+conn = psycopg2.connect(dbname="postgres", user="postgres", password=PG_SUPERUSER_PASSWORD, host="localhost", port=5432)
 conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
 cur = conn.cursor()
 
@@ -14,7 +19,7 @@ conn.close()
 print("Database sentinel_test recreated successfully")
 
 # Step 2: Grant schema privileges to sentinel_user
-conn2 = psycopg2.connect(dbname="sentinel_test", user="postgres", password="moon", host="localhost", port=5432)
+conn2 = psycopg2.connect(dbname="sentinel_test", user="postgres", password=PG_SUPERUSER_PASSWORD, host="localhost", port=5432)
 conn2.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
 cur2 = conn2.cursor()
 cur2.execute("GRANT ALL ON SCHEMA public TO sentinel_user")

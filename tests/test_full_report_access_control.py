@@ -29,7 +29,28 @@ def _mock_user(role='user'):
     u.linked_username = 'other_user'
     u.session_version = 1
     u.is_active = True
+    # Feature 037 / FR-006f: login_required redirects to the change-password
+    # page while this flag is set. A MagicMock auto-creates every attribute as a
+    # truthy object, so without setting it explicitly every request here would
+    # be redirected (302) before reaching the access-control check under test
+    # (403). Set it False so these tests exercise authorization, not rotation.
+    u.must_change_password = False
     return u
+
+
+def _valid_tab_session():
+    """
+    A live tab session, for tests that mock the database.
+
+    Feature 037 / FR-002a: login_required now requires a valid tab_session row
+    as well as the session cookie. These tests mock DashboardUser.query, so
+    TabSession.query has nothing behind it either — without this the request is
+    redirected (302) before the authorization check under test can return 403.
+    """
+    tab = MagicMock()
+    tab.expiry_reason.return_value = None
+    tab.revoked_at = None
+    return tab
 
 
 def test_full_report_returns_403_for_foreign_agent(client):
@@ -44,6 +65,7 @@ def test_full_report_returns_403_for_foreign_agent(client):
         sess['session_version'] = 1
 
     with patch('auth.DashboardUser') as mock_du, \
+         patch('auth.lookup_tab_session', return_value=_valid_tab_session()), \
          patch('server_dashboard.can_view_agent', return_value=False), \
          patch('server_dashboard.server_models') as mock_models:
 
@@ -68,6 +90,7 @@ def test_full_report_allows_linked_agent(client):
         sess['session_version'] = 1
 
     with patch('auth.DashboardUser') as mock_du, \
+         patch('auth.lookup_tab_session', return_value=_valid_tab_session()), \
          patch('server_dashboard.can_view_agent', return_value=True), \
          patch('server_dashboard.server_models') as mock_models, \
          patch('server_dashboard._compute_core_hours_utilization', return_value={

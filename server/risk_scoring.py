@@ -257,10 +257,15 @@ class RiskScoringEngine:
             eol_date = eol_date.replace(tzinfo=timezone.utc)
 
         days = (eol_date - now).days
+        # FR-007: these strings are shown to users, so the date must use the
+        # canonical format. Most strftime calls in the server are dict keys, query
+        # defaults or wire formats and are deliberately left alone — these two are
+        # display text.
+        from utils.datetime_format import format_date
         if days > 0:
-            return f"EOL in {days} days ({eol_date.strftime('%Y-%m-%d')})"
+            return f"EOL in {days} days ({format_date(eol_date)})"
         else:
-            return f"EOL was {abs(days)} days ago ({eol_date.strftime('%Y-%m-%d')})"
+            return f"EOL was {abs(days)} days ago ({format_date(eol_date)})"
 
     @staticmethod
     def _score_vulnerability(cvss_max: float, cve_count: int, exploit_available: bool) -> float:

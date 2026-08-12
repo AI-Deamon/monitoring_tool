@@ -59,7 +59,9 @@
         renderTop5Agents(data);
 
         // Update Last Updated
-        document.getElementById('last-updated').textContent = "Last updated: " + new Date().toLocaleTimeString();
+        // FR-007: canonical format via the shared formatter, not the browser locale.
+        document.getElementById('last-updated').textContent =
+            "Last updated: " + DateFmt.formatDateTime(new Date());
 
         // -- Charts --
         console.log('About to render charts...');
@@ -184,7 +186,7 @@
             if (data.top_idle_agents && data.top_idle_agents.length > 0) {
                 idleList.innerHTML = data.top_idle_agents.slice(0, 3).map((agent, index) => `
                     <li class="flex justify-between items-center gap-1 text-xs">
-                        <span class="text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname.substring(0, 8)}</span>
+                        <span class="text-gray-900 dark:text-gray-100 min-w-0 flex-1 truncate"><strong>${index + 1}.</strong> ${AgentFmt.nameHtml(agent)}</span>
                         <span class="font-mono text-warning-600 dark:text-warning-400 text-[11px]">${formatTime(agent.idle_seconds)}</span>
                     </li>
                 `).join('');
@@ -199,7 +201,7 @@
             if (data.top_active_agents && data.top_active_agents.length > 0) {
                 activeList.innerHTML = data.top_active_agents.slice(0, 3).map((agent, index) => `
                     <li class="flex justify-between items-center gap-1 text-xs">
-                        <span class="text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname.substring(0, 8)}</span>
+                        <span class="text-gray-900 dark:text-gray-100 min-w-0 flex-1 truncate"><strong>${index + 1}.</strong> ${AgentFmt.nameHtml(agent)}</span>
                         <span class="font-mono text-success-600 dark:text-success-400 text-[11px]">${formatTime(agent.active_seconds)}</span>
                     </li>
                 `).join('');
@@ -214,7 +216,7 @@
             if (data.top_locked_agents && data.top_locked_agents.length > 0) {
                 lockedList.innerHTML = data.top_locked_agents.slice(0, 3).map((agent, index) => `
                     <li class="flex justify-between items-center gap-1 text-xs">
-                        <span class="text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname.substring(0, 8)}</span>
+                        <span class="text-gray-900 dark:text-gray-100 min-w-0 flex-1 truncate"><strong>${index + 1}.</strong> ${AgentFmt.nameHtml(agent)}</span>
                         <span class="font-mono text-gray-600 dark:text-gray-400 text-[11px]">${formatTime(agent.locked_seconds)}</span>
                     </li>
                 `).join('');

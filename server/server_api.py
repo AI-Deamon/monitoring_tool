@@ -9,11 +9,44 @@ from flask import Blueprint, request, jsonify, current_app
 from extensions import db
 import server_models
 from server_auth import generate_api_key, generate_api_token, require_auth
+from server_telemetry import parse_agent_timestamp
 from schemas import RegisterSchema, AppInventorySchema, DomainUsageSchema, HeartbeatSchema
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('api', __name__)
+
+
+def inventory_dedup_key(app_data):
+    """
+    Identity of one installed application, for de-duplicating an inventory batch.
+
+    Returns None for an entry with no usable name, so callers can skip it.
+
+    Feature 037 / FR-018, FR-019. This previously keyed on name alone, which
+    de-duplicated correctly for repeated reports (FR-018) but also collapsed
+    genuinely distinct installations — two versions of the same application, or
+    a per-machine and a per-user install of it — into a single row. FR-019
+    requires those to stay distinguishable, so version and install location are
+    part of the identity.
+
+    Name matching is case-insensitive and ignores surrounding whitespace: the
+    same application reported with inconsistent casing is one application, not
+    two. Version and location are compared exactly, since a case difference
+    there is meaningful.
+
+    Must stay in step with the uniqueness constraint on AppInventory. If the key
+    is wider than the constraint, ingestion computes distinct entries and the
+    insert then fails on a constraint violation.
+    """
+    name = (app_data.get('name') or '').strip()
+    if not name:
+        return None
+    return (
+        name.casefold(),
+        (app_data.get('version') or '').strip(),
+        (app_data.get('install_location') or '').strip(),
+    )
 
 
 # =============================================================================
@@ -505,19 +538,22 @@ def inventory():
             deleted_count = server_models.AppInventory.query.filter_by(agent_id=agent_id).delete()
             logger.debug(f"[AGENT {agent_id}] Deleted {deleted_count} old inventory records")
             
-            # Track seen apps to prevent duplicates in the same batch
+            # Track seen apps to prevent duplicates in the same batch.
+            # Keyed on name + version + install location (FR-018, FR-019) so a
+            # repeated report collapses, but two genuinely distinct installs of
+            # the same application do not. See inventory_dedup_key().
             seen_apps = set()
-            
+
             for app_data in apps:
                 app_name = app_data.get('name')
-                if not app_name:
+                dedup_key = inventory_dedup_key(app_data)
+                if dedup_key is None:
                     continue
-                
-                # Skip if we've already processed this app name in this batch
-                if app_name in seen_apps:
+
+                if dedup_key in seen_apps:
                     continue
-                
-                seen_apps.add(app_name)
+
+                seen_apps.add(dedup_key)
                 
                 # Parse install_date - handle various formats
                 install_date_raw = app_data.get('install_date')
@@ -1307,15 +1343,11 @@ def domains():
                 url = domain_data.get('url')
                 browser = domain_data.get('browser')
                 visited_str = domain_data.get('visited_at') or domain_data.get('timestamp')
-                if visited_str:
-                    try:
-                        visited_at = datetime.fromisoformat(visited_str.replace('Z', '+00:00'))
-                        # Convert to naive datetime for DB comparison
-                        visited_at = visited_at.replace(tzinfo=None) if visited_at.tzinfo else visited_at
-                    except:
-                        visited_at = datetime.now(timezone.utc)
-                else:
-                    visited_at = datetime.now(timezone.utc)
+                visited_at = (
+                    parse_agent_timestamp(visited_str, agent_id=agent_id)
+                    if visited_str
+                    else datetime.now(timezone.utc).replace(tzinfo=None)
+                )
             
             if not domain:
                 continue
@@ -1426,6 +1458,10 @@ def asset_hardware():
         existing.manufacturer = identity.get('manufacturer', '')
         existing.model = identity.get('model', '')
         existing.bios_uuid = identity.get('bios_uuid', '')
+        # D06 / FR-015: firmware version. Collected by the agent but previously
+        # dropped here, so it never reached the database and the dashboard field
+        # stayed a placeholder. Distinct from bios_uuid, which is an identifier.
+        existing.bios_version = identity.get('bios_version', '')
         existing.system_uuid = identity.get('system_uuid', '')
         existing.asset_tag = identity.get('asset_tag', '')
         existing.domain = identity.get('domain', '')
@@ -1450,6 +1486,13 @@ def asset_hardware():
         
         existing.disks_json = json.dumps(hardware.get('disks', []))
         existing.motherboard = hardware.get('motherboard', '')
+        
+        # Battery fields (laptops only; left NULL when the agent reports none)
+        battery = hardware.get('battery') or {}
+        existing.battery_name = battery.get('name') or None
+        existing.battery_health_percent = battery.get('health_percent')
+        existing.battery_charge_percent = battery.get('charge_percent')
+        existing.battery_cycle_count = battery.get('cycle_count')
         
         # Network fields
         existing.primary_mac = network.get('primary_mac', '')

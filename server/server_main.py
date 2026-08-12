@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -88,9 +88,16 @@ def apply_startup_fixes(app):
 def sync_screen_time_background(app):
     """
     Background task: Sync ALL data every 5 minutes.
-    - Syncs screen_time from telemetry
+    - Syncs screen_time from spans for the fully-elapsed day (reconcile-and-set)
     - Syncs app_usage from app_sessions (source of truth)
     - Syncs domain_usage from domain_sessions (source of truth)
+
+    Spans are the sanctioned elapsed-day writer (FR-006): for the last fully
+    elapsed UTC day, sync_screen_time_from_spans overwrites the row from the
+    full span sum. The cumulative counter in process_screentime_event remains
+    the in-progress-day live estimate only. The dedicated daily job
+    (reconcile_elapsed_screentime_days) covers the full 7-day window for late
+    spans.
     """
     from leader_election import get_leader
     leader = get_leader(app)
@@ -102,15 +109,15 @@ def sync_screen_time_background(app):
             with app.app_context():
                 from sqlalchemy import text
 
-                # screen_time.active_seconds is intentionally NOT synced here.
-                # process_screentime_delta (server_telemetry.py) is the
-                # documented, additive, agent-is-the-source-of-truth writer
-                # for screen_time - this job used to also call
-                # sync_screen_time_from_sessions(), which independently
-                # recomputed active_seconds from app_sessions and merged it
-                # in via GREATEST(), a one-way ratchet that could never
-                # correct itself downward if app_sessions ever contained
-                # overlapping/oversized rows. Removed; see plan doc.
+                # screen_time for the fully-elapsed day comes from spans, not
+                # from a cumulative merge: sync_screen_time_from_spans is the
+                # sanctioned elapsed-day writer (reconcile-and-set, idempotent,
+                # corrects downward). The per-event cumulative writer
+                # (process_screentime_event) only estimates the in-progress
+                # day. This job used to call sync_screen_time_from_sessions(),
+                # which recomputed active_seconds from app_sessions and merged
+                # it in via GREATEST(), a one-way ratchet that could never
+                # correct itself downward. Removed; see plan doc.
 
                 # Pass an explicit UTC date rather than relying on
                 # Postgres's CURRENT_DATE, which resolves to this
@@ -135,9 +142,16 @@ def sync_screen_time_background(app):
                     text("SELECT sync_domain_usage_from_sessions(:d)"),
                     {"d": today_utc},
                 )
-                
+
+                # Reconcile the last fully-elapsed UTC day from spans
+                # (authoritative; see docstring).
+                db.session.execute(
+                    text("SELECT sync_screen_time_from_spans(:d)"),
+                    {"d": today_utc - timedelta(days=1)},
+                )
+
                 db.session.commit()
-                logger.info("[SYNC] Data synced: app_usage + domain_usage updated")
+                logger.info("[SYNC] Data synced: app_usage + domain_usage + screen_time-from-spans updated")
         except Exception as e:
             logger.error(f"[SYNC] Error syncing data: {e}")
 

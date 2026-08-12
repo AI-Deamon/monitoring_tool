@@ -165,26 +165,16 @@ async function loadFullReport(isManual = false) {
                 `;
         }
 
-        document.getElementById('registered-at').textContent = data.agent.registered_at
-            ? new Date(data.agent.registered_at).toLocaleDateString()
-            : '-';
+        // FR-007: canonical format, viewer timezone. Was toLocaleDateString(),
+        // which follows the BROWSER's locale — the same screen rendered
+        // differently for different users.
+        document.getElementById('registered-at').textContent =
+            DateFmt.formatDate(data.agent.registered_at);
         document.getElementById('first-seen-today').textContent = data.agent.first_seen_today
-            ? new Date(data.agent.first_seen_today).toLocaleTimeString('en-IN', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            })
+            ? DateFmt.formatDateTime(data.agent.first_seen_today)
             : 'No activity';
         document.getElementById('last-seen-today').textContent = data.agent.last_seen_today
-            ? new Date(data.agent.last_seen_today).toLocaleString('en-IN', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            })
+            ? DateFmt.formatDateTime(data.agent.last_seen_today)
             : 'No activity';
 
         // Live status
@@ -351,11 +341,7 @@ function renderDomainVisits(visitsData) {
         div.innerHTML = `
 <span class="text-xs text-gray-500 dark:text-gray-400 font-mono w-20">
   ${v.visited_at
-                ? new Date(v.visited_at).toLocaleTimeString('en-IN', {
-                    timeZone: 'Asia/Kolkata',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                })
+                ? DateFmt.formatDateTime(v.visited_at).split(' ')[1]
                 : ''}
 </span>
 
@@ -423,9 +409,8 @@ function cleanInstallLocation(location) {
 function formatInstallDate(dateStr) {
     if (!dateStr || dateStr === '-') return '-';
     try {
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return dateStr;
-        return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        const formatted = DateFmt.formatDate(dateStr);
+        return formatted === DateFmt.EMPTY_DISPLAY ? dateStr : formatted;
     } catch {
         return dateStr;
     }
@@ -552,7 +537,29 @@ async function loadHardware() {
         ? hw.disks.reduce((sum, d) => sum + (d.size_gb || 0), 0).toFixed(0)
         : null;
     setText('hw-disk', totalDisk ? `${totalDisk} GB` : '-');
-    setText('hw-bios', hw.motherboard || '-');
+    // Battery health replaces the old "BIOS Version" tile. Color-coded health
+    // bar (green >= 80%, yellow 60-79%, red < 60%) with charge % and cycles.
+    const battery = hw.battery;
+    const bHealth = document.getElementById('hw-battery-health');
+    const bName = document.getElementById('hw-battery-name');
+    const bBar = document.getElementById('hw-battery-bar');
+    const bCharge = document.getElementById('hw-battery-charge');
+    const bCycles = document.getElementById('hw-battery-cycles');
+    if (battery && battery.name) {
+        bHealth.textContent = battery.health_percent != null ? `${Math.round(battery.health_percent)}%` : '-';
+        bName.textContent = battery.name;
+        const pct = Math.max(0, Math.min(100, battery.health_percent || 0));
+        bBar.style.width = `${pct}%`;
+        bBar.style.backgroundColor = pct >= 80 ? '#22c55e' : pct >= 60 ? '#eab308' : '#ef4444';
+        bCharge.textContent = battery.charge_percent != null ? `Charge ${Math.round(battery.charge_percent)}%` : '';
+        bCycles.textContent = battery.cycle_count != null ? `${battery.cycle_count} cycles` : '';
+    } else {
+        bHealth.textContent = 'No battery';
+        bName.textContent = '';
+        bBar.style.width = '0%';
+        bCharge.textContent = '';
+        bCycles.textContent = '';
+    }
 
     // Network
     setText('hw-ip', hw.primary_ip);
@@ -566,7 +573,7 @@ async function loadHardware() {
     setText('hw-bitlocker', hw.bitlocker_status);
 
     // Meta
-    setText('hw-collected-at', hw.collected_at ? new Date(hw.collected_at).toLocaleString('en-IN') : '-');
+    setText('hw-collected-at', DateFmt.formatDateTime(hw.collected_at));
     setText('hw-hash', hw.collection_hash);
 }
 
@@ -721,8 +728,8 @@ async function loadSystemVisibility() {
     const updatedEl = document.getElementById('system-visibility-updated');
     if (updatedEl) {
         if (data.timestamp) {
-            const ts = new Date(data.timestamp);
-            updatedEl.textContent = `Latest snapshot: ${isNaN(ts.getTime()) ? data.timestamp : ts.toLocaleString('en-IN')}`;
+            const snapshot = DateFmt.formatDateTime(data.timestamp);
+            updatedEl.textContent = `Latest snapshot: ${snapshot === DateFmt.EMPTY_DISPLAY ? data.timestamp : snapshot}`;
         } else {
             updatedEl.textContent = 'Latest snapshot: -';
         }
@@ -983,7 +990,7 @@ function renderCriticalAlerts(alerts) {
                         </div>
                         <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">${escapeHtml(details.description || item.indicator_type)}</p>
                         <div class="mt-2 flex items-center gap-4 text-xs text-gray-400">
-                            <span>Detected: ${new Date(item.first_detected).toLocaleDateString()}</span>
+                            <span>Detected: ${DateFmt.formatDate(item.first_detected)}</span>
                             <span>Score Impact: -${item.severity === 'critical' ? 20 : 15}</span>
                         </div>
                     </div>

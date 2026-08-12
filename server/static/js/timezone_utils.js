@@ -1,185 +1,83 @@
 /**
- * SentinelEdge Dashboard - IST Timezone Utilities
- * All times are stored in UTC in the database
- * This utility converts UTC timestamps to IST for display
+ * SentinelEdge Dashboard - date/time display helpers.
+ *
+ * ---------------------------------------------------------------------------
+ * Rewritten for feature 037 (FR-007, FR-008). Previously "IST Timezone
+ * Utilities": every function here hardcoded Asia/Kolkata and appended a literal
+ * " IST" suffix, and each used its own toLocaleString() options — a second,
+ * competing date formatter alongside the rest of the dashboard.
+ *
+ * That is exactly the missing-abstraction problem behind six reported defects.
+ * All of these functions now delegate to DateFmt (js/datetime_format.js), which
+ * renders DD-MM-YYYY / DD-MM-YYYY HH:mm in the VIEWER's timezone.
+ *
+ * The function NAMES are deliberately unchanged, including their "IST" suffixes.
+ * Renaming them would mean touching every call site in one change; keeping them
+ * fixes every caller at once and can be renamed later as pure cleanup. The names
+ * are now historical, not descriptive — none of these is IST-specific.
+ *
+ * Requires js/datetime_format.js to be loaded first (base.html does this).
+ * ---------------------------------------------------------------------------
  */
 
-// IST Offset: UTC + 5 hours 30 minutes
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-
 /**
- * Convert UTC date to IST
- * @param {string|Date} date - UTC date string or Date object
- * @returns {Date} IST Date object
+ * Parse a stored timestamp into a Date.
+ * Naive strings are treated as UTC, matching how the API serves them.
+ * Historical name; no longer converts to IST.
  */
 function toIST(date) {
-    if (!date) return null;
-
-    // If string, append 'Z' to treat as UTC
-    if (typeof date === 'string') {
-        if (!date.endsWith('Z') && !date.includes('+')) {
-            date = date + 'Z';
-        }
-        date = new Date(date);
-    }
-
-    // Add IST offset
-    return new Date(date.getTime() + IST_OFFSET_MS);
+    return DateFmt.parseStored(date);
 }
 
-/**
- * Format datetime in IST - Full format
- * Example: "Dec 17, 2025, 10:30 AM IST"
- */
+/** DD-MM-YYYY HH:mm in the viewer's timezone. */
 function formatDateTimeIST(dateStr) {
-    if (!dateStr) return 'N/A';
-
-    let ts = dateStr;
-    if (typeof ts === 'string' && !ts.endsWith('Z') && !ts.includes('+')) {
-        ts = ts + 'Z';
-    }
-
-    const date = new Date(ts);
-    const options = {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-        timeZone: 'Asia/Kolkata'
-    };
-
-    return date.toLocaleString('en-IN', options) + ' IST';
+    return DateFmt.formatDateTime(dateStr);
 }
 
-/**
- * Format time only in IST
- * Example: "10:30 AM IST"
- */
+/** HH:mm in the viewer's timezone. */
 function formatTimeIST(dateStr) {
-    if (!dateStr) return 'N/A';
-
-    let ts = dateStr;
-    if (typeof ts === 'string' && !ts.endsWith('Z') && !ts.includes('+')) {
-        ts = ts + 'Z';
-    }
-
-    const date = new Date(ts);
-    const options = {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-        timeZone: 'Asia/Kolkata'
-    };
-
-    return date.toLocaleString('en-IN', options) + ' IST';
+    const text = DateFmt.formatDateTime(dateStr);
+    return text === DateFmt.EMPTY_DISPLAY ? text : text.split(' ')[1];
 }
 
-/**
- * Format date only in IST
- * Example: "Dec 17, 2025"
- */
+/** DD-MM-YYYY in the viewer's timezone. */
 function formatDateOnlyIST(dateStr) {
-    if (!dateStr) return 'N/A';
-
-    let ts = dateStr;
-    if (typeof ts === 'string' && !ts.endsWith('Z') && !ts.includes('+')) {
-        ts = ts + 'Z';
-    }
-
-    const date = new Date(ts);
-    const options = {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        timeZone: 'Asia/Kolkata'
-    };
-
-    return date.toLocaleString('en-IN', options);
+    return DateFmt.formatDate(dateStr);
 }
 
 /**
- * Format datetime with seconds in IST
- * Example: "Dec 17, 2025, 10:30:15 AM IST"
+ * DD-MM-YYYY HH:mm with the timezone labelled (FR-008).
+ * Historical name mentions seconds; the canonical format does not include them,
+ * and no caller depended on second-level precision.
  */
 function formatDateTimeISTWithSeconds(dateStr) {
-    if (!dateStr) return 'N/A';
-
-    let ts = dateStr;
-    if (typeof ts === 'string' && !ts.endsWith('Z') && !ts.includes('+')) {
-        ts = ts + 'Z';
-    }
-
-    const date = new Date(ts);
-    const options = {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-        timeZone: 'Asia/Kolkata'
-    };
-
-    return date.toLocaleString('en-IN', options) + ' IST';
+    return DateFmt.formatDateTimeLabelled(dateStr);
 }
 
-/**
- * Get current time in IST
- * Example: "Dec 17, 2025, 10:30:15 AM IST"
- */
+/** Current time, DD-MM-YYYY HH:mm in the viewer's timezone. */
 function getCurrentTimeIST() {
-    const now = new Date();
-    const options = {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-        timeZone: 'Asia/Kolkata'
-    };
-
-    return now.toLocaleString('en-IN', options) + ' IST';
+    return DateFmt.formatDateTime(new Date());
 }
 
 /**
- * Format long date in IST for reports
- * Example: "Monday, December 17, 2025"
+ * DD-MM-YYYY. Historical name says "long" — it previously rendered a verbose
+ * locale form, which is a second format competing with the canonical one.
  */
 function formatDateLongIST(dateStr) {
-    if (!dateStr) return 'N/A';
-
-    const date = new Date(dateStr + 'T00:00:00Z');
-    const options = {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        timeZone: 'Asia/Kolkata'
-    };
-
-    return date.toLocaleDateString('en-IN', options);
+    return DateFmt.formatDate(dateStr);
 }
 
 /**
- * Get relative time (e.g., "5 minutes ago")
- * Returns IST timestamp with relative time
+ * Relative age ("5 minutes ago"), falling back to an absolute timestamp for
+ * anything older than a week.
  */
 function getRelativeTimeIST(dateStr) {
     if (!dateStr) return 'Never';
 
-    let ts = dateStr;
-    if (typeof ts === 'string' && !ts.endsWith('Z') && !ts.includes('+')) {
-        ts = ts + 'Z';
-    }
+    const date = DateFmt.parseStored(dateStr);
+    if (!date) return 'Never';
 
-    const date = new Date(ts);
-    const now = new Date();
-    const seconds = Math.floor((now - date) / 1000);
+    const seconds = Math.floor((new Date() - date) / 1000);
 
     if (seconds < 0) return 'Just now';
     if (seconds < 60) return `${seconds} seconds ago`;
@@ -187,14 +85,13 @@ function getRelativeTimeIST(dateStr) {
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
     if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
 
-    // For older dates, show full IST timestamp
-    return formatDateTimeIST(dateStr);
+    return DateFmt.formatDateTime(dateStr);
 }
 
-/**
- * Helper for duration formatting (NOT timezone-related)
- * Shows seconds when time is under 1 minute
- */
+/* -------------------------------------------------------------------------
+ * Duration helpers — NOT timezone related, unchanged.
+ * ---------------------------------------------------------------------- */
+
 function formatTime(seconds) {
     if (!seconds || seconds < 0) return '0s';
 
@@ -218,6 +115,3 @@ function formatTimeShort(seconds) {
     if (minutes > 0) return `${minutes}m`;
     return `${secs}s`;
 }
-
-// Console log to confirm loading
-console.log('🌏 IST Timezone Utilities loaded - All times in Asia/Kolkata (UTC+5:30)');

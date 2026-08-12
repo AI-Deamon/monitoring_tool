@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Edit User - SentinelEdge</title>
     <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
+  <!-- Tailwind (precompiled) -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
 <style nonce="{{ csp_nonce() }}">
   * {
@@ -244,9 +245,9 @@
       <div class="mb-6 p-4 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-700 leading-6">
           <strong>Username:</strong> {{ user.username }}<br>
           <strong>Created:</strong>
-          {{ user.created_at.strftime('%Y-%m-%d %H:%M') if user.created_at else 'Unknown' }}<br>
+          {{ user.created_at | fmt_datetime if user.created_at else 'Unknown' }}<br>
           <strong>Last Login:</strong>
-          {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Never' }}
+          {{ user.last_login | fmt_datetime if user.last_login else 'Never' }}
       </div>
 
       <form method="POST" action="{{ url_for('auth.edit_user', user_id=user.id) }}" class="space-y-6">

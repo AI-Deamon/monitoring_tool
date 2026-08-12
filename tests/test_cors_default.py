@@ -3,6 +3,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
 
 class TestCorsDefault(unittest.TestCase):
+    def setUp(self):
+        self._saved = {
+            'CORS_ORIGINS': os.environ.get('CORS_ORIGINS'),
+            'FLASK_ENV': os.environ.get('FLASK_ENV'),
+        }
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
     def test_default_origins_is_not_wildcard(self):
         os.environ.pop('CORS_ORIGINS', None)
         import importlib, server_app

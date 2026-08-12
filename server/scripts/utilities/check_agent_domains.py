@@ -80,9 +80,9 @@ def main():
     print("SentinelEdge - Agent Domain Data Checker")
     print("=" * 50)
     
-    # Set database URL from environment
-    os.environ['DATABASE_URL'] = 'postgresql://sentinelserver:sentinel_edge_secure@localhost:5432/sentinel_edge_v1'
-    
+    if not os.environ.get('DATABASE_URL'):
+        raise SystemExit("DATABASE_URL environment variable must be set")
+
     check_agent_domain_data(agent_id)
 
 if __name__ == "__main__":

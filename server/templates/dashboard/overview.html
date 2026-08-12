@@ -521,8 +521,9 @@ async function loadUtilizationTrend() {
 
         const labels = (data.labels || []).map(iso => {
             // "2026-07-20" -> "Jul 20"
-            const d = new Date(iso + 'T00:00:00');
-            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            // Chart axis label. Kept short, but via the shared formatter so it
+            // cannot drift into a browser-locale format (FR-007).
+            return DateFmt.formatDate(iso + 'T00:00:00').slice(0, 5);  // DD-MM
         });
         const series = data.series || {};
         const hasData = TREND_SERIES.some(s => (series[s.key] || []).some(v => v > 0));

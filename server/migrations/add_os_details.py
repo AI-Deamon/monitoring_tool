@@ -140,11 +140,11 @@ if __name__ == '__main__':
     # Create minimal Flask app for database connection
     app = Flask(__name__)
     
-    # Load config from environment or use defaults
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
-        'DATABASE_URL', 
-        'postgresql://sentineledge:sentineledge@localhost:5432/sentineledge'
-    )
+    # Load config from environment
+    db_url = os.environ.get('DATABASE_URL')
+    if not db_url:
+        raise SystemExit("DATABASE_URL environment variable must be set")
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
     db.init_app(app)

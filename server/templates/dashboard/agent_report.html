@@ -304,8 +304,9 @@
   });
 
   function changeDate() {
-    const date = document.getElementById('report-date').value;
-    window.location.href = `/dashboard/agent/${AGENT_ID}/report?date=${date}`;
+    const date = safeDateParam(document.getElementById('report-date').value);
+    const agentId = safeAgentId(AGENT_ID);
+    window.location.assign(`/dashboard/agent/${agentId}/report?date=${date}`);
   }
 
   async function loadReport(dateStr) {
@@ -367,10 +368,19 @@
     document.getElementById('r-username').textContent = agent.username || 'N/A';
     document.getElementById('r-os').textContent = agent.os || 'Unknown';
     document.getElementById('r-agent-id').textContent = agent.agent_id || '';
-    document.getElementById('r-first-seen').textContent = agent.registered_at ?
-      new Date(agent.registered_at).toLocaleDateString() : 'N/A';
-    document.getElementById('r-last-seen').textContent = agent.last_seen ?
-      new Date(agent.last_seen).toLocaleString() : 'N/A';
+    // D19 / FR-012: this field is labelled "First Seen" but read agent.registered_at
+    // — the REGISTRATION moment — and rendered it with toLocaleDateString(), which
+    // drops the time entirely. Both halves of QA's report ("showing registered date
+    // and not displaying time") were this one line.
+    //
+    // The API already serves a correct first_seen (agent.first_activity_at, the
+    // first real telemetry activity) alongside registered_at; the UI simply read
+    // the wrong key. Fall back to registration only when the agent has never
+    // reported, so the field is never blank.
+    document.getElementById('r-first-seen').textContent =
+      DateFmt.formatDateTime(agent.first_seen || agent.registered_at);
+    document.getElementById('r-last-seen').textContent =
+      DateFmt.formatDateTime(agent.last_seen);
   }
 
   function renderScreenTime(st) {
@@ -619,24 +629,20 @@
     return `${minutes}m`;
   }
 
+  // FR-007: one format product-wide. This rendered 'en-US' long form
+  // ("Friday, August 7, 2026"), which is a second format competing with the
+  // canonical one — precisely what SC-004 forbids.
   function formatDateLong(dateStr) {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
+    return DateFmt.formatDate(dateStr);
   }
 
+  // D11 / FR-010: the report generation timestamp. This added a fixed 5.5-hour
+  // offset to a UTC instant AND passed timeZone: 'Asia/Kolkata' to
+  // toLocaleString — double-shifting by +05:30, so the "generated" time was
+  // 5.5 hours ahead of when the report was actually produced. That is the
+  // reported "generated report time is not correct".
   function getCurrentTimeIST() {
-    const now = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
-    const istTime = new Date(now.getTime() + istOffset);
-    return istTime.toLocaleString('en-US', {
-      timeZone: 'Asia/Kolkata',
-      hour12: true
-    });
+    return DateFmt.formatDateTime(new Date());
   }
 
   async function fetchJSON(url) {

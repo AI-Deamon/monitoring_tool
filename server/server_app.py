@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, send_file, request, g
+from flask import Flask, jsonify, send_file, request, g, session
 from extensions import db
 from server_config import get_config
 import logging
@@ -47,6 +47,17 @@ def create_app():
     
     # H-17 FIX: Explicit XSS protection via Jinja autoescaping
     app.jinja_env.autoescape = True  # Enabled by default, but make it explicit
+
+    # Feature 037, FR-007: the single canonical date presentation, registered on
+    # the Flask environment so server-rendered pages match client-rendered ones.
+    # A value shown by Jinja and the same value shown by DateFmt must look
+    # identical, or SC-004 ("zero deviating screens") cannot hold.
+    from utils.datetime_format import format_date as _fmt_date
+    from utils.datetime_format import format_datetime as _fmt_datetime
+    app.jinja_env.filters['fmt_date'] = _fmt_date
+    app.jinja_env.filters['fmt_datetime'] = _fmt_datetime
+    from utils.datetime_format import format_datetime_labelled as _fmt_dt_lbl
+    app.jinja_env.filters['fmt_datetime_tz'] = _fmt_dt_lbl
     
     # H-17 FIX: Add Content-Security-Policy header for defense-in-depth
     @app.before_request
@@ -66,11 +77,17 @@ def create_app():
         # itself has no 'unsafe-inline', so attacker-injected <script>
         # tags are blocked.
         nonce = getattr(g, "csp_nonce", "")
+        # Tailwind is precompiled to static/css/tailwind.css (no runtime/CDN),
+        # so script-src needs no CDN host and no 'unsafe-eval'. Inline
+        # <script>/<style> blocks use 'nonce-{nonce}'. 'unsafe-inline' remains
+        # only where it is unavoidable:
+        #   - script-src-attr : inline onclick/onchange handlers
+        #   - style-src       : inline style="..." attributes in templates
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; "
             f"script-src 'self' 'nonce-{nonce}'; "
             "script-src-attr 'unsafe-inline'; "
-            f"style-src 'self' 'nonce-{nonce}'; "
+            "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
             "font-src 'self'; "
             "connect-src 'self'; "
@@ -85,14 +102,36 @@ def create_app():
         response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
         if config.USE_TLS:
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+
+        # Feature 037 / FR-002: authenticated pages must not survive sign-out in
+        # the browser cache. Without no-store, pressing Back after signing out
+        # re-renders a dashboard page from cache — the page is stale and the
+        # session is dead, but a bystander still sees monitored employee data.
+        #
+        # Applied only to authenticated responses: static assets are cacheable
+        # and making them no-store would discard that for no benefit.
+        if 'user_id' in session:
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
         return response
-    
+
     @app.before_request
     def _enforce_https():
         if os.getenv('FORCE_HTTPS', 'false').lower() == 'true' and not request.is_secure \
                 and request.headers.get('X-Forwarded-Proto', 'http') != 'https':
             from flask import redirect
             return redirect(request.url.replace('http://', 'https://', 1), code=308)
+
+    @app.before_request
+    def _static_methods_guard():
+        # Burp #1 (client-side desync): a POST with a smuggled second request was
+        # accepted on a /static/ path. Static assets are read-only, so reject any
+        # non-idempotent method before the body is processed.
+        if request.path.startswith('/static/') \
+                and request.method not in ('GET', 'HEAD', 'OPTIONS'):
+            from flask import abort
+            abort(405)
     
     # ================================================================
     # ISSUE-001 FIX: Enforce strong SECRET_KEY in production

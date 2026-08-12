@@ -71,21 +71,16 @@ async function loadSelectors() {
 
     // Handle Date Change
     dateSelect.addEventListener('change', (e) => {
-        const newDate = e.target.value;
-        const currentUrl = new URL(window.location.href);
-        if (newDate) {
-            currentUrl.searchParams.set('date', newDate);
-        } else {
-            currentUrl.searchParams.delete('date');
-        }
-        window.location.href = currentUrl.toString();
+        const newDate = safeDateParam(e.target.value);
+        const url = new URL(window.location.pathname, window.location.origin);
+        if (newDate) url.searchParams.set('date', newDate);
+        window.location.assign(url.pathname + url.search);  // same-origin, path+query only
     });
 
     // Handle Agent Change
     agentSelect.addEventListener('change', (e) => {
-        const agentId = e.target.value;
-        const currentUrl = new URL(window.location.href);
-        const dateParam = currentUrl.searchParams.get('date');
+        const agentId = safeAgentId(e.target.value);
+        const dateParam = safeDateParam(new URLSearchParams(window.location.search).get('date'));
 
         let newPath;
         if (agentId) {
@@ -97,12 +92,12 @@ async function loadSelectors() {
         }
 
         // Construct new URL preserving Date param
-        const newUrl = new URL(newPath, window.location.origin);
+        const url = new URL(newPath, window.location.origin);
         if (dateParam) {
-            newUrl.searchParams.set('date', dateParam);
+            url.searchParams.set('date', dateParam);
         }
 
-        window.location.href = newUrl.toString();
+        window.location.assign(url.pathname + url.search);  // same-origin, path+query only
     });
 }
 

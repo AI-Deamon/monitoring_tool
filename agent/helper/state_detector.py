@@ -220,9 +220,12 @@ class StateDetector:
         self.idle_detector = None
 
         # PHASE 2: Initialize state machine (ONLY place that calculates time)
+        # US1: inject the input-recentcy predicate so tick() never credits
+        # ACTIVE while the user is unattended (anti-fabrication guard).
         self.screen_time_engine = ScreenTimeEngine(
             data_dir=data_dir or Path(os.path.expanduser("~")) / ".sentineledge",
             agent_id=self.agent_id,
+            user_active_fn=lambda: self._get_idle_seconds() < self.idle_threshold,
         )
 
         # ✅ OFFLINE-FIRST: Cached BufferDB instance (avoids connection leaks)
@@ -432,19 +435,21 @@ class StateDetector:
             now = time.time()
             duration_seconds = now - self._last_state_change_time
 
-            # NEW: CREATE SPAN for the exiting state (timeline visualization only)
+            # NEW: CREATE SPAN(s) for the exiting state (timeline visualization
+            # only). FR-012: multi-day states are split into one span per UTC
+            # day; each segment is persisted to the buffer immediately.
             if (
                 prev_state in ("active", "idle", "locked", "away")
                 and self._last_state_change_time > 0
                 and duration_seconds >= 1.0
             ):
-                span = self._create_span(
+                spans = self._create_span_segments(
                     state=prev_state,
                     start_time=self._last_state_change_time,
                     end_time=now,
                     duration=duration_seconds,
                 )
-                if span:
+                for span in spans:
                     self.pending_spans.append(span)
                     # ✅ OFFLINE-FIRST: Persist span to SQLite buffer immediately
                     # This ensures spans survive midnight resets and offline periods
@@ -906,6 +911,13 @@ class StateDetector:
                     start_time + 86400
                 )  # Adjust end_time to match capped duration
 
+            # US2 (FR-005): a locked state >= 2h is recorded as away (mirrors
+            # the engine AWAY_THRESHOLD). For split spans the segmenter passes
+            # the already-resolved state, so this rule applies the decision to
+            # the ORIGINAL duration (never a single segment's duration).
+            if state == "locked" and duration >= 7200:
+                state = "away"
+
             start_dt = datetime.fromtimestamp(start_time, tz=timezone.utc)
             end_dt = datetime.fromtimestamp(end_time, tz=timezone.utc)
 
@@ -923,6 +935,70 @@ class StateDetector:
         except Exception as e:
             logger.error(f"[SPAN] Failed to create span: {e}")
             return None
+
+    def _create_span_segments(
+        self,
+        state: str,
+        start_time: float,
+        end_time: float,
+        duration: Optional[float] = None,
+    ) -> list:
+        """
+        Split a continuous state into one span per UTC day (FR-012).
+
+        The server buckets spans by `start_time::DATE`, so a multi-day state
+        must be split at UTC midnight to avoid one 24h-capped span landing on
+        a single day (dropping the other days' time entirely).
+
+        The `away` reclassification (FR-005) is decided ONCE from the ORIGINAL
+        duration and applied to every segment — a 2.5h lock crossing midnight
+        emits two `away` spans, never two under-threshold `locked` spans.
+        """
+        try:
+            from datetime import datetime, timezone, timedelta
+
+            if duration is None:
+                duration = end_time - start_time
+
+            resolved_state = (
+                "away" if (state == "locked" and duration >= 7200) else state
+            )
+
+            start_dt = datetime.fromtimestamp(start_time, tz=timezone.utc)
+            end_dt = datetime.fromtimestamp(end_time, tz=timezone.utc)
+
+            if start_dt.date() == end_dt.date():
+                span = self._create_span(
+                    resolved_state, start_time, end_time, duration
+                )
+                return [span] if span else []
+
+            segments = []
+            seg_start = start_time
+            cursor = start_dt.date() + timedelta(days=1)
+            while True:
+                midnight_ts = datetime.combine(
+                    cursor, datetime.min.time(), tzinfo=timezone.utc
+                ).timestamp()
+                if midnight_ts >= end_time:
+                    break
+                span = self._create_span(
+                    resolved_state, seg_start, midnight_ts, midnight_ts - seg_start
+                )
+                if span:
+                    segments.append(span)
+                seg_start = midnight_ts
+                cursor += timedelta(days=1)
+
+            span = self._create_span(
+                resolved_state, seg_start, end_time, end_time - seg_start
+            )
+            if span:
+                segments.append(span)
+            return segments
+        except Exception as e:
+            logger.error(f"[SPAN] Failed to split spans: {e}")
+            return []
 
     def get_pending_spans(self) -> list:
         """Return and clear pending spans (called by Collector)."""
@@ -1167,21 +1243,24 @@ class StateDetector:
                     break
 
                 if duration > 60:  # Only if > 1 minute
-                    # Create span for the interrupted session
-                    span = self._create_span(
+                    # Create span(s) for the interrupted session (FR-012: one
+                    # span per UTC day when the session crosses midnight).
+                    spans = self._create_span_segments(
                         state=prev_state,
                         start_time=session_start,
                         end_time=now,
                         duration=duration,
                     )
-                    if span:
+                    for span in spans:
                         # Use _transition_lock (not _state_lock) - it's the lock
                         # every other reader/writer of pending_spans uses
                         # (_transition, get_pending_spans, persist_all_pending_spans).
                         with self._transition_lock:
                             self.pending_spans.append(span)
+                    if spans:
                         logger.info(
-                            f"[RECOVERY] Recovered {prev_state} session: {duration:.1f}s"
+                            f"[RECOVERY] Recovered {prev_state} session: "
+                            f"{duration:.1f}s ({len(spans)} span(s))"
                         )
                 break  # end of while True — always exit after one pass
 
