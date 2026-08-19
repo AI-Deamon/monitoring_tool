@@ -19,8 +19,16 @@ except ImportError:
     winerror = None
 
 import ctypes
-from ctypes import Structure, windll, byref, sizeof, c_uint
-from ctypes import wintypes
+from ctypes import Structure, byref, sizeof, c_uint
+
+# windll/wintypes are Windows-only ctypes members (absent on Linux/macOS).
+# Guarded the same way as the pywin32 imports above so this module can still
+# be imported for unit testing state-machine logic on non-Windows CI runners.
+try:
+    from ctypes import windll, wintypes
+except ImportError:
+    windll = None
+    wintypes = None
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import threading
