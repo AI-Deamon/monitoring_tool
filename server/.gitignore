@@ -61,3 +61,24 @@ clear_agent_data.py
 # Redundant duplicate of engines/admin_classification.py - not importable
 # as a script (defines a Flask Blueprint, no __main__), nothing referenced it
 scripts/admin/admin_classification.py
+
+# Pre-Alembic manual migration scripts, superseded by migrations/versions/.
+# Alembic only ever reads versions/ - these never ran as part of any real
+# upgrade path. Verified against a freshly-migrated DB: every table/column/
+# function they create already exists via the real chain, and nothing in
+# the running app references domain_manual_classifications or the chk_*
+# duration constraints these scripts also define.
+migrations/add_agent_operational_status.py
+migrations/add_asset_info_table.py
+migrations/add_check_constraints.sql
+migrations/add_classification_system.py
+migrations/add_domain_raw_fields.py
+migrations/add_idempotency_key_to_domain_sessions.sql
+migrations/add_os_details.py
+migrations/add_screentime_delta_procedure.py
+migrations/add_screentime_spans.sql
+migrations/add_update_control.py
+migrations/apply_domain_classification.sql
+migrations/apply_session_sync_functions.sql
+migrations/fix_sync_function.sql
+migrations/performance_optimization.py
