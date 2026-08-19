@@ -407,4 +407,4 @@ def downgrade():
     op.execute("DROP FUNCTION IF EXISTS sync_app_usage_from_sessions CASCADE;")
     op.execute("DROP FUNCTION IF EXISTS sync_domain_usage_from_sessions CASCADE;")
     
-    print("✓ Stored procedures removed")
+    print("[OK] Stored procedures removed")

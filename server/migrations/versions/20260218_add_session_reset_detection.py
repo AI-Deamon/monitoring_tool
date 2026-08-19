@@ -84,7 +84,7 @@ def upgrade():
         $$ LANGUAGE plpgsql;
     """)
 
-    print("✅ Session-based reset detection installed")
+    print("[OK] Session-based reset detection installed")
     print("   - Added session_start column to screen_time")
     print("   - Updated process_screentime_event() with session-aware logic")
 
@@ -119,4 +119,4 @@ def downgrade():
 
     op.execute("DROP INDEX IF EXISTS idx_screen_time_session;")
     op.execute("ALTER TABLE screen_time DROP COLUMN IF EXISTS session_start;")
-    print("⬇️  Reverted to GREATEST()-only screentime procedure")
+    print("[OK] Reverted to GREATEST()-only screentime procedure")

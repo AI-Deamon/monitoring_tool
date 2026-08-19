@@ -202,4 +202,4 @@ def downgrade():
     op.drop_table('domain_usage')
     op.drop_table('app_usage')
     op.drop_table('screen_time')
-    print("✅ Core aggregation tables dropped")
+    print("[OK] Core aggregation tables dropped")
