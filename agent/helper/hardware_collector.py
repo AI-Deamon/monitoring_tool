@@ -63,19 +63,20 @@ class GPUInfo:
 
 @dataclass
 class BatteryInfo:
-    """Battery health and charge information (laptops only).
+    """Battery health information (laptops only).
 
     health_percent = full_capacity_mwh / design_capacity_mwh * 100.
 
-    health_percent and charge_percent are Optional and stay None when the
-    underlying capacities are unreadable. 0.0 would be indistinguishable from
-    a genuinely dead battery on the dashboard, so "unknown" must not collapse
-    into "0%".
+    health_percent is Optional and stays None when the underlying capacities
+    are unreadable. 0.0 would be indistinguishable from a genuinely dead
+    battery on the dashboard, so "unknown" must not collapse into "0%".
+
+    Charge % and cycle count were dropped (not collected): WMI/powercfg
+    report both unreliably across OEMs and drivers, and cycle count in
+    particular had no way to distinguish "unknown" from a real 0.
     """
     name: str = ""
     health_percent: Optional[float] = None
-    charge_percent: Optional[float] = None
-    cycle_count: int = 0
     design_capacity_mwh: int = 0
     full_capacity_mwh: int = 0
 
@@ -495,7 +496,7 @@ class HardwareCollector:
         # showing nothing.
         $battery = $null
         try {
-            $design = 0; $full = 0; $cycles = 0; $bname = ''
+            $design = 0; $full = 0; $bname = ''
 
             $reportPath = Join-Path $env:TEMP ("sebat_" + [guid]::NewGuid().ToString() + ".xml")
             try {
@@ -506,7 +507,6 @@ class HardwareCollector:
                     if ($null -ne $b) {
                         $design = [double]$b.DesignCapacity
                         $full   = [double]$b.FullChargeCapacity
-                        $cycles = [int]$b.CycleCount
                         $bname  = [string]$b.Id
                     }
                 }
@@ -524,19 +524,11 @@ class HardwareCollector:
                 $fc = @(Get-CimInstance -Namespace root\\WMI -ClassName BatteryFullChargedCapacity -ErrorAction SilentlyContinue)
                 if ($fc.Count -gt 0) { $full = [double]$fc[0].FullChargedCapacity }
             }
-            if ($cycles -le 0) {
-                $cc = @(Get-CimInstance -Namespace root\\WMI -ClassName BatteryCycleCount -ErrorAction SilentlyContinue)
-                if ($cc.Count -gt 0) { $cycles = [int]$cc[0].CycleCount }
-            }
 
-            # Win32_Battery: live charge %, and the authority on whether a
-            # battery exists at all (a desktop returns nothing here).
+            # Win32_Battery: the authority on whether a battery exists at all
+            # (a desktop returns nothing here) and a name fallback.
             $w32 = @(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue)
-            $charge = $null
             if ($w32.Count -gt 0) {
-                if ($null -ne $w32[0].EstimatedChargeRemaining) {
-                    $charge = [double]$w32[0].EstimatedChargeRemaining
-                }
                 if ([string]::IsNullOrWhiteSpace($bname)) { $bname = [string]$w32[0].Name }
             }
 
@@ -548,8 +540,6 @@ class HardwareCollector:
                 $battery = @{
                     Name           = $bname
                     HealthPercent  = $health
-                    ChargePercent  = $(if ($null -ne $charge) { [math]::Round($charge, 1) } else { $null })
-                    CycleCount     = $cycles
                     DesignCapacity = [int]$design
                     FullCapacity   = [int]$full
                 }
@@ -636,16 +626,12 @@ class HardwareCollector:
                     hardware.battery = BatteryInfo(
                         name=(battery_data.get('Name') or '').strip(),
                         health_percent=_opt_float(battery_data.get('HealthPercent')),
-                        charge_percent=_opt_float(battery_data.get('ChargePercent')),
-                        cycle_count=int(battery_data.get('CycleCount', 0) or 0),
                         design_capacity_mwh=int(battery_data.get('DesignCapacity', 0) or 0),
                         full_capacity_mwh=int(battery_data.get('FullCapacity', 0) or 0),
                     )
                     logger.info(
                         f"[HARDWARE] Battery: {hardware.battery.name} "
                         f"health={hardware.battery.health_percent}% "
-                        f"charge={hardware.battery.charge_percent}% "
-                        f"cycles={hardware.battery.cycle_count} "
                         f"({hardware.battery.full_capacity_mwh}/"
                         f"{hardware.battery.design_capacity_mwh} mWh)"
                     )

@@ -1521,8 +1521,6 @@ def asset_hardware():
         battery = hardware.get('battery') or {}
         existing.battery_name = battery.get('name') or None
         existing.battery_health_percent = battery.get('health_percent')
-        existing.battery_charge_percent = battery.get('charge_percent')
-        existing.battery_cycle_count = battery.get('cycle_count')
         
         # Network fields
         existing.primary_mac = network.get('primary_mac', '')

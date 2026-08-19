@@ -973,8 +973,6 @@ class AssetInfo(db.Model):
     # ================================================================
     battery_name = db.Column(db.String(255), nullable=True)
     battery_health_percent = db.Column(db.Float, nullable=True)
-    battery_charge_percent = db.Column(db.Float, nullable=True)
-    battery_cycle_count = db.Column(db.Integer, nullable=True)
 
     # ================================================================
     # NETWORK
@@ -1039,8 +1037,6 @@ class AssetInfo(db.Model):
             "battery": {
                 "name": self.battery_name,
                 "health_percent": self.battery_health_percent,
-                "charge_percent": self.battery_charge_percent,
-                "cycle_count": self.battery_cycle_count,
             }
             if self.battery_name
             else None,

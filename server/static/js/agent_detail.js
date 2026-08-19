@@ -548,27 +548,23 @@ async function loadHardware() {
         : null;
     setText('hw-disk', totalDisk ? `${totalDisk} GB` : '-');
     // Battery health replaces the old "BIOS Version" tile. Color-coded health
-    // bar (green >= 80%, yellow 60-79%, red < 60%) with charge % and cycles.
+    // bar (green >= 80%, yellow 60-79%, red < 60%). Charge % and cycle count
+    // were dropped - WMI reports both unreliably across OEMs/drivers, and a
+    // silent 0 was indistinguishable from "no data".
     const battery = hw.battery;
     const bHealth = document.getElementById('hw-battery-health');
     const bName = document.getElementById('hw-battery-name');
     const bBar = document.getElementById('hw-battery-bar');
-    const bCharge = document.getElementById('hw-battery-charge');
-    const bCycles = document.getElementById('hw-battery-cycles');
     if (battery && battery.name) {
         bHealth.textContent = battery.health_percent != null ? `${Math.round(battery.health_percent)}%` : '-';
         bName.textContent = battery.name;
         const pct = Math.max(0, Math.min(100, battery.health_percent || 0));
         bBar.style.width = `${pct}%`;
         bBar.style.backgroundColor = pct >= 80 ? '#22c55e' : pct >= 60 ? '#eab308' : '#ef4444';
-        bCharge.textContent = battery.charge_percent != null ? `Charge ${Math.round(battery.charge_percent)}%` : '';
-        bCycles.textContent = battery.cycle_count != null ? `${battery.cycle_count} cycles` : '';
     } else {
         bHealth.textContent = 'No battery';
         bName.textContent = '';
         bBar.style.width = '0%';
-        bCharge.textContent = '';
-        bCycles.textContent = '';
     }
 
     // Network

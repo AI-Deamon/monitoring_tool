@@ -1036,8 +1036,6 @@ def get_single_asset_data(agent_id):
                 "battery": {
                     "name": info.battery_name,
                     "health_percent": info.battery_health_percent,
-                    "charge_percent": info.battery_charge_percent,
-                    "cycle_count": info.battery_cycle_count,
                 }
                 if info.battery_name
                 else None,
