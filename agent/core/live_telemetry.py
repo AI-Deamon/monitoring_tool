@@ -36,37 +36,19 @@ logger = logging.getLogger(__name__)
 
 
 def get_ist_now() -> datetime:
-    """Get current time in IST timezone with robust fallback."""
-    from datetime import timedelta
-    
-    # Method 1: Try ZoneInfo (Python 3.9+)
-    if _ZONEINFO_AVAILABLE:
-        try:
-            return datetime.now(ZoneInfo("Asia/Kolkata"))
-        except Exception:
-            try:
-                # Try alternate timezone name
-                return datetime.now(ZoneInfo("Asia/Calcutta"))
-            except Exception:
-                pass
-    
-    # Method 2: Try pytz with multiple timezone names
-    if _PYTZ_AVAILABLE:
-        for tz_name in ['Asia/Kolkata', 'Asia/Calcutta']:
-            try:
-                ist = pytz.timezone(tz_name)
-                return datetime.now(ist)
-            except Exception:
-                continue
-    
-    # Method 3: Manual UTC+5:30 offset (ALWAYS works - no library needed)
+    """Current time in agent-local time.
+
+    Uses the offset owned by core.agent_time (default IST) so live telemetry
+    stamps the same day boundary as the buffer and the state machine. It
+    deliberately does NOT resolve "Asia/Kolkata" via zoneinfo/pytz any more:
+    that ignored the configured offset entirely, and a frozen (PyInstaller)
+    build has no tzdata unless it is explicitly bundled.
+    """
     try:
-        utc_now = datetime.now(timezone.utc)
-        ist_offset = timezone(timedelta(hours=5, minutes=30))
-        return utc_now.astimezone(ist_offset)
+        from .agent_time import now as _local_now
+        return _local_now()
     except Exception as e:
-        logger.error(f"[LIVE] Failed to get IST time: {e}, using UTC")
-        # Last resort: Use UTC and log error
+        logger.error(f"[LIVE] Failed to get agent-local time: {e}, using UTC")
         return datetime.now(timezone.utc)
 
 

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from extensions import db
+from utils.dt import utcnow_naive
 from sqlalchemy.dialects import postgresql
 import uuid
 
@@ -27,6 +28,11 @@ class Organization(db.Model):
 
     # Relationships
     agents = db.relationship("Agent", backref="organization", lazy="dynamic")
+    # NOTE: intentionally no cascade="all, delete-orphan" here, unlike Agent's
+    # owned relationships elsewhere in this file - deleting an Organization
+    # must not silently cascade-delete DashboardUser accounts. org_id on
+    # DashboardUser blocks the delete instead (IntegrityError) until users
+    # are explicitly reassigned or removed.
     users = db.relationship("DashboardUser", backref="organization", lazy="dynamic")
 
 
@@ -231,7 +237,20 @@ class AgentCurrentStatus(db.Model):
 
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
 
-    agent = db.relationship("Agent", backref="current_status", uselist=False)
+    # agent_id is BOTH this table's primary key and the FK to agents. Without
+    # an explicit cascade, deleting an Agent makes SQLAlchemy try to null out
+    # the child's FK - which is the PK here, so it raises:
+    #   "Dependency rule tried to blank-out primary key column
+    #    'agent_current_status.agent_id'"
+    # and the delete fails before Postgres' ON DELETE CASCADE can act.
+    # uselist=False belongs on the backref so agent.current_status is the
+    # scalar this class documents, not a list.
+    agent = db.relationship(
+        "Agent",
+        backref=db.backref(
+            "current_status", uselist=False, cascade="all, delete-orphan"
+        ),
+    )
 
     # FIX 5: STALE STATUS DETECTION
     @property
@@ -490,8 +509,19 @@ class AppInventory(db.Model):
     estimated_size_kb = db.Column(db.BigInteger, nullable=True)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Feature 037 / FR-019: uniqueness was (agent_id, name), which collapsed two
+    # genuinely distinct installations of one application — different versions,
+    # or per-machine vs per-user locations — into a single row. Version and
+    # install location are part of the identity so those stay distinguishable.
+    # Must stay in step with server_api.inventory_dedup_key().
     __table_args__ = (
-        db.UniqueConstraint("agent_id", "name", name="uq_app_inventory_agent_name"),
+        db.UniqueConstraint(
+            "agent_id",
+            "name",
+            "version",
+            "install_location",
+            name="uq_app_inventory_agent_name_version_location",
+        ),
     )
 
     def to_dict(self):
@@ -915,6 +945,10 @@ class AssetInfo(db.Model):
     manufacturer = db.Column(db.String(255), nullable=True)
     model = db.Column(db.String(255), nullable=True)
     bios_uuid = db.Column(db.String(255), nullable=True)
+    # Firmware version string reported by the hardware (SMBIOSBIOSVersion).
+    # Distinct from bios_uuid, which is an identifier, not a version — conflating
+    # the two is defect D06.
+    bios_version = db.Column(db.String(255), nullable=True)
     system_uuid = db.Column(db.String(255), nullable=True)
     asset_tag = db.Column(db.String(255), nullable=True)
     domain = db.Column(db.String(255), nullable=True)
@@ -933,6 +967,14 @@ class AssetInfo(db.Model):
     gpus_json = db.Column(db.Text, nullable=True)  # JSON array of {name, memory_gb}
     disks_json = db.Column(db.Text, nullable=True)  # JSON array of disk info
     motherboard = db.Column(db.Text, nullable=True)
+
+    # ================================================================
+    # BATTERY HEALTH (laptops only; NULL on desktops)
+    # ================================================================
+    battery_name = db.Column(db.String(255), nullable=True)
+    battery_health_percent = db.Column(db.Float, nullable=True)
+    battery_charge_percent = db.Column(db.Float, nullable=True)
+    battery_cycle_count = db.Column(db.Integer, nullable=True)
 
     # ================================================================
     # NETWORK
@@ -979,6 +1021,7 @@ class AssetInfo(db.Model):
             "manufacturer": self.manufacturer,
             "model": self.model,
             "bios_uuid": self.bios_uuid,
+            "bios_version": self.bios_version,
             "system_uuid": self.system_uuid,
             "asset_tag": self.asset_tag,
             "domain": self.domain,
@@ -993,6 +1036,14 @@ class AssetInfo(db.Model):
             "gpus": _json.loads(self.gpus_json) if self.gpus_json else [],
             "disks": _json.loads(self.disks_json) if self.disks_json else [],
             "motherboard": self.motherboard,
+            "battery": {
+                "name": self.battery_name,
+                "health_percent": self.battery_health_percent,
+                "charge_percent": self.battery_charge_percent,
+                "cycle_count": self.battery_cycle_count,
+            }
+            if self.battery_name
+            else None,
             "primary_mac": self.primary_mac,
             "primary_ip": self.primary_ip,
             "all_macs": _json.loads(self.all_macs_json) if self.all_macs_json else [],
@@ -1712,7 +1763,8 @@ class ReportSchedule(db.Model):
     include_pdf = db.Column(db.Boolean, default=False, nullable=False)
     auto_email = db.Column(db.Boolean, default=True, nullable=False)
     template_name = db.Column(db.String(100), nullable=True)
-    recipients_json = db.Column(postgresql.JSONB, nullable=True)  # overrides recipients field
+    # JSONB on PostgreSQL; falls back to JSON on SQLite so tests can create the schema
+    recipients_json = db.Column(db.JSON().with_variant(postgresql.JSONB(), 'postgresql'), nullable=True)  # overrides recipients field
 
 
 class ReportGenerationJob(db.Model):
@@ -1727,10 +1779,13 @@ class ReportGenerationJob(db.Model):
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
     status = db.Column(db.String(20), default='pending', nullable=False)
-    progress = db.Column(postgresql.JSONB, default=dict, nullable=False)
+    progress = db.Column(db.JSON().with_variant(postgresql.JSONB(), 'postgresql'), default=dict, nullable=False)
     result_html = db.Column(db.Text, nullable=True)
     result_pdf_path = db.Column(db.String(500), nullable=True)
     error_message = db.Column(db.Text, nullable=True)
     created_by = db.Column(db.String(100), nullable=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    # D02 / FR-009: naive UTC. An aware default here was stored through the
+    # session TimeZone, putting created_at 5.5h ahead of completed_at's own
+    # clock and making job durations nonsense.
+    created_at = db.Column(db.DateTime, default=utcnow_naive, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)

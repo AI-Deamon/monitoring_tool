@@ -2,7 +2,7 @@
 {% block title %}Activity Report - {{ agent_id }} - SentinelEdge{% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce() }}">
     /* ===== PRINT & SCREEN STYLES ===== */
     @media print {
         body {
@@ -565,14 +565,14 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/timezone_utils.js') }}"></script>
-<script>
+<script nonce="{{ csp_nonce() }}">
     // ===== CONFIGURATION =====
     const AGENT_ID = "{{ agent_id }}";
     const API_URL = `/dashboard/api/agent/${AGENT_ID}/full-report`;
 
     // Get date from URL parameter or use today
     const urlParams = new URLSearchParams(window.location.search);
-    let reportDate = urlParams.get('date') || new Date().toISOString().split('T')[0];
+    let reportDate = urlParams.get('date') || localDateStr();
 
     // Set date picker
     document.getElementById('report-date-input').value = reportDate;
@@ -592,8 +592,9 @@
 
     // ===== CHANGE DATE =====
     function changeReportDate() {
-        const newDate = document.getElementById('report-date-input').value;
-        window.location.href = `/dashboard/agent/${AGENT_ID}/report-v2?date=${newDate}`;
+        const newDate = safeDateParam(document.getElementById('report-date-input').value);
+        const agentId = safeAgentId(AGENT_ID);
+        window.location.assign(`/dashboard/agent/${agentId}/report-v2?date=${newDate}`);
     }
 
     // ===== LOAD REPORT DATA =====

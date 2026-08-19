@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -47,14 +47,23 @@ def init_database(app):
     # db.create_all() removed to enforce Alembic-only schema management.
 
 def apply_startup_fixes(app):
-    """Run self-healing scripts on startup."""
-    from scripts.fixes.ensure_procedures_correct import apply_fixes as fix_procedures
-    # Import other fixes dynamically or path-based if needed, but procedures are critical
-    
+    """Run optional self-healing scripts on startup.
+
+    Stored procedures are owned by the Alembic migration chain; the
+    scripts.fixes package is a legacy add-on that is not part of the repo,
+    so its absence must never prevent the server from booting.
+    """
+    try:
+        from scripts.fixes.ensure_procedures_correct import apply_fixes as fix_procedures
+    except ImportError:
+        logger.info("[STARTUP] scripts.fixes not present - skipping self-healing "
+                    "(schema/procedures are managed by Alembic)")
+        return
+
     with app.app_context():
         try:
             logger.info("[STARTUP] Running self-healing scripts...")
-            
+
             # 1. Fix Stored Procedures (Round function error)
             fix_procedures()
             
@@ -79,83 +88,102 @@ def apply_startup_fixes(app):
 def sync_screen_time_background(app):
     """
     Background task: Sync ALL data every 5 minutes.
-    - Syncs screen_time from telemetry
+    - Syncs screen_time from spans for the fully-elapsed day (reconcile-and-set)
     - Syncs app_usage from app_sessions (source of truth)
     - Syncs domain_usage from domain_sessions (source of truth)
+
+    Spans are the sanctioned elapsed-day writer (FR-006): for the last fully
+    elapsed UTC day, sync_screen_time_from_spans overwrites the row from the
+    full span sum. The cumulative counter in process_screentime_event remains
+    the in-progress-day live estimate only. The dedicated daily job
+    (reconcile_elapsed_screentime_days) covers the full 7-day window for late
+    spans.
     """
+    from leader_election import get_leader
+    leader = get_leader(app)
     while True:
         try:
             time.sleep(60)  # Wait 1 minute (Optimized for shift)
+            if not leader.check():
+                continue
             with app.app_context():
                 from sqlalchemy import text
-                
-                # Sync screen_time
-                result = db.session.execute(text(
-                    "SELECT * FROM sync_screen_time_from_sessions(CURRENT_DATE)"
-                ))
-                rows = result.fetchall()
-                
+
+                # screen_time for the fully-elapsed day comes from spans, not
+                # from a cumulative merge: sync_screen_time_from_spans is the
+                # sanctioned elapsed-day writer (reconcile-and-set, idempotent,
+                # corrects downward). The per-event cumulative writer
+                # (process_screentime_event) only estimates the in-progress
+                # day. This job used to call sync_screen_time_from_sessions(),
+                # which recomputed active_seconds from app_sessions and merged
+                # it in via GREATEST(), a one-way ratchet that could never
+                # correct itself downward. Removed; see plan doc.
+
+                # Pass an explicit UTC date rather than relying on
+                # Postgres's CURRENT_DATE, which resolves to this
+                # connection's configured session timezone (IST on this
+                # database) - the stored procedures filter sessions with
+                # start_time::DATE = p_date, and start_time is always
+                # stored as naive UTC, so an IST-valued p_date silently
+                # mis-buckets sessions in the ~5.5h window after IST
+                # midnight. This must match the daily job in
+                # background_tasks.py::sync_yesterday_data(), which
+                # already computes UTC explicitly.
+                today_utc = datetime.now(timezone.utc).date()
+
                 # Sync app_usage from app_sessions
-                db.session.execute(text(
-                    "SELECT sync_app_usage_from_sessions(CURRENT_DATE)"
-                ))
-                
+                db.session.execute(
+                    text("SELECT sync_app_usage_from_sessions(:d)"),
+                    {"d": today_utc},
+                )
+
                 # Sync domain_usage from domain_sessions
-                db.session.execute(text(
-                    "SELECT sync_domain_usage_from_sessions(CURRENT_DATE)"
-                ))
-                
+                db.session.execute(
+                    text("SELECT sync_domain_usage_from_sessions(:d)"),
+                    {"d": today_utc},
+                )
+
+                # Reconcile the last fully-elapsed UTC day from spans
+                # (authoritative; see docstring).
+                db.session.execute(
+                    text("SELECT sync_screen_time_from_spans(:d)"),
+                    {"d": today_utc - timedelta(days=1)},
+                )
+
                 db.session.commit()
-                logger.info(f"[SYNC] Data synced: {len(rows)} agents, app_usage + domain_usage updated")
+                logger.info("[SYNC] Data synced: app_usage + domain_usage + screen_time-from-spans updated")
         except Exception as e:
             logger.error(f"[SYNC] Error syncing data: {e}")
 
 
 def cleanup_background(app):
     """
-    FIX 3: Hourly cleanup - Purge old data + sync aggregates + classify domains.
-    Runs every hour to clean up old raw events and sessions.
+    FIX 3: Hourly domain auto-classification.
+    Data-retention purging is owned by background_tasks.py's scheduled job.
     """
     import server_models
-    from datetime import datetime, timedelta, timezone
-    
+    from leader_election import get_leader
+    leader = get_leader(app)
+
     while True:
         try:
             time.sleep(3600)  # 1 hour
+            if not leader.check():
+                continue
             with app.app_context():
                 from sqlalchemy import text
-                
-                # ================================================================
-                # PART 1: PURGE OLD DATA
-                # ================================================================
-                # Purge old raw events (30 days retention)
-                # Use timezone-aware UTC time
-                cutoff_30d = datetime.now(timezone.utc) - timedelta(days=30)
-                # Ensure we compare against offset-naive if DB is naive, or aware if aware.
-                # Usually naive UTC is stored in Postgres TIMESTAMP WITHOUT TIME ZONE
-                # So we might need to strip tzinfo if DB columns are naive. 
-                # Ideally, we should migrate to TIMESTAMP WITH TIME ZONE, but for now:
-                cutoff_30d = cutoff_30d.replace(tzinfo=None)
 
-                purged_raw = db.session.query(server_models.RawEvent).filter(
-                    server_models.RawEvent.received_at < cutoff_30d
-                ).delete(synchronize_session='fetch')
-                
-                # Purge old app sessions (90 days retention)
-                cutoff_90d = datetime.now(timezone.utc) - timedelta(days=90)
-                cutoff_90d = cutoff_90d.replace(tzinfo=None) # Strip timezone for naive DB columns
-                
-                purged_sessions = 0
-                if hasattr(server_models, 'AppSession'):
-                    purged_sessions = db.session.query(server_models.AppSession).filter(
-                        server_models.AppSession.created_at < cutoff_90d
-                    ).delete(synchronize_session='fetch')
-                
-                db.session.commit()
-                logger.info(f"[CLEANUP] Purged: raw_events={purged_raw}, sessions={purged_sessions}")
-                
+                # NOTE: Data-retention purging (raw_events, app_sessions, domain
+                # sessions/visits, state_changes) is no longer done here. It is
+                # owned exclusively by background_tasks.py's scheduled
+                # cleanup_old_data() job (which calls server_cleanup.cleanup_old_data()),
+                # started from create_app(). Having two independent threads purge
+                # the same tables on different schedules/cutoff columns was itself
+                # a source of confusion and risk; this thread now only handles
+                # domain auto-classification below.
+
                 # ================================================================
-                # PART 2: CLASSIFY UNREVIEWED DOMAINS (AUTOMATIC!)
+                # CLASSIFY UNREVIEWED DOMAINS (AUTOMATIC!)
                 # ================================================================
                 try:
                     # Get unreviewed sessions

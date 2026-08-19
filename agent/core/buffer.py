@@ -16,14 +16,16 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
-# Standardize buffered timestamps to IST (UTC+05:30).
-IST_OFFSET = timedelta(hours=5, minutes=30)
-IST = timezone(IST_OFFSET, name="IST")
+# Buffered timestamps use the agent-local offset owned by core.agent_time
+# (defaults to IST). Kept as module-level names for backward compatibility.
+from . import agent_time as _agent_time
+
+set_timezone_offset = _agent_time.set_offset_minutes
 
 
 def _get_ist_now() -> datetime:
-    """Get current time in IST."""
-    return datetime.now(IST)
+    """Get current time in agent-local time."""
+    return _agent_time.now()
 
 
 def _get_ist_timestamp() -> str:
@@ -53,7 +55,7 @@ def _parse_timestamp_to_ist(value) -> Optional[datetime]:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
 
-    return dt.astimezone(IST)
+    return dt.astimezone(_agent_time.get_timezone())
 
 
 def _normalize_timestamp_to_ist(value, fallback_to_now: bool = False) -> Optional[str]:
@@ -113,12 +115,17 @@ class BufferDB:
         current_time = time.time()
         if hasattr(self._local, "conn") and self._local.conn is not None:
             if current_time - self._local.conn_created > 3600:  # 1 hour
+                # H-03 FIX: Check for active transaction before closing
                 try:
-                    self._local.conn.close()
-                    logger.debug("Refreshed stale database connection (age > 1 hour)")
+                    if self._local.conn.in_transaction:
+                        logger.warning("Skipping connection refresh - transaction in progress")
+                    else:
+                        self._local.conn.close()
+                        logger.debug("Refreshed stale database connection (age > 1 hour)")
+                        self._local.conn = None
                 except Exception as e:
                     logger.debug(f"Error closing stale connection: {e}")
-                self._local.conn = None
+                    self._local.conn = None
 
         # Get or create thread-local connection
         if not hasattr(self._local, "conn") or self._local.conn is None:
@@ -1400,6 +1407,7 @@ class BufferDB:
                 """
                 SELECT * FROM hardware_snapshots
                 WHERE uploaded = 0
+                AND (idempotency_key IS NULL OR idempotency_key NOT LIKE 'net_partial:%')
                 ORDER BY id ASC
                 LIMIT ?
             """,

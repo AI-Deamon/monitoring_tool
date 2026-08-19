@@ -264,6 +264,7 @@ def get_certificate_fingerprint(hostname: str, port: int = 443) -> Optional[str]
     
     try:
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         with socket.create_connection((hostname, port), timeout=5) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert_der = ssock.getpeercert(binary_form=True)
@@ -335,7 +336,7 @@ class ServerUploader:
         if self.config.secure_storage:
             token = self.config.secure_storage.load_token_securely(str(self.config.config_path))
             if token:
-                logger.debug(f"[TOKEN] Loaded from secure storage: {token[:10]}...")
+                logger.debug(f"[TOKEN] Loaded from secure storage: {token[:4]}***")
                 self.config.api_token = token
                 return token
             else:
@@ -343,7 +344,7 @@ class ServerUploader:
         
         # Try config attribute as fallback
         if self.config.api_token and self.config.api_token != '':
-            logger.debug(f"[TOKEN] Using token from config attribute: {self.config.api_token[:10]}...")
+            logger.debug(f"[TOKEN] Using token from config attribute: {self.config.api_token[:4]}***")
             return self.config.api_token
         
         # Absolutely no token available
@@ -378,7 +379,7 @@ class ServerUploader:
             "Content-Type": "application/json",
         }
         
-        logger.debug(f"[AUTH] Created headers with Bearer token: {token[:20]}...")
+        logger.debug(f"[AUTH] Created headers with Bearer token: {token[:4]}***")
         logger.debug(f"[AUTH] Agent ID: {self.config.agent_id}")
         return headers
     
@@ -473,7 +474,7 @@ class ServerUploader:
                 return False
             
             logger.info("=" * 70)
-            logger.info(f"[REGISTER] SUCCESS: Received API key: {api_key[:20]}...")
+            logger.info(f"[REGISTER] SUCCESS: Received API key: {api_key[:4]}***")
             logger.info("=" * 70)
             
             # Verify agent data in response
@@ -521,7 +522,7 @@ class ServerUploader:
                 
                 if not loaded_key or loaded_key != api_key:
                     logger.error("[REGISTER] API key verification FAILED after storage")
-                    logger.error(f"[REGISTER] Stored: {api_key[:10]}..., Loaded: {loaded_key[:10] if loaded_key else 'None'}...")
+                    logger.error(f"[REGISTER] Stored: {api_key[:4]}***, Loaded: {loaded_key[:4] if loaded_key else 'None'}***")
                     self.registration_attempts += 1
                     self.last_registration_failure = time.time()
                     return False
@@ -660,13 +661,7 @@ class ServerUploader:
                 context = None
                 if url.startswith('https://') and not self.config.allow_insecure_http:
                     context = ssl.create_default_context()
-                    
-                    # Custom certificate verification
-                    def verify_cert(conn, url, cert, errnum, errdepth, retcode):
-                        if retcode == 0:  # Pre-verification
-                            return self._validate_certificate(conn)
-                        return retcode
-                    
+                    context.minimum_version = ssl.TLSVersion.TLSv1_2
                     context.verify_mode = ssl.CERT_REQUIRED
                     
                     # mTLS support: Load client cert if enabled
@@ -686,7 +681,13 @@ class ServerUploader:
                         except Exception as e:
                             logger.error(f"[SECURITY] Failed to load mTLS certificates: {e}")
                 
+                # H-07 FIX: Manual certificate validation after connection
                 with urllib.request.urlopen(req, timeout=timeout, context=context) as response:
+                    # Validate certificate pinning if HTTPS
+                    if url.startswith('https://') and context:
+                        sock = response.fp.raw._sock
+                        if hasattr(sock, 'getpeercert'):
+                            self._validate_certificate(sock)
                     response_data = response.read().decode('utf-8')
                     if response_data:
                         return json.loads(response_data)
@@ -735,7 +736,17 @@ class ServerUploader:
                     error_body = e.read().decode('utf-8')
                     logger.error(f"[REQUEST] Error body: {error_body}")
                 except:
-                    pass
+                    error_body = None
+
+                # 400 = the payload itself failed server-side validation
+                # (e.g. screentime totals exceeding 24h). Retrying an
+                # unmodified payload can never succeed, unlike network
+                # errors/401/403/5xx which are transient. Callers that
+                # buffer-and-retry (e.g. _upload_merged_events) need to be
+                # able to tell these apart so they stop resending data that
+                # will be rejected forever.
+                if e.code == 400:
+                    return {'status': 'rejected', 'http_code': 400, 'error': error_body}
                 return None
                 
             except CertificatePinningError as e:
@@ -806,12 +817,53 @@ class ServerUploader:
         except Exception as e:
             logger.error(f"Upload batch error: {e}", exc_info=True)
 
+    #: Server statuses that mean "the data is safely on the server", so the
+    #: buffered record must be marked uploaded.
+    #:
+    #: The asset endpoints answer with the ACTION they performed rather than a
+    #: generic 'ok':
+    #:   /asset-hardware          -> 'created' | 'updated'   (server_api.py)
+    #:   /asset-hardware/network  -> 'network_updated'
+    #:   bulk inventory           -> 'partial' (some rows deduped by the DB)
+    #:
+    #: None of those were listed here, so hardware and network records were
+    #: NEVER marked uploaded. Because _upload_hardware() breaks on the first
+    #: unacknowledged record, the OLDEST snapshot became a permanent
+    #: head-of-line block: it was re-sent and re-applied on every cycle while
+    #: every newer snapshot queued behind it forever.
+    #:
+    #: Observed on L180701PB: 251 buffered snapshots, all uploaded=0, the
+    #: oldest from 2026-05-21. The server kept re-applying that May record --
+    #: stamping collected_at=now() so it looked fresh -- while the current
+    #: adapter, and later the battery data, never arrived at all.
+    #:
+    #: (HTTP 304 is already normalised to 'ok' by _make_request, so
+    #: 'unchanged' does not need to appear here -- it is listed for clarity
+    #: in case that normalisation is ever removed.)
+    ACK_SUCCESS_STATUSES = frozenset({
+        'ok',
+        'success',
+        'skipped',
+        'created',
+        'updated',
+        'unchanged',
+        'network_updated',
+        'partial',
+    })
+
     def _is_ack_success(self, response: Optional[Dict]) -> bool:
         """Treat only explicit success-like statuses as upload ACKs."""
         if not response:
             return False
         status = str(response.get('status', '')).lower()
-        return status in ('ok', 'success', 'skipped')
+        return status in self.ACK_SUCCESS_STATUSES
+
+    def _is_permanent_rejection(self, response: Optional[Dict]) -> bool:
+        """True if the server rejected the payload with HTTP 400 - i.e. the
+        data itself is invalid and will never be accepted, no matter how
+        many times it's resent. Distinct from transient failures (network
+        errors, 401/403, 5xx) which are worth retrying."""
+        return bool(response) and str(response.get('status', '')).lower() == 'rejected'
 
     def _send_current_status(self):
         """Send current app/idle status from latest heartbeat"""
@@ -966,13 +1018,23 @@ class ServerUploader:
                 continue
             
             if self._is_ack_success(response):
+                # Mark immediately per-item to avoid re-delivery on crash
+                self.buffer.mark_events_uploaded([event['id']])
                 uploaded_ids.append(event['id'])
+            elif self._is_permanent_rejection(response):
+                # Server validation will never pass for this exact payload
+                # (e.g. a screentime snapshot whose bucket sum exceeds 24h).
+                # Drop it instead of resending it every upload cycle forever.
+                logger.warning(
+                    f"[UPLOAD] Dropping permanently-invalid {event_type} event "
+                    f"id={event['id']} (agent={event.get('agent_id')}): "
+                    f"server rejected with HTTP 400, will never succeed"
+                )
+                self.buffer.mark_events_uploaded([event['id']])
             else:
                 self.buffer.record_upload_ack_failure()
-        
-        # Mark as uploaded
+
         if uploaded_ids:
-            self.buffer.mark_events_uploaded(uploaded_ids)
             logger.info(f"[OK] Uploaded {len(uploaded_ids)} merged events")
     
     def _upload_domains(self):
@@ -1014,6 +1076,7 @@ class ServerUploader:
             return
         
         uploaded_ids = []
+        total_duration = 0
         
         # Send each session individually to domain-switch endpoint
         # (which stores in domain_sessions and aggregates to domain_usage)
@@ -1032,18 +1095,14 @@ class ServerUploader:
             response = self._make_request('/telemetry/domain-switch', payload)
             
             if self._is_ack_success(response):
+                # Mark immediately per-item to avoid re-delivery on crash
+                self.buffer.mark_domain_sessions_uploaded([session['id']])
                 uploaded_ids.append(session['id'])
+                total_duration += session.get('duration_seconds', 0)
             else:
                 self.buffer.record_upload_ack_failure()
         
-        # Mark uploaded sessions
         if uploaded_ids:
-            self.buffer.mark_domain_sessions_uploaded(uploaded_ids)
-            
-            total_duration = sum(
-                s.get('duration_seconds', 0) for s in sessions 
-                if s['id'] in uploaded_ids
-            )
             logger.info(f"[OK] Uploaded {len(uploaded_ids)} domain sessions ({total_duration:.0f}s)")
         else:
             logger.debug("Failed to upload domain sessions (server offline?)")
@@ -1144,6 +1203,8 @@ class ServerUploader:
                 response = self._make_request('/extended-inventory', data)
                 
                 if self._is_ack_success(response):
+                    # Mark immediately per-item to avoid re-delivery on crash
+                    self.buffer.mark_extended_inventory_uploaded([snapshot['id']])
                     uploaded_ids.append(snapshot['id'])
                     counts = {
                         k: len(v) for k, v in data.items()
@@ -1156,7 +1217,6 @@ class ServerUploader:
                     break  # Stop on first failure
             
             if uploaded_ids:
-                self.buffer.mark_extended_inventory_uploaded(uploaded_ids)
                 logger.info(f"[EXTENDED] Marked {len(uploaded_ids)} snapshots as uploaded")
         
         except Exception as e:
@@ -1179,6 +1239,8 @@ class ServerUploader:
                 response = self._make_request('/eol-data', data)
                 
                 if self._is_ack_success(response):
+                    # Mark immediately per-item to avoid re-delivery on crash
+                    self.buffer.mark_eol_data_uploaded([snapshot['id']])
                     uploaded_ids.append(snapshot['id'])
                     # Count number of items in each EOL data category
                     counts = {}
@@ -1199,7 +1261,6 @@ class ServerUploader:
                     break
             
             if uploaded_ids:
-                self.buffer.mark_eol_data_uploaded(uploaded_ids)
                 logger.info(f"[EOL] Marked {len(uploaded_ids)} snapshots as uploaded")
         
         except Exception as e:
@@ -1222,6 +1283,8 @@ class ServerUploader:
                 response = self._make_request('/security-indicators', data)
                 
                 if self._is_ack_success(response):
+                    # Mark immediately per-item to avoid re-delivery on crash
+                    self.buffer.mark_security_indicators_uploaded([snapshot['id']])
                     uploaded_ids.append(snapshot['id'])
                     total = len(data.get('indicators', []))
                     logger.info(f"[OK] Uploaded security indicators: {total} indicators")
@@ -1231,7 +1294,6 @@ class ServerUploader:
                     break
             
             if uploaded_ids:
-                self.buffer.mark_security_indicators_uploaded(uploaded_ids)
                 logger.info(f"[SECURITY] Marked {len(uploaded_ids)} snapshots as uploaded")
         
         except Exception as e:
@@ -1254,6 +1316,8 @@ class ServerUploader:
                 response = self._make_request('/system-visibility', data)
 
                 if self._is_ack_success(response):
+                    # Mark immediately per-item to avoid re-delivery on crash
+                    self.buffer.mark_system_visibility_uploaded([snapshot['id']])
                     uploaded_ids.append(snapshot['id'])
                     counts = data.get('counts', {})
                     logger.info(f"[OK] Uploaded system visibility snapshot: {counts}")
@@ -1263,7 +1327,6 @@ class ServerUploader:
                     break
 
             if uploaded_ids:
-                self.buffer.mark_system_visibility_uploaded(uploaded_ids)
                 logger.info(f"[VISIBILITY] Marked {len(uploaded_ids)} snapshots as uploaded")
 
         except Exception as e:

@@ -83,7 +83,7 @@ function formatTimeShort(seconds) {
 
 function getSelectedDate() {
     const el = document.getElementById('global-date-select');
-    return el ? el.value : new Date().toISOString().split('T')[0];
+    return el ? el.value : localDateStr();
 }
 
 async function fetchJSON(url) {
@@ -165,26 +165,16 @@ async function loadFullReport(isManual = false) {
                 `;
         }
 
-        document.getElementById('registered-at').textContent = data.agent.registered_at
-            ? new Date(data.agent.registered_at).toLocaleDateString()
-            : '-';
+        // FR-007: canonical format, viewer timezone. Was toLocaleDateString(),
+        // which follows the BROWSER's locale — the same screen rendered
+        // differently for different users.
+        document.getElementById('registered-at').textContent =
+            DateFmt.formatDate(data.agent.registered_at);
         document.getElementById('first-seen-today').textContent = data.agent.first_seen_today
-            ? new Date(data.agent.first_seen_today).toLocaleTimeString('en-IN', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            })
+            ? DateFmt.formatDateTime(data.agent.first_seen_today)
             : 'No activity';
         document.getElementById('last-seen-today').textContent = data.agent.last_seen_today
-            ? new Date(data.agent.last_seen_today).toLocaleString('en-IN', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            })
+            ? DateFmt.formatDateTime(data.agent.last_seen_today)
             : 'No activity';
 
         // Live status
@@ -235,8 +225,8 @@ async function loadFullReport(isManual = false) {
     renderFlipCards(data.screen_time || {}, data.state_events || []);
 
     // Render tables
-    renderAppUsage(data.app_usage, data.live_status);
-    renderDomainUsage(data.domain_usage, data.live_status);
+    renderAppUsage(data.app_usage);
+    renderDomainUsage(data.domain_usage);
     renderDomainVisits(data.domain_visits);
     renderInventory(data.inventory);
     loadScreenTimeHistory();
@@ -244,24 +234,10 @@ async function loadFullReport(isManual = false) {
     loadSystemVisibility();
 }
 
-function renderAppUsage(appData, liveStatus) {
+function renderAppUsage(appData) {
     const tbody = document.getElementById('apps-body');
     tbody.innerHTML = '';
     document.getElementById('apps-count').textContent = `${appData?.count || 0} apps`;
-
-    if (liveStatus?.current_app) {
-        document.getElementById('app-ongoing-section').classList.remove('hidden');
-        document.getElementById('ongoing-app-name').textContent = liveStatus.current_app;
-        const appDurationEl = document.getElementById('ongoing-app-duration');
-        if (liveStatus.duration_seconds > 0) {
-            appDurationEl.textContent = formatTime(liveStatus.duration_seconds);
-            appDurationEl.classList.remove('hidden');
-        } else {
-            appDurationEl.classList.add('hidden');
-        }
-    } else {
-        document.getElementById('app-ongoing-section').classList.add('hidden');
-    }
 
     if (!appData?.data?.length) {
         tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No data</td></tr>';
@@ -274,7 +250,7 @@ function renderAppUsage(appData, liveStatus) {
         tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
         tr.innerHTML = `
                 <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${app.app}</td>
-                <td class="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-300">${app.session_count || '-'}</td>
+                <td class="px-4 py-3 text-center text-sm text-gray-600 dark:text-gray-300">${app.session_count || '-'}</td>
                 <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(app.duration_seconds)}</td>
                 <td class="px-4 py-3 text-right">
                     <div class="flex items-center justify-end gap-2">
@@ -289,24 +265,10 @@ function renderAppUsage(appData, liveStatus) {
     });
 }
 
-function renderDomainUsage(domainData, liveStatus) {
+function renderDomainUsage(domainData) {
     const tbody = document.getElementById('domains-body');
     tbody.innerHTML = '';
     document.getElementById('domains-count').textContent = `${domainData?.count || 0} domains`;
-
-    if (liveStatus?.current_domain) {
-        document.getElementById('domain-ongoing-section').classList.remove('hidden');
-        document.getElementById('ongoing-domain-name').textContent = liveStatus.current_domain;
-        const domainDurationEl = document.getElementById('ongoing-domain-duration');
-        if (liveStatus.domain_duration > 0 || liveStatus.domain_duration_seconds > 0) {
-            domainDurationEl.textContent = formatTime(liveStatus.domain_duration || liveStatus.domain_duration_seconds || 0);
-            domainDurationEl.classList.remove('hidden');
-        } else {
-            domainDurationEl.classList.add('hidden');
-        }
-    } else {
-        document.getElementById('domain-ongoing-section').classList.add('hidden');
-    }
 
     if (!domainData?.data?.length) {
         tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No data</td></tr>';
@@ -320,7 +282,7 @@ function renderDomainUsage(domainData, liveStatus) {
         tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
         tr.innerHTML = `
                 <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${d.domain}</td>
-                <td class="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-300">${d.session_count || '-'}</td>
+                <td class="px-4 py-3 text-center text-sm text-gray-600 dark:text-gray-300">${d.session_count || '-'}</td>
                 <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(d.duration_seconds)}</td>
                 <td class="px-4 py-3 text-right">
                     <div class="flex items-center justify-end gap-2">
@@ -351,11 +313,7 @@ function renderDomainVisits(visitsData) {
         div.innerHTML = `
 <span class="text-xs text-gray-500 dark:text-gray-400 font-mono w-20">
   ${v.visited_at
-                ? new Date(v.visited_at).toLocaleTimeString('en-IN', {
-                    timeZone: 'Asia/Kolkata',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                })
+                ? DateFmt.formatDateTime(v.visited_at).split(' ')[1]
                 : ''}
 </span>
 
@@ -423,9 +381,8 @@ function cleanInstallLocation(location) {
 function formatInstallDate(dateStr) {
     if (!dateStr || dateStr === '-') return '-';
     try {
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return dateStr;
-        return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        const formatted = DateFmt.formatDate(dateStr);
+        return formatted === DateFmt.EMPTY_DISPLAY ? dateStr : formatted;
     } catch {
         return dateStr;
     }
@@ -490,20 +447,58 @@ async function loadScreenTimeHistory() {
     });
 }
 
-function exportTableToCSV(tableId, filename) {
-    const table = document.getElementById(tableId);
-    let csv = [];
-    table.querySelectorAll('tr').forEach(row => {
-        let cols = [];
-        row.querySelectorAll('th, td').forEach(col => cols.push('"' + col.textContent.trim().replace(/"/g, '""') + '"'));
-        csv.push(cols.join(','));
-    });
-    const blob = new Blob([csv.join('\\n')], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
+// Inventory export (D15 / FR-025b).
+//
+// This used to scrape the rendered #inventory-table into CSV in the browser.
+// That produced a document unlike the one the Reports page hands out for the
+// same data: no title, no agent identity, no de-duplication, and whatever
+// columns the table happened to show. It was also broken — rows were joined on
+// the literal two-character sequence \n, so every export was one long line.
+//
+// Both downloads now come from build_inventory_workbook() on the server, so
+// there is one inventory template rather than two that drift apart.
+async function downloadInventoryWorkbook() {
+    const btn = document.getElementById('btn-inventory-xlsx');
+    const original = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = 'Preparing…';
+    }
+    try {
+        const resp = await fetch(
+            `/dashboard/api/inventory/fleet-export.xlsx?agent_id=${encodeURIComponent(AGENT_ID)}`
+        );
+        if (!resp.ok) {
+            let msg = 'Failed to generate the spreadsheet.';
+            try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (e) { /* non-JSON error body */ }
+            alert(msg);
+            return;
+        }
+
+        // Honour the server's Content-Disposition so the DD-MM-YYYY filename
+        // (FR-007) is defined in exactly one place.
+        let filename = 'inventory.xlsx';
+        const disposition = resp.headers.get('Content-Disposition') || '';
+        const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+        if (match) filename = decodeURIComponent(match[1]);
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('Failed to generate the spreadsheet: ' + e);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = original;
+        }
+    }
 }
 
 // Hardware data loader
@@ -542,13 +537,39 @@ async function loadHardware() {
     setText('hw-cpu', hw.cpu_name);
     setText('hw-cpu-cores', hw.cpu_cores ? `${hw.cpu_cores} cores / ${hw.cpu_threads || hw.cpu_cores} threads` : '-');
     setText('hw-ram', hw.ram_total_gb ? `${hw.ram_total_gb} GB` : '-');
-    setText('hw-gpu', hw.gpu_name);
+    if (hw.gpus && hw.gpus.length > 0) {
+        setText('hw-gpu', hw.gpus.map(g => g.name).join(', '));
+    } else {
+        setText('hw-gpu', '-');
+    }
     // Compute total disk from disks array
     const totalDisk = hw.disks && hw.disks.length > 0
         ? hw.disks.reduce((sum, d) => sum + (d.size_gb || 0), 0).toFixed(0)
         : null;
     setText('hw-disk', totalDisk ? `${totalDisk} GB` : '-');
-    setText('hw-bios', hw.motherboard || '-');
+    // Battery health replaces the old "BIOS Version" tile. Color-coded health
+    // bar (green >= 80%, yellow 60-79%, red < 60%) with charge % and cycles.
+    const battery = hw.battery;
+    const bHealth = document.getElementById('hw-battery-health');
+    const bName = document.getElementById('hw-battery-name');
+    const bBar = document.getElementById('hw-battery-bar');
+    const bCharge = document.getElementById('hw-battery-charge');
+    const bCycles = document.getElementById('hw-battery-cycles');
+    if (battery && battery.name) {
+        bHealth.textContent = battery.health_percent != null ? `${Math.round(battery.health_percent)}%` : '-';
+        bName.textContent = battery.name;
+        const pct = Math.max(0, Math.min(100, battery.health_percent || 0));
+        bBar.style.width = `${pct}%`;
+        bBar.style.backgroundColor = pct >= 80 ? '#22c55e' : pct >= 60 ? '#eab308' : '#ef4444';
+        bCharge.textContent = battery.charge_percent != null ? `Charge ${Math.round(battery.charge_percent)}%` : '';
+        bCycles.textContent = battery.cycle_count != null ? `${battery.cycle_count} cycles` : '';
+    } else {
+        bHealth.textContent = 'No battery';
+        bName.textContent = '';
+        bBar.style.width = '0%';
+        bCharge.textContent = '';
+        bCycles.textContent = '';
+    }
 
     // Network
     setText('hw-ip', hw.primary_ip);
@@ -562,7 +583,7 @@ async function loadHardware() {
     setText('hw-bitlocker', hw.bitlocker_status);
 
     // Meta
-    setText('hw-collected-at', hw.collected_at ? new Date(hw.collected_at).toLocaleString('en-IN') : '-');
+    setText('hw-collected-at', DateFmt.formatDateTime(hw.collected_at));
     setText('hw-hash', hw.collection_hash);
 }
 
@@ -717,8 +738,8 @@ async function loadSystemVisibility() {
     const updatedEl = document.getElementById('system-visibility-updated');
     if (updatedEl) {
         if (data.timestamp) {
-            const ts = new Date(data.timestamp);
-            updatedEl.textContent = `Latest snapshot: ${isNaN(ts.getTime()) ? data.timestamp : ts.toLocaleString('en-IN')}`;
+            const snapshot = DateFmt.formatDateTime(data.timestamp);
+            updatedEl.textContent = `Latest snapshot: ${snapshot === DateFmt.EMPTY_DISPLAY ? data.timestamp : snapshot}`;
         } else {
             updatedEl.textContent = 'Latest snapshot: -';
         }
@@ -979,7 +1000,7 @@ function renderCriticalAlerts(alerts) {
                         </div>
                         <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">${escapeHtml(details.description || item.indicator_type)}</p>
                         <div class="mt-2 flex items-center gap-4 text-xs text-gray-400">
-                            <span>Detected: ${new Date(item.first_detected).toLocaleDateString()}</span>
+                            <span>Detected: ${DateFmt.formatDate(item.first_detected)}</span>
                             <span>Score Impact: -${item.severity === 'critical' ? 20 : 15}</span>
                         </div>
                     </div>

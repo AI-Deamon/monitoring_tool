@@ -42,6 +42,9 @@ sentineledge_server_deploy_*/
 sentineledge_server_v3_final/
 *.zip
 
+# Build output from release_agent.py
+release/
+
 # IDEs
 .vscode/
 .idea/
@@ -81,3 +84,4 @@ htmlcov/
 graphify-out/cache
 server/graphify-out/cache
 server/graphify-out
+.gstack/

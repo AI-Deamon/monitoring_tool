@@ -19,10 +19,10 @@ from typing import Any, Dict, Optional, Tuple
 DEFAULT_DATA_DIR = Path(r"C:\ProgramData\WinDiagSvc")
 FALLBACK_LOG_FILE = Path(r"C:\ProgramData\WinDiagSvc\logs\swapper_fallback.log")
 STALE_MANIFEST_MINUTES = 30
-PARENT_EXIT_TIMEOUT_SECONDS = 60
 REPLACE_RETRIES = 10
 REPLACE_RETRY_DELAY_SECONDS = 3
 SERVICE_START_TIMEOUT_SECONDS = 45
+SERVICE_STOP_TIMEOUT_SECONDS = 90
 SERVICE_STATE_POLL_SECONDS = 2
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -178,39 +178,43 @@ def _validate_manifest(manifest: Dict[str, Any], manifest_path: Path) -> None:
         )
 
 
-def _wait_for_process_exit(pid: int, timeout: int) -> bool:
-    """Wait for process to exit."""
-    if pid <= 0:
+def _stop_service(
+    install_dir: Path,
+    service_name: str,
+    timeout: int = SERVICE_STOP_TIMEOUT_SECONDS,
+) -> bool:
+    """Stop the core service and wait until SCM confirms STOPPED.
+
+    This replaces the old wait-for-parent-PID step. The core has no code path
+    that exits on its own (its update worker only returns from the thread), so
+    the service stop IS the parent exit - waiting for both just burned a fixed
+    60s on every swap before force-stopping the service anyway.
+    """
+    state = _get_service_state(service_name)
+    if state == "STOPPED":
+        LOGGER.info(f"Service already STOPPED: {service_name}")
         return True
 
-    LOGGER.info(f"Waiting for parent PID {pid} to exit (timeout={timeout}s)")
+    LOGGER.info(f"Stopping core service {service_name} (current state={state})")
 
-    try:
-        import psutil  # type: ignore
+    nssm = install_dir / "nssm" / "win64" / "nssm.exe"
+    if nssm.exists():
+        _run_command(
+            [str(nssm), "stop", service_name, str(timeout * 1000)],
+            timeout=timeout + 10,
+        )
+    else:
+        _run_command(["net", "stop", service_name], timeout=timeout)
 
-        try:
-            proc = psutil.Process(pid)
-            proc.wait(timeout=timeout)
-            LOGGER.info(f"Parent PID {pid} exited")
-            return True
-        except psutil.NoSuchProcess:
-            LOGGER.info(f"Parent PID {pid} already exited")
-            return True
-        except psutil.TimeoutExpired:
-            LOGGER.error(f"Timeout waiting for parent PID {pid}")
-            return False
-    except Exception:
-        started = time.time()
-        while time.time() - started < timeout:
-            try:
-                os.kill(pid, 0)
-            except OSError:
-                LOGGER.info(f"Parent PID {pid} exited")
-                return True
-            time.sleep(1)
+    if _wait_for_service_state(service_name, "STOPPED", timeout):
+        LOGGER.info(f"Service confirmed STOPPED: {service_name}")
+        return True
 
-        LOGGER.error(f"Timeout waiting for parent PID {pid}")
-        return False
+    LOGGER.error(
+        f"Service did not reach STOPPED within {timeout}s "
+        f"(last_state={_get_service_state(service_name) or 'UNKNOWN'})"
+    )
+    return False
 
 
 def _set_helper_task_disabled(task_name: str) -> bool:
@@ -406,21 +410,70 @@ def _restart_service(install_dir: Path, service_name: str, mode: str) -> bool:
     return False
 
 
+# Relative to install_dir. tools/swapper.exe is included so a rollback also
+# restores the swapper that shipped with the version being rolled back to.
+BACKUP_ITEMS = (
+    "windiag.exe",
+    "syshealth.exe",
+    "version.json",
+    "tools/swapper.exe",
+)
+
+
 def _backup_files(install_dir: Path, backup_dir: Path) -> None:
     backup_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("windiag.exe", "syshealth.exe", "version.json"):
-        src = install_dir / filename
+    for relative in BACKUP_ITEMS:
+        src = install_dir / relative
         if src.exists():
-            shutil.copy2(src, backup_dir / filename)
-            LOGGER.info(f"Backed up {filename} -> {backup_dir}")
+            dst = backup_dir / relative
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            LOGGER.info(f"Backed up {relative} -> {backup_dir}")
 
 
 def _restore_backup(install_dir: Path, backup_dir: Path) -> None:
-    for filename in ("windiag.exe", "syshealth.exe", "version.json"):
-        src = backup_dir / filename
+    for relative in BACKUP_ITEMS:
+        src = backup_dir / relative
         if src.exists():
-            shutil.copy2(src, install_dir / filename)
-            LOGGER.info(f"Restored {filename} from backup")
+            dst = install_dir / relative
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            LOGGER.info(f"Restored {relative} from backup")
+
+
+def _promote_swapper(staging_dir: Path, install_dir: Path) -> bool:
+    """Install the new swapper into the canonical path.
+
+    A running EXE cannot replace itself, which is why swapper.exe was never
+    updated: it was always launched from the path it would have to overwrite.
+    The core now runs a copy staged out of the update package, so THIS process
+    is free to write install_dir/tools/swapper.exe.
+
+    Called only after the swap is otherwise complete and the service is back
+    to RUNNING - the new swapper earns the canonical slot by proving it can
+    drive a whole swap. Never fatal: the agent update has already succeeded by
+    this point, and a failure here just leaves the previous (working) swapper
+    in place for the next update.
+    """
+    staged = _find_required_file(staging_dir, "swapper.exe")
+    if not staged:
+        LOGGER.warning(
+            "Update package contains no swapper.exe; keeping the installed one"
+        )
+        return False
+
+    target = install_dir / "tools" / "swapper.exe"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(staged, target)
+        LOGGER.info(f"Promoted new swapper -> {target}")
+        return True
+    except Exception as exc:
+        LOGGER.warning(
+            f"Could not promote new swapper ({exc}); the previous swapper "
+            "stays in place and the agent update is unaffected"
+        )
+        return False
 
 
 def _safe_extract(zip_path: Path, staging_dir: Path) -> None:
@@ -516,23 +569,18 @@ def main() -> int:
         LOGGER.info(f"Install dir: {install_dir}")
         LOGGER.info(f"Data dir: {data_dir}")
 
-        if not _wait_for_process_exit(parent_pid, PARENT_EXIT_TIMEOUT_SECONDS):
-            LOGGER.warning(
-                f"Parent PID {parent_pid} did not exit in "
-                f"{PARENT_EXIT_TIMEOUT_SECONDS}s; proceeding with forced stop"
-            )
+        LOGGER.info(f"Parent PID (advisory): {parent_pid}")
 
         # Step 1: Stop helper task
         _set_helper_task_disabled(helper_task)
 
-        # Step 2: Stop the core service BEFORE file replacement
-        LOGGER.info(f"Stopping core service {service_name} before file swap...")
-        nssm = install_dir / "nssm" / "win64" / "nssm.exe"
-        if nssm.exists():
-            _run_command([str(nssm), "stop", service_name, "60"], timeout=70)
-        else:
-            _run_command(["net", "stop", service_name], timeout=60)
-        time.sleep(3)  # Allow SCM/task scheduler state to settle
+        # Step 2: Stop the core service BEFORE file replacement. This is also
+        # how the parent process exits - the core never exits on its own.
+        if not _stop_service(install_dir, service_name):
+            raise RuntimeError(
+                f"Could not stop {service_name}; refusing to swap files "
+                "while the old binaries may still be running"
+            )
 
         # Kill any stale windiag/syshealth processes
         LOGGER.info("Killing stale processes...")
@@ -591,11 +639,21 @@ def main() -> int:
         _set_helper_task_enabled_and_run(helper_task)
 
         _cleanup_path(data_dir / "failed_swap.json")
+        # The core holds update.lock across the swap (it must not run another
+        # cycle while we replace its EXE). That process is gone now, so
+        # release the lock or the restarted core is blocked from updating.
+        _cleanup_path(data_dir / "update.lock")
         # Service was already stopped before file swap, so use "start" not "restart"
         if not _restart_service(install_dir, service_name, mode="start"):
             raise RuntimeError(
                 f"Service {service_name} failed to reach RUNNING after swap"
             )
+
+        # Last step before cleanup: the new swapper has now driven a complete
+        # swap and the service is back up, so it has earned the canonical slot.
+        # Promoting earlier would let a broken swapper overwrite the known-good
+        # one and leave no working path for the next update.
+        _promote_swapper(staging_dir, install_dir)
 
         _cleanup_path(staging_dir)
         _cleanup_path(manifest_path)
@@ -614,6 +672,14 @@ def main() -> int:
             backup_path=str(backup_dir) if str(backup_dir) else "",
             error=error_text,
         )
+
+        # update_pending.json is written before the service restart, so a
+        # failure after that point would leave it behind. The core reads it on
+        # startup and would self-test the ROLLED-BACK binary, then report the
+        # new version as 'healthy' - while failed_swap.json says the swap
+        # failed. Drop it so the failure is reported once, consistently.
+        _cleanup_path(data_dir / "update_pending.json")
+        _cleanup_path(data_dir / "update.lock")
 
         if backup_created and backup_dir.exists():
             try:

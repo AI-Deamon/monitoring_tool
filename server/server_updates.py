@@ -39,6 +39,7 @@ from typing import Dict, Any, Optional
 
 from flask import Blueprint, jsonify, request, send_file, current_app
 from server_auth import require_auth
+from utils.dt import utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,64 @@ updates_bp = Blueprint('updates', __name__, url_prefix='/api/v1/updates')
 UPDATES_DIR = Path(os.environ.get('SENTINELEDGE_UPDATES_DIR',
                                    Path(__file__).parent / 'updates'))
 CLEAR_FAILED_SWAP_SENTINEL = "__CLEAR_FAILED_SWAP__"
+
+
+# =============================================================================
+# H-15 FIX: Package Checksum Utilities
+# =============================================================================
+
+def calculate_file_sha256(file_path: Path) -> str:
+    """
+    Calculate SHA256 checksum of a file.
+    
+    Args:
+        file_path: Path to the file
+        
+    Returns:
+        Hex-encoded SHA256 checksum
+    """
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path, 'rb') as f:
+            # Read in 64KB chunks to handle large files
+            for chunk in iter(lambda: f.read(65536), b''):
+                sha256_hash.update(chunk)
+        return sha256_hash.hexdigest()
+    except Exception as e:
+        logger.error(f"[UPDATES] Failed to calculate SHA256 for {file_path}: {e}")
+        return ''
+
+
+def verify_package_checksum(file_path: Path, expected_sha256: str) -> bool:
+    """
+    Verify package file matches expected SHA256 checksum.
+    
+    Args:
+        file_path: Path to package file
+        expected_sha256: Expected SHA256 hex string
+        
+    Returns:
+        True if checksum matches, False otherwise
+    """
+    if not expected_sha256:
+        logger.warning(f"[UPDATES] No checksum provided for {file_path.name}")
+        return False
+        
+    actual_sha256 = calculate_file_sha256(file_path)
+    
+    if not actual_sha256:
+        return False
+        
+    match = actual_sha256.lower() == expected_sha256.lower()
+    
+    if not match:
+        logger.critical(
+            f"[UPDATES] CHECKSUM MISMATCH for {file_path.name}!\n"
+            f"  Expected: {expected_sha256}\n"
+            f"  Actual:   {actual_sha256}"
+        )
+    
+    return match
 
 
 # =============================================================================
@@ -154,11 +213,30 @@ def _write_update_history(agent_id: str, event: str, version: str, details: str 
         if not status:
             return  # Not a lifecycle event worth auditing
 
+        # A lifecycle episode needs a target to be an episode OF. Writing a
+        # 'pending' row with to_version='' (which trigger-check did for an
+        # agent that had no target_version) left a phantom episode that never
+        # reached a terminal status, which is exactly the un-anchored row the
+        # stale-watchdog episode scoping warns about in
+        # server_dashboard.api_set_target_version.
+        if status in ('pending', 'downloading', 'installing') and not (version or '').strip():
+            logger.debug(
+                f"[UPDATES] Skipping {event} audit row for {agent_id}: no target version"
+            )
+            return
+
         agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
         if not agent:
             return
 
-        now = datetime.now(timezone.utc)
+        # D02 / FR-009: started_at/completed_at are naive-UTC columns. Writing
+        # an aware value here made Postgres cast it through the session
+        # TimeZone, storing IST wall-clock — 5.5h ahead of the row's own
+        # created_at. _update_episode_reference_time() then returned a
+        # timestamp in the future, so the stale-update watchdog's
+        # `reference_ts < reset_cutoff` test could never be true and a
+        # genuinely stuck agent was never auto-reset.
+        now = utcnow_naive()
         history = server_models.UpdateHistory(
             agent_id=agent_id,
             from_version=agent.version,
@@ -179,14 +257,76 @@ def _write_update_history(agent_id: str, event: str, version: str, details: str 
             pass
 
 
-def _get_agent_from_db(agent_id: str):
-    """Helper to get agent record from DB."""
+def _get_agent_from_db(agent_id):
+    """Helper to get agent record from DB.
+
+    agent_id is untrusted input - it arrives from an X-Agent-ID header or a
+    JSON body, so it may be any type, or absent entirely.
+    """
+    import uuid as _uuid
+
+    # agents.agent_id is a native UUID column; bind a uuid.UUID so the
+    # lookup works on every dialect (SQLite's UUID binding rejects str).
+    try:
+        parsed_id = _uuid.UUID(str(agent_id))
+    except (ValueError, AttributeError, TypeError):
+        # A non-UUID id (callers default to the literal 'unknown' when
+        # X-Agent-ID is absent) can never match a UUID column. Issuing the
+        # query anyway made Postgres raise InvalidTextRepresentation, which
+        # aborts the transaction and makes every later query in the same
+        # request fail with "current transaction is aborted" - including the
+        # policy lookup right after this one. Just miss cleanly instead.
+        logger.debug(f"[UPDATES] Ignoring non-UUID agent id: {agent_id!r}")
+        return None
+
     try:
         import server_models
-        return server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        return server_models.Agent.query.filter_by(agent_id=parsed_id).first()
     except Exception as e:
         logger.error(f"[UPDATES] DB lookup failed for {agent_id}: {e}")
+        # Leave the session usable for the rest of the request.
+        try:
+            from extensions import db
+            db.session.rollback()
+        except Exception:
+            pass
         return None
+
+
+def _admin_api_guard():
+    """Authorize an admin-only JSON endpoint.
+
+    Returns None when the caller is an authenticated admin, otherwise an
+    (response, status) tuple to return directly.
+
+    Fails CLOSED: any error while resolving the user denies the request.
+    (The previous inline checks only tested for `user_id in session`, so any
+    logged-in non-admin could change global update policy, and they swallowed
+    import errors with `pass`, skipping authorization entirely.)
+    """
+    try:
+        from flask import session
+        from auth import DashboardUser
+
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Authentication required'}), 401
+
+        user = DashboardUser.query.filter_by(id=user_id).first()
+        if not user or not user.is_active:
+            return jsonify({'error': 'Authentication required'}), 401
+
+        # Password change / deactivation invalidates existing sessions.
+        if user.session_version != session.get('session_version', 1):
+            return jsonify({'error': 'Session expired'}), 401
+
+        if user.role != 'admin':
+            return jsonify({'error': 'Administrator access required'}), 403
+
+        return None
+    except Exception as e:
+        logger.error(f"[UPDATES] Admin authorization failed: {e}")
+        return jsonify({'error': 'Authorization unavailable'}), 403
 
 
 def _get_global_policy():
@@ -394,8 +534,8 @@ def get_latest_version():
 @require_auth
 def download_update(version: str):
     """
-    Download update package. Requires JWT/API-key authentication.
-    Returns the ZIP package file.
+    Download update package with SHA256 verification.
+    Requires JWT/API-key authentication.
     """
 
     try:
@@ -412,6 +552,21 @@ def download_update(version: str):
         if not package_file.exists():
             logger.warning(f"[UPDATES] Package not found: {package_file}")
             return jsonify({'error': 'version_not_found'}), 404
+
+        # H-15 FIX: Verify package integrity before sending
+        metadata_file = config['updates_dir'] / f'{safe_version}.json'
+        if metadata_file.exists():
+            try:
+                metadata = json.loads(metadata_file.read_text())
+                expected_sha256 = metadata.get('package_sha256')
+                
+                if expected_sha256:
+                    if not verify_package_checksum(package_file, expected_sha256):
+                        logger.error(f"[UPDATES] Package integrity check failed for {safe_version}")
+                        return jsonify({'error': 'integrity_check_failed'}), 500
+                    logger.debug(f"[UPDATES] Package integrity verified for {safe_version}")
+            except Exception as e:
+                logger.warning(f"[UPDATES] Could not verify package integrity: {e}")
 
         agent_id = request.headers.get('X-Agent-ID', 'unknown')
         file_size = package_file.stat().st_size
@@ -528,6 +683,44 @@ def report_update_health():
                 f"[UPDATES] ❌ Agent {agent_id} update to {version} "
                 f"FAILED: {json.dumps(details)}"
             )
+
+        # Dedup guard: report_health() retries on transport failures, so a
+        # request the server already committed can arrive twice if only the
+        # ack was lost. Without this, a retried call would double-write
+        # UpdateHistory and double-increment update_attempts.
+        mapped_status = {
+            'healthy': 'success', 'failed': 'failed', 'rolled_back': 'rolled_back'
+        }.get(status)
+        is_duplicate = False
+        if mapped_status:
+            try:
+                import server_models as _sm
+                last = (
+                    _sm.UpdateHistory.query.filter_by(agent_id=agent_id)
+                    .order_by(_sm.UpdateHistory.created_at.desc())
+                    .first()
+                )
+                if (
+                    last
+                    and last.to_version == version
+                    and last.status == mapped_status
+                    and last.created_at
+                    and (datetime.now(timezone.utc) - last.created_at.replace(tzinfo=timezone.utc))
+                        < timedelta(minutes=2)
+                ):
+                    is_duplicate = True
+                    logger.info(
+                        f"[UPDATES] Duplicate health report for agent={agent_id} "
+                        f"version={version} status={status} - acknowledging without re-applying"
+                    )
+            except Exception as e:
+                logger.warning(f"[UPDATES] Dedup check failed, proceeding normally: {e}")
+
+        if is_duplicate:
+            return jsonify({
+                'acknowledged': True,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            })
 
         _log_update_event(agent_id, f'health_{status}', version,
                           json.dumps(details))
@@ -740,15 +933,10 @@ def update_policy():
     """
     Update the global auto-update policy (AUE-14). Admin-only.
     """
-    # Admin auth: require dashboard login + admin role
-    try:
-        from auth import admin_required as _admin_check
-        from flask import session
-        if 'user_id' not in session:
-            return jsonify({'error': 'Authentication required'}), 401
-    except Exception:
-        pass  # Auth module may not be loaded in all contexts
-    
+    denied = _admin_api_guard()
+    if denied:
+        return denied
+
     try:
         from extensions import db
         data = request.get_json() or {}
@@ -839,8 +1027,26 @@ def get_update_history():
             server_models.UpdateHistory.created_at.desc()
         ).limit(limit).all()
 
+        # D21 / FR-026: the payload carried only agent_id, so the update history
+        # table could not show a human-readable name however it was rendered —
+        # it displayed the first eight characters of a UUID. Resolve the agent's
+        # name here so the client has one to show, with the id kept alongside.
+        # One query for the whole page rather than one per row.
+        rows = [h.to_dict() for h in history]
+        agent_ids = {r.get('agent_id') for r in rows if r.get('agent_id')}
+        names = {}
+        if agent_ids:
+            for agent in server_models.Agent.query.filter(
+                server_models.Agent.agent_id.in_(agent_ids)
+            ).all():
+                names[str(agent.agent_id)] = (
+                    getattr(agent, 'agent_name', None) or agent.hostname or ''
+                )
+        for r in rows:
+            r['hostname'] = names.get(str(r.get('agent_id') or ''), '')
+
         return jsonify({
-            'history': [h.to_dict() for h in history],
+            'history': rows,
             'total': total
         })
 
@@ -913,13 +1119,9 @@ def trigger_update_check():
     """
     Trigger immediate update check on agent(s) (AUE-15). Admin-only.
     """
-    # Admin auth
-    try:
-        from flask import session
-        if 'user_id' not in session:
-            return jsonify({'error': 'Authentication required'}), 401
-    except Exception:
-        pass
+    denied = _admin_api_guard()
+    if denied:
+        return denied
 
     try:
         import server_models
@@ -971,14 +1173,11 @@ def trigger_update_check():
 @updates_bp.route('/clear-failure/<agent_id>', methods=['POST'])
 def clear_failure(agent_id: str):
     """
-    Queue a one-time clear_failed_swap signal for an agent.
+    Queue a one-time clear_failed_swap signal for an agent. Admin-only.
     """
-    try:
-        from flask import session
-        if 'user_id' not in session:
-            return jsonify({'error': 'Authentication required'}), 401
-    except Exception:
-        pass
+    denied = _admin_api_guard()
+    if denied:
+        return denied
 
     try:
         agent = _get_agent_from_db(agent_id)

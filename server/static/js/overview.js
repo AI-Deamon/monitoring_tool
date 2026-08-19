@@ -16,14 +16,14 @@
             return dateInput.value;
         }
         const params = new URLSearchParams(window.location.search);
-        return params.get('date') || new Date().toISOString().split('T')[0];
+        return params.get('date') || localDateStr();
     }
 
     // Initialize global date picker and attach listener
     document.addEventListener('DOMContentLoaded', () => {
         const dateInput = document.getElementById('global-date-select');
         if (dateInput) {
-            const today = new Date().toISOString().split('T')[0];
+            const today = localDateStr();
             dateInput.value = getSelectedDate();
             dateInput.max = today;
             // Attach change listener for this page
@@ -59,7 +59,9 @@
         renderTop5Agents(data);
 
         // Update Last Updated
-        document.getElementById('last-updated').textContent = "Last updated: " + new Date().toLocaleTimeString();
+        // FR-007: canonical format via the shared formatter, not the browser locale.
+        document.getElementById('last-updated').textContent =
+            "Last updated: " + DateFmt.formatDateTime(new Date());
 
         // -- Charts --
         console.log('About to render charts...');
@@ -80,10 +82,13 @@
         const ctxStatus = document.getElementById('agent-status-chart');
         if (!ctxStatus) {
             console.error('Canvas element agent-status-chart not found!');
+        } else if (window.statusChart) {
+            // Update in place — destroy()+recreate blanked the canvas for a
+            // frame on every 30s auto-refresh, which read as a visible flicker.
+            window.statusChart.data.datasets[0].data = [data.active_agents, data.offline_agents];
+            window.statusChart.update();
         } else {
             try {
-                if (window.statusChart) window.statusChart.destroy();
-
                 window.statusChart = new Chart(ctxStatus, {
                     type: 'doughnut',
                     data: {
@@ -127,10 +132,14 @@
         const ctxScreen = document.getElementById('screentime-chart');
         if (!ctxScreen) {
             console.error('Canvas element screentime-chart not found!');
+        } else if (window.screenChart) {
+            window.screenChart.data.datasets[0].data = [
+                data.screen_time.active, data.screen_time.idle,
+                data.screen_time.locked, data.screen_time.away || 0,
+            ];
+            window.screenChart.update();
         } else {
             try {
-                if (window.screenChart) window.screenChart.destroy();
-
                 const awayTime = data.screen_time.away || 0;
                 window.screenChart = new Chart(ctxScreen, {
                     type: 'doughnut',
@@ -184,7 +193,7 @@
             if (data.top_idle_agents && data.top_idle_agents.length > 0) {
                 idleList.innerHTML = data.top_idle_agents.slice(0, 3).map((agent, index) => `
                     <li class="flex justify-between items-center gap-1 text-xs">
-                        <span class="text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname.substring(0, 8)}</span>
+                        <span class="text-gray-900 dark:text-gray-100 min-w-0 flex-1 truncate"><strong>${index + 1}.</strong> ${AgentFmt.nameHtml(agent)}</span>
                         <span class="font-mono text-warning-600 dark:text-warning-400 text-[11px]">${formatTime(agent.idle_seconds)}</span>
                     </li>
                 `).join('');
@@ -199,7 +208,7 @@
             if (data.top_active_agents && data.top_active_agents.length > 0) {
                 activeList.innerHTML = data.top_active_agents.slice(0, 3).map((agent, index) => `
                     <li class="flex justify-between items-center gap-1 text-xs">
-                        <span class="text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname.substring(0, 8)}</span>
+                        <span class="text-gray-900 dark:text-gray-100 min-w-0 flex-1 truncate"><strong>${index + 1}.</strong> ${AgentFmt.nameHtml(agent)}</span>
                         <span class="font-mono text-success-600 dark:text-success-400 text-[11px]">${formatTime(agent.active_seconds)}</span>
                     </li>
                 `).join('');
@@ -214,7 +223,7 @@
             if (data.top_locked_agents && data.top_locked_agents.length > 0) {
                 lockedList.innerHTML = data.top_locked_agents.slice(0, 3).map((agent, index) => `
                     <li class="flex justify-between items-center gap-1 text-xs">
-                        <span class="text-gray-900 dark:text-gray-100"><strong>${index + 1}.</strong> ${agent.hostname.substring(0, 8)}</span>
+                        <span class="text-gray-900 dark:text-gray-100 min-w-0 flex-1 truncate"><strong>${index + 1}.</strong> ${AgentFmt.nameHtml(agent)}</span>
                         <span class="font-mono text-gray-600 dark:text-gray-400 text-[11px]">${formatTime(agent.locked_seconds)}</span>
                     </li>
                 `).join('');

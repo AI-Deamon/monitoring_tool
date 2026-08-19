@@ -67,8 +67,6 @@ class WindowTracker:
                     break
             else:
                 self._state_file = Path(program_data) / 'WinDiagSvc' / 'window_state.json'
-        self.duration_lock = threading.Lock()  # Protect cumulative_app_usage updates
-        
         # FIX: Initialize Windows APIs BEFORE _load_state() which may call _do_initial_sample()
         # This prevents "'WindowTracker' object has no attribute 'user32'" errors
         try:
@@ -203,6 +201,10 @@ class WindowTracker:
         
     def get_foreground_window_info(self) -> Optional[Dict]:
         """Get foreground window process info"""
+        # H-06 FIX: Guard against Win32 API calls before initialization
+        if not getattr(self, '_win32_available', False):
+            return None
+            
         try:
             # FIX #10: Use timeout-protected call for GetForegroundWindow
             hwnd = self._get_window_with_timeout(timeout=2)
@@ -411,6 +413,9 @@ class WindowTracker:
                 'is_brief': duration < self._brief_app_threshold
             }
             self._session_history.append(session)
+            self._total_switches += 1
+            if duration < self._brief_app_threshold:
+                self._brief_switches += 1
             
             # Keep only last 100 sessions
             if len(self._session_history) > 100:

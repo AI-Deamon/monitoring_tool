@@ -1,6 +1,17 @@
-import psycopg2
+import os
+import sys
 
-conn = psycopg2.connect("postgresql://postgres:moon@localhost:5432/sentinel_test")
+import psycopg2
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+# Never hardcode credentials: this file previously carried a real password.
+database_url = os.getenv('DATABASE_URL')
+if not database_url:
+    sys.exit("DATABASE_URL is not set (put it in server/.env)")
+
+conn = psycopg2.connect(database_url)
 cur = conn.cursor()
 
 # Check agent_current_status for username

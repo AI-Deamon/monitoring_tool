@@ -566,6 +566,9 @@ class SecurityCollector:
     def _run_powershell(self, script: str, timeout: int = 60) -> Optional[str]:
         """Run a PowerShell command and return stdout."""
         try:
+            # Force UTF-8 output to prevent JSON corruption from down-converted smart quotes
+            utf8_script = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {script}"
+            
             # Use CREATE_NO_WINDOW and -WindowStyle Hidden for robust background execution
             result = subprocess.run(
                 [
@@ -577,7 +580,7 @@ class SecurityCollector:
                     "-WindowStyle",
                     "Hidden",
                     "-Command",
-                    script,
+                    utf8_script,
                 ],
                 capture_output=True,
                 text=True,

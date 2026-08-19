@@ -39,6 +39,7 @@ echo   - Installation files (%INSTALL_DIR%)
 echo.
 echo Optionally remove:
 echo   - Configuration and data (%DATA_DIR%)
+echo   - Per-user data (AppData\Roaming\WinDiagSvc and AppData\Local\WinDiagSvc)
 echo.
 
 set /p "CONFIRM=Continue with uninstallation? (Y/N): "
@@ -56,11 +57,12 @@ echo [STEP 1] Killing all agent processes...
 :: Force kill every possible related process
 taskkill /f /im windiag.exe >nul 2>&1
 taskkill /f /im syshealth.exe >nul 2>&1
+taskkill /f /im swapper.exe >nul 2>&1
 taskkill /f /im nssm.exe >nul 2>&1
 taskkill /f /im pythonw.exe >nul 2>&1
 
 :: Also kill by window title pattern (catches child processes)
-powershell -Command "Get-Process | Where-Object {$_.Path -like '*WinDiagSvc*' -or $_.Path -like '*windiag*' -or $_.Path -like '*syshealth*'} | Stop-Process -Force -ErrorAction SilentlyContinue" >nul 2>&1
+powershell -Command "Get-Process | Where-Object {$_.Path -like '*WinDiagSvc*' -or $_.Path -like '*windiag*' -or $_.Path -like '*syshealth*' -or $_.Path -like '*swapper*'} | Stop-Process -Force -ErrorAction SilentlyContinue" >nul 2>&1
 
 echo [OK] Processes terminated
 
@@ -106,6 +108,16 @@ if %errorlevel% equ 0 (
     echo [INFO] Helper task not found — skipping
 )
 
+:: Transient on-demand relaunch task created during auto-update swaps
+:: (tools/swapper.py, core/service.py) — normally self-deletes, but a
+:: crash mid-swap can leave it behind.
+schtasks /query /tn "%TASK_NAME%_OnDemand" >nul 2>&1
+if %errorlevel% equ 0 (
+    schtasks /end /tn "%TASK_NAME%_OnDemand" >nul 2>&1
+    schtasks /delete /tn "%TASK_NAME%_OnDemand" /f >nul 2>&1
+    echo [OK] Leftover on-demand helper task removed
+)
+
 :: ============================================================================
 :: Step 4: Remove Installation Files (with retry)
 :: ============================================================================
@@ -116,6 +128,7 @@ if exist "%INSTALL_DIR%\" (
     :: Final kill sweep before deletion
     taskkill /f /im windiag.exe >nul 2>&1
     taskkill /f /im syshealth.exe >nul 2>&1
+    taskkill /f /im swapper.exe >nul 2>&1
     taskkill /f /im nssm.exe >nul 2>&1
 
     :: Wait for OS to release file handles
@@ -148,9 +161,26 @@ if exist "%INSTALL_DIR%\" (
     )
 
     if exist "%INSTALL_DIR%\" (
-        echo [WARN] Some files still locked. Scheduling delete on next reboot...
-        powershell -Command "Get-ChildItem '%INSTALL_DIR%' -Recurse -File | ForEach-Object { [System.IO.File]::Move($_.FullName, $_.FullName) }" >nul 2>&1
-        echo        Manual fallback: delete %INSTALL_DIR% after reboot
+        echo [WARN] Some files still locked. Scheduling delayed delete for next reboot...
+        set "MOVEFILE_PS1=%TEMP%\wds_uninstall_movefile.ps1"
+        (
+        echo $sig = @'
+        echo using System;
+        echo using System.Runtime.InteropServices;
+        echo public class WdsNative {
+        echo     [DllImport^("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto^)]
+        echo     public static extern bool MoveFileEx^(string lpExistingFileName, string lpNewFileName, int dwFlags^);
+        echo }
+        echo '@
+        echo Add-Type -TypeDefinition $sig -ErrorAction SilentlyContinue
+        echo Get-ChildItem -Path "%INSTALL_DIR%" -Recurse -File -ErrorAction SilentlyContinue ^| ForEach-Object {
+        echo     [WdsNative]::MoveFileEx^($_.FullName, $null, 4^) ^| Out-Null
+        echo }
+        ) > "!MOVEFILE_PS1!"
+        powershell -NoProfile -ExecutionPolicy Bypass -File "!MOVEFILE_PS1!" >nul 2>&1
+        del /f /q "!MOVEFILE_PS1!" >nul 2>&1
+        echo        Locked files registered for deletion on next reboot ^(via MoveFileEx^)
+        echo        Manual fallback: delete %INSTALL_DIR% after reboot if anything remains
     ) else (
         echo [OK] Installation files removed
     )
@@ -184,15 +214,40 @@ if /i "%REMOVE_DATA%"=="Y" (
     ) else (
         echo [INFO] Data directory not found
     )
+
+    :: Per-user data: Helper writes helper_state.json/helper.log to
+    :: AppData\Roaming\WinDiagSvc (helper/config.py), and Core's writable
+    :: data dir falls back to AppData\Local\WinDiagSvc when ProgramData
+    :: isn't writable (core/config.py _get_writable_data_dir).
+    echo [INFO] Checking per-user data directories...
+    for /d %%U in ("C:\Users\*") do (
+        if exist "%%U\AppData\Roaming\WinDiagSvc\" (
+            echo   - Cleaning Roaming AppData for %%~nU
+            icacls "%%U\AppData\Roaming\WinDiagSvc" /reset /t /q >nul 2>&1
+            rmdir /s /q "%%U\AppData\Roaming\WinDiagSvc\" 2>nul
+            if exist "%%U\AppData\Roaming\WinDiagSvc\" (
+                powershell -Command "Remove-Item -Path '%%U\AppData\Roaming\WinDiagSvc' -Recurse -Force -ErrorAction SilentlyContinue"
+            )
+        )
+        if exist "%%U\AppData\Local\WinDiagSvc\" (
+            echo   - Cleaning Local AppData for %%~nU
+            icacls "%%U\AppData\Local\WinDiagSvc" /reset /t /q >nul 2>&1
+            rmdir /s /q "%%U\AppData\Local\WinDiagSvc\" 2>nul
+            if exist "%%U\AppData\Local\WinDiagSvc\" (
+                powershell -Command "Remove-Item -Path '%%U\AppData\Local\WinDiagSvc' -Recurse -Force -ErrorAction SilentlyContinue"
+            )
+        )
+    )
+    echo [OK] Per-user data directories checked
 ) else (
     echo [INFO] Data preserved at %DATA_DIR%
 )
 
 :: ============================================================================
-:: Step 5: Also clean legacy SentinelEdge if present
+:: Step 6: Also clean legacy SentinelEdge if present
 :: ============================================================================
 echo.
-echo [STEP 5] Checking for legacy installation...
+echo [STEP 6] Checking for legacy installation...
 
 set "LEGACY_FOUND=0"
 sc query SentinelEdgeCore >nul 2>&1

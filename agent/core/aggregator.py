@@ -10,6 +10,17 @@ from .buffer import BufferDB
 
 logger = logging.getLogger(__name__)
 
+# Any gap between consecutive heartbeats bigger than this is treated as an
+# interruption (sleep/suspend, crash, or a buffered offline backlog being
+# processed all at once) rather than continuous foreground app usage. Must
+# stay comfortably above the largest heartbeat interval the helper uses
+# (120s while locked) - see agent/helper/main.py's adaptive heartbeat interval.
+MAX_HEARTBEAT_GAP_SECONDS = 300
+
+# Matches the 24h session cap already used in agent/helper/window.py and
+# agent/helper/domain.py - a backstop in case a gap isn't caught above.
+MAX_APP_SESSION_SECONDS = 86400
+
 class HeartbeatAggregator:
     """Aggregates heartbeats into merged events - Config-driven"""
     
@@ -192,16 +203,52 @@ class HeartbeatAggregator:
             )
             self.buffer.store_merged_event(event)
 
+    def _store_app_event(self, agent_id, username, app_name, title, start, end):
+        """
+        Build and store a single app-usage event, capping its duration to
+        MAX_APP_SESSION_SECONDS. Mirrors the session cap already applied in
+        agent/helper/window.py and agent/helper/domain.py, so a session
+        that somehow bypasses the gap check in _merge_app_sessions still
+        can't report an unbounded duration.
+        """
+        duration = (end - start).total_seconds()
+        if duration <= 0:
+            return
+
+        if duration > MAX_APP_SESSION_SECONDS:
+            logger.warning(
+                f"AGGREGATOR: App session exceeded 24h: {app_name}, "
+                f"duration={duration / 3600:.1f}h, capping to 24h"
+            )
+            duration = MAX_APP_SESSION_SECONDS
+            end = start + timedelta(seconds=MAX_APP_SESSION_SECONDS)
+
+        event = {
+            'agent_id': agent_id,
+            'username': username,
+            'type': 'app',
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'duration_seconds': duration,
+            'state': {
+                'app_name': app_name,
+                'window_title': title
+            },
+            'heartbeat_count': 1
+        }
+        self.buffer.store_merged_event(event)
+
     def _merge_app_sessions(self, agent_id: str, heartbeats: List[Dict]):
         """Merge app foreground sessions into events"""
         if not heartbeats:
             return
-        
+
         current_app = None
         current_start = None
         current_username = None
         current_title = None
-        
+        last_seen_ts = None  # timestamp of the most recently processed heartbeat
+
         for hb_record in heartbeats:
             hb = hb_record['data']
             app_data = hb.get('app', {})
@@ -209,103 +256,89 @@ class HeartbeatAggregator:
             title = app_data.get('current_title')
             timestamp = hb.get('timestamp')
             username = hb.get('username', 'unknown')
-            
+
+            if not timestamp:
+                continue
+
+            # Parse timestamp
+            try:
+                # H-08 FIX: Parse with timezone awareness and normalize to UTC
+                ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                else:
+                    ts = ts.astimezone(timezone.utc)
+            except:
+                continue
+
+            # A gap bigger than MAX_HEARTBEAT_GAP_SECONDS since the last
+            # heartbeat we saw means something interrupted normal reporting
+            # (sleep/suspend, crash, or a buffered offline backlog being
+            # processed all at once). Close any open session at the last
+            # heartbeat we actually saw, NOT at `ts` - otherwise the whole
+            # gap would silently be folded into the session's duration.
+            if (
+                last_seen_ts is not None
+                and (ts - last_seen_ts).total_seconds() > MAX_HEARTBEAT_GAP_SECONDS
+            ):
+                if current_app and current_start:
+                    self._store_app_event(
+                        agent_id, current_username, current_app, current_title,
+                        current_start, last_seen_ts,
+                    )
+                current_app = None
+                current_start = None
+
+            last_seen_ts = ts
+
             # Skip if app is None (user was idle/locked)
             if not app_name or app_name == 'None' or app_name == 'null':
                 # User was idle - end current app session if exists
                 if current_app and current_start:
-                    try:
-                        ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    except:
-                        continue
-                        
-                    duration = (ts - current_start).total_seconds()
-                    if duration > 0:
-                        event = {
-                            'agent_id': agent_id,
-                            'username': current_username,
-                            'type': 'app',
-                            'start': current_start.isoformat(),
-                            'end': ts.isoformat(),
-                            'duration_seconds': duration,
-                            'state': {
-                                'app_name': current_app,
-                                'window_title': current_title
-                            },
-                            'heartbeat_count': 1
-                        }
-                        self.buffer.store_merged_event(event)
-                    
-                    # Reset current session
+                    self._store_app_event(
+                        agent_id, current_username, current_app, current_title,
+                        current_start, ts,
+                    )
                     current_app = None
                     current_start = None
                 continue  # Skip to next heartbeat
-            
-            if not timestamp:
-                continue
-            
-            # Parse timestamp
-            try:
-                ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            except:
-                continue
-            
+
             # If app changed, save previous and start new
             if app_name != current_app:
                 # Save previous app if exists
                 if current_app and current_start:
-                    duration = (ts - current_start).total_seconds()
-                    if duration > 0:
-                        event = {
-                            'agent_id': agent_id,
-                            'username': current_username,
-                            'type': 'app',
-                            'start': current_start.isoformat(),
-                            'end': ts.isoformat(),
-                            'duration_seconds': duration,
-                            'state': {
-                                'app_name': current_app,
-                                'window_title': current_title
-                            },
-                            'heartbeat_count': 1
-                        }
-                        self.buffer.store_merged_event(event)
-                
+                    self._store_app_event(
+                        agent_id, current_username, current_app, current_title,
+                        current_start, ts,
+                    )
+
                 # Start new app
                 current_app = app_name
                 current_start = ts
                 current_username = username
                 current_title = title
-        
+
         # Save final app
         if current_app and current_start:
             # BUG FIX: Use the last heartbeat's timestamp, NOT now()
             # This ensures historical data is attributed correctly.
             last_hb = heartbeats[-1]['data']
             last_ts_str = last_hb.get('timestamp')
-            
+
             if last_ts_str:
                 try:
                     end_time = datetime.fromisoformat(last_ts_str.replace('Z', '+00:00'))
+                    if end_time.tzinfo is None:
+                        end_time = end_time.replace(tzinfo=timezone.utc)
+                    else:
+                        end_time = end_time.astimezone(timezone.utc)
                 except:
-                    end_time = datetime.now(timezone.utc) # Last resort fallback
+                    end_time = datetime.now(timezone.utc)  # Last resort fallback
             else:
                 end_time = datetime.now(timezone.utc)
-                
-            duration = (end_time - current_start).total_seconds()
-            if duration > 0:
-                event = {
-                    'agent_id': agent_id,
-                    'username': current_username,
-                    'type': 'app',
-                    'start': current_start.isoformat(),
-                    'end': end_time.isoformat(),
-                    'duration_seconds': duration,
-                    'state': {
-                        'app_name': current_app,
-                        'window_title': current_title
-                    },
-                    'heartbeat_count': 1
-                }
-                self.buffer.store_merged_event(event)
+
+            self._store_app_event(
+                agent_id, current_username, current_app, current_title,
+                current_start, end_time,
+            )
 

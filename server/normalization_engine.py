@@ -335,7 +335,7 @@ class CPEResolver:
 
         try:
             # Import here to avoid circular imports
-            from . import server_models
+            import server_models
 
             entries = server_models.NVDCacheEntry.query.filter_by(
                 cpe_string=cpe_string

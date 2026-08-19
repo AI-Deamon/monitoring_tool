@@ -101,22 +101,49 @@ def run_migrations():
         return True
 
 def apply_stored_procedures():
-    """Apply critical stored procedures"""
-    print_step(6, "Applying Stored Procedures")
-    
-    scripts = [
-        "scripts/fixes/apply_sync_functions.py",
-        "scripts/fixes/fix_domain_sessions_schema.py",
+    """Verify critical stored procedures exist (created by Alembic migrations)"""
+    print_step(6, "Verifying Stored Procedures")
+
+    # All of these are created by the Alembic chain (run_migrations step).
+    # This step verifies none are missing so a fresh install fails loudly
+    # here instead of 500ing on the first telemetry event.
+    required = [
+        'process_screentime_event',
+        'process_screentime_delta',
+        'process_app_switch_event',
+        'process_domain_switch_event',
+        'sync_screen_time_from_sessions',
+        'sync_app_usage_from_sessions',
+        'sync_domain_usage_from_sessions',
     ]
-    
-    for script in scripts:
-        script_path = Path(script)
-        if script_path.exists():
-            run_command(f"python {script}", f"Running {script_path.name}")
-        else:
-            print(f"  ⚠️  {script} not found, skipping")
-    
-    return True
+
+    try:
+        sys.path.insert(0, str(Path.cwd()))
+        from server_app import create_app
+        from extensions import db
+        from sqlalchemy import text
+
+        app = create_app()
+        with app.app_context():
+            rows = db.session.execute(text(
+                "SELECT proname FROM pg_proc WHERE proname = ANY(:names)"
+            ), {'names': required}).fetchall()
+            found = {r[0] for r in rows}
+
+        missing = [name for name in required if name not in found]
+        for name in required:
+            mark = "✅" if name in found else "❌"
+            print(f"  {mark} {name}")
+
+        if missing:
+            print(f"\n  ❌ Missing stored procedures: {', '.join(missing)}")
+            print("     Run 'alembic upgrade head' and re-run this script.")
+            return False
+
+        return True
+    except Exception as e:
+        print(f"  ⚠️  Could not verify stored procedures: {e}")
+        return False
 
 def create_default_admin():
     """Create default admin user"""

@@ -10,7 +10,6 @@ import tempfile
 import uuid
 from pathlib import Path
 import pytest
-import os
 
 
 class TestUpdateIntervalDefault:
@@ -190,15 +189,23 @@ class TestUpdateIntervalDefault:
 class TestVersionReportingOnPoll:
     """Fix 3: Server should update agents.version on every /latest poll."""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_env(self, monkeypatch):
+        """Point this class at in-memory SQLite without leaking the change.
+
+        Assigning to os.environ directly outlives the test, and other suites
+        (e.g. test_midnight_span_handling) deliberately run against the real
+        DATABASE_URL - they then fail with "no such table: agents".
+        """
+        monkeypatch.setenv('FLASK_ENV', 'development')
+        monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
+        monkeypatch.setenv('SECRET_KEY', 'test-secret-key-for-unit-tests')
+
     def _create_test_app(self):
         """Create a Flask app configured for SQLite testing."""
         import sys
         server_root = Path(__file__).parent.parent / "server"
         sys.path.insert(0, str(server_root))
-
-        os.environ['FLASK_ENV'] = 'development'
-        os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
-        os.environ['SECRET_KEY'] = 'test-secret-key-for-unit-tests'
 
         from server_app import create_app
         from extensions import db

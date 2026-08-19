@@ -60,6 +60,11 @@ class SystemState(Enum):
 # High-confidence lock screen processes
 LOCK_APPS = ["lockapp.exe", "logonui.exe"]
 
+# Consecutive not-locked polling ticks required before a heuristic-sourced
+# (desktop/process) LOCKED state is allowed to self-correct back to ACTIVE.
+# _monitor_loop ticks every 5s, so 3 ticks ~= 15s of confirmation.
+HEURISTIC_UNLOCK_CONFIRM_TICKS = 3
+
 
 class StateAuthority:
     """
@@ -79,16 +84,41 @@ class StateAuthority:
         """Rule engine for state transitions"""
         if self.current_state == SystemState.LOCKED:
             # LOCKED can only be exited by:
-            # 1. OS unlock event (highest authority)
-            # 2. RDP override (user is active remotely)
-            # if new_state == SystemState.ACTIVE and (
-            #     source == "os" or remote_session_active
-            # ):
-            if new_state == SystemState.ACTIVE and (source == "os"):
+            # 1. OS unlock event (highest authority) - a real WTS lock
+            #    always got here via source="os", so a real WTS unlock is
+            #    guaranteed to eventually arrive.
+            if new_state == SystemState.ACTIVE and source == "os":
+                return True
+            # 2. Heuristic self-correction — ONLY for locks entered via a
+            #    non-OS heuristic (desktop/process). Those heuristics can
+            #    false-positive on things that are not real OS locks (e.g.
+            #    a UAC secure-desktop switch), which means no matching OS
+            #    unlock event will ever arrive to release them. A real
+            #    OS-confirmed lock (lock_source == "os") is never eligible
+            #    here, so it stays fully terminal.
+            if (
+                new_state == SystemState.ACTIVE
+                and source == "heuristic_confirmed"
+                and self.lock_source in ("desktop", "process")
+            ):
                 return True
             return False
 
         return True
+
+    def upgrade_lock_source_to_os(self):
+        """
+        Promote an in-progress heuristic-sourced lock to OS-confirmed.
+
+        Called when a real WTS_SESSION_LOCK event arrives for a session
+        that a desktop/process heuristic had already (correctly, in this
+        case) flagged as LOCKED. Without this, the lock would stay tagged
+        with its original non-authoritative source and remain eligible for
+        heuristic self-correction even though it is now a real OS lock.
+        """
+        with self._lock:
+            if self.current_state == SystemState.LOCKED:
+                self.lock_source = "os"
 
     def set_state(
         self, new_state: SystemState, source: str, remote_session_active: bool = False
@@ -146,6 +176,7 @@ class StateDetector:
         self._last_unlock_transition_time = (
             0  # Grace period after any unlock transition
         )
+        self._heuristic_unlock_streak = 0  # Consecutive not-locked polls while heuristic-locked
         self._transition_lock = (
             threading.RLock()
         )  # Serialize transitions across threads
@@ -189,9 +220,12 @@ class StateDetector:
         self.idle_detector = None
 
         # PHASE 2: Initialize state machine (ONLY place that calculates time)
+        # US1: inject the input-recentcy predicate so tick() never credits
+        # ACTIVE while the user is unattended (anti-fabrication guard).
         self.screen_time_engine = ScreenTimeEngine(
             data_dir=data_dir or Path(os.path.expanduser("~")) / ".sentineledge",
             agent_id=self.agent_id,
+            user_active_fn=lambda: self._get_idle_seconds() < self.idle_threshold,
         )
 
         # ✅ OFFLINE-FIRST: Cached BufferDB instance (avoids connection leaks)
@@ -366,9 +400,18 @@ class StateDetector:
         self, new_state: str, source: str = "poll", remote_session_active: bool = False
     ):
         """PHASE 2: Use state machine for ALL time calculations"""
+        callback_args = None
         with self._transition_lock:
             prev_state = self.current_state
             if prev_state == new_state:
+                # A real OS lock event can arrive after a desktop/process
+                # heuristic already flagged LOCKED (heuristics poll every
+                # 5s; WTS events are near-instant but not guaranteed to
+                # win the race). Promote it to OS-confirmed so it becomes
+                # fully terminal, even though the visible state is unchanged.
+                if new_state == "locked" and source == "os":
+                    self.authority.upgrade_lock_source_to_os()
+                    self._heuristic_unlock_streak = 0
                 return
             try:
                 new_state_enum = SystemState(new_state)
@@ -392,19 +435,21 @@ class StateDetector:
             now = time.time()
             duration_seconds = now - self._last_state_change_time
 
-            # NEW: CREATE SPAN for the exiting state (timeline visualization only)
+            # NEW: CREATE SPAN(s) for the exiting state (timeline visualization
+            # only). FR-012: multi-day states are split into one span per UTC
+            # day; each segment is persisted to the buffer immediately.
             if (
-                prev_state in ("active", "idle", "locked")
+                prev_state in ("active", "idle", "locked", "away")
                 and self._last_state_change_time > 0
                 and duration_seconds >= 1.0
             ):
-                span = self._create_span(
+                spans = self._create_span_segments(
                     state=prev_state,
                     start_time=self._last_state_change_time,
                     end_time=now,
                     duration=duration_seconds,
                 )
-                if span:
+                for span in spans:
                     self.pending_spans.append(span)
                     # ✅ OFFLINE-FIRST: Persist span to SQLite buffer immediately
                     # This ensures spans survive midnight resets and offline periods
@@ -462,28 +507,35 @@ class StateDetector:
 
             # Mirror authority state locally
             self.current_state = new_state
+            # Any real transition clears the heuristic self-correction
+            # counter; it only tracks consecutive not-locked polls while
+            # stuck in the same heuristic-sourced LOCKED state.
+            self._heuristic_unlock_streak = 0
             # NEW: Persist current state for crash recovery
             self._persist_current_state()
 
-            # Call callback with duration
+            # Capture callback args — invoke outside the lock to avoid blocking
+            # other threads on a slow/unreachable network request.
             if self.on_state_change:
-                try:
-                    prev_state_enum = (
-                        SystemState(prev_state)
-                        if prev_state != "unknown"
-                        else SystemState.UNKNOWN
-                    )
-                    new_state_enum = SystemState(new_state)
-                    self.on_state_change(
-                        prev_state_enum, new_state_enum, duration_seconds
-                    )
-                except Exception as e:
-                    logger.error(f"[STATE] Callback error: {e}", exc_info=True)
+                prev_state_enum = (
+                    SystemState(prev_state)
+                    if prev_state != "unknown"
+                    else SystemState.UNKNOWN
+                )
+                new_state_enum = SystemState(new_state)
+                callback_args = (prev_state_enum, new_state_enum, duration_seconds)
 
             logger.info(
                 f"[STATE] {prev_state} -> {new_state} "
                 f"(source={source}, remote={remote_session_active})"
             )
+
+        # Invoke callback outside the lock
+        if callback_args:
+            try:
+                self.on_state_change(*callback_args)
+            except Exception as e:
+                logger.error(f"[STATE] Callback error: {e}", exc_info=True)
 
     def _handle_enter(self, prev_state, new_state):
         pass
@@ -742,6 +794,7 @@ class StateDetector:
                     and self._foreground_app
                     and self._foreground_app.lower() in LOCK_APPS
                 ):
+                    self._heuristic_unlock_streak = 0
                     self._transition("locked", source="process")
                     return
 
@@ -750,13 +803,43 @@ class StateDetector:
                 # remote_session_active = self._is_remote_session()
                 remote_session_active = False
                 if self._is_session_locked() and not remote_session_active:
+                    self._heuristic_unlock_streak = 0
                     self._transition("locked", source="desktop")
+                    return
+
+                # Neither heuristic detects a lock this tick. If we're
+                # currently LOCKED via one of those same heuristics (never
+                # confirmed by a real OS lock event), count this as a vote
+                # to self-correct — some false positives (e.g. a UAC
+                # secure-desktop switch) never get a matching OS unlock
+                # event, so without this the state would stay stuck LOCKED
+                # indefinitely.
+                if (
+                    self.authority.state == SystemState.LOCKED
+                    and self.authority.lock_source in ("desktop", "process")
+                ):
+                    self._heuristic_unlock_streak += 1
+                    if self._heuristic_unlock_streak >= HEURISTIC_UNLOCK_CONFIRM_TICKS:
+                        logger.info(
+                            f"[STATE] Heuristic-sourced LOCKED (source="
+                            f"{self.authority.lock_source}) self-corrected to ACTIVE "
+                            f"after {self._heuristic_unlock_streak} consecutive "
+                            f"not-locked polls with no OS lock/unlock event"
+                        )
+                        self._transition("active", source="heuristic_confirmed")
+                        return
+                    logger.debug(
+                        f"[STATE] Heuristic-sourced LOCKED looks unlocked "
+                        f"({self._heuristic_unlock_streak}/{HEURISTIC_UNLOCK_CONFIRM_TICKS} "
+                        f"confirmation polls)"
+                    )
                     return
             else:
                 # remote_session_active = self._is_remote_session()
                 remote_session_active = False
 
-            # If we reach here, neither lock detection triggered.
+            # If we reach here, neither lock detection triggered (or we're
+            # in the post-unlock grace window).
             # If currently locked, only OS unlock or remote-session activity may unlock.
             if self.authority.state == SystemState.LOCKED:
                 if remote_session_active:
@@ -828,6 +911,13 @@ class StateDetector:
                     start_time + 86400
                 )  # Adjust end_time to match capped duration
 
+            # US2 (FR-005): a locked state >= 2h is recorded as away (mirrors
+            # the engine AWAY_THRESHOLD). For split spans the segmenter passes
+            # the already-resolved state, so this rule applies the decision to
+            # the ORIGINAL duration (never a single segment's duration).
+            if state == "locked" and duration >= 7200:
+                state = "away"
+
             start_dt = datetime.fromtimestamp(start_time, tz=timezone.utc)
             end_dt = datetime.fromtimestamp(end_time, tz=timezone.utc)
 
@@ -846,9 +936,73 @@ class StateDetector:
             logger.error(f"[SPAN] Failed to create span: {e}")
             return None
 
+    def _create_span_segments(
+        self,
+        state: str,
+        start_time: float,
+        end_time: float,
+        duration: Optional[float] = None,
+    ) -> list:
+        """
+        Split a continuous state into one span per UTC day (FR-012).
+
+        The server buckets spans by `start_time::DATE`, so a multi-day state
+        must be split at UTC midnight to avoid one 24h-capped span landing on
+        a single day (dropping the other days' time entirely).
+
+        The `away` reclassification (FR-005) is decided ONCE from the ORIGINAL
+        duration and applied to every segment — a 2.5h lock crossing midnight
+        emits two `away` spans, never two under-threshold `locked` spans.
+        """
+        try:
+            from datetime import datetime, timezone, timedelta
+
+            if duration is None:
+                duration = end_time - start_time
+
+            resolved_state = (
+                "away" if (state == "locked" and duration >= 7200) else state
+            )
+
+            start_dt = datetime.fromtimestamp(start_time, tz=timezone.utc)
+            end_dt = datetime.fromtimestamp(end_time, tz=timezone.utc)
+
+            if start_dt.date() == end_dt.date():
+                span = self._create_span(
+                    resolved_state, start_time, end_time, duration
+                )
+                return [span] if span else []
+
+            segments = []
+            seg_start = start_time
+            cursor = start_dt.date() + timedelta(days=1)
+            while True:
+                midnight_ts = datetime.combine(
+                    cursor, datetime.min.time(), tzinfo=timezone.utc
+                ).timestamp()
+                if midnight_ts >= end_time:
+                    break
+                span = self._create_span(
+                    resolved_state, seg_start, midnight_ts, midnight_ts - seg_start
+                )
+                if span:
+                    segments.append(span)
+                seg_start = midnight_ts
+                cursor += timedelta(days=1)
+
+            span = self._create_span(
+                resolved_state, seg_start, end_time, end_time - seg_start
+            )
+            if span:
+                segments.append(span)
+            return segments
+        except Exception as e:
+            logger.error(f"[SPAN] Failed to split spans: {e}")
+            return []
+
     def get_pending_spans(self) -> list:
         """Return and clear pending spans (called by Collector)."""
-        with self._state_lock:
+        with self._transition_lock:
             spans = self.pending_spans.copy()
             self.pending_spans.clear()
             return spans
@@ -874,15 +1028,19 @@ class StateDetector:
                 from pathlib import Path
                 from core.buffer import BufferDB
                 
-                # Determine buffer path (typically ProgramData/SentinelEdge/buffer.db)
-                possible_paths = [
+                # H-01 FIX: Prioritize dynamic buffer path from state_file location
+                # This handles custom installation directories correctly
+                possible_paths = []
+                
+                # Primary: Use state_file.parent (same directory as helper state)
+                if hasattr(self, 'state_file') and self.state_file:
+                    possible_paths.append(self.state_file.parent / "buffer.db")
+                
+                # Fallback: Standard installation paths (only if primary unavailable)
+                possible_paths.extend([
                     Path("C:\\ProgramData\\SentinelEdge\\buffer.db"),
                     Path("C:\\ProgramData\\SentinelEdge\\data\\buffer.db"),
-                ]
-                
-                # Add data_dir path if available
-                if hasattr(self, 'state_file') and self.state_file:
-                    possible_paths.insert(0, self.state_file.parent / "buffer.db")
+                ])
                 
                 for path in possible_paths:
                     if path.exists():
@@ -954,7 +1112,7 @@ class StateDetector:
         Returns:
             Number of spans successfully persisted
         """
-        with self._state_lock:
+        with self._transition_lock:
             if not self.pending_spans:
                 logger.debug("[SPAN] No pending spans to persist")
                 return 0
@@ -987,22 +1145,48 @@ class StateDetector:
             with open(self.state_file, "r") as f:
                 data = json.load(f)
 
+            # Track whether we discarded stale data that needs a deferred persist.
+            # We CANNOT call _persist_current_state() here yet — current_state and
+            # session_start have not been restored yet.  Writing now would save a
+            # blank session state that would break continuity on the next restart.
+            _needs_stale_persist = False
+
             # Recover pending final-day totals (midnight rollover) if present.
             pending_final = data.get("final_totals_for_upload")
             pending_day = data.get("final_totals_day_for_upload")
             if isinstance(pending_final, dict) and pending_day:
-                self._final_totals_for_upload = pending_final
-                self._final_totals_day_for_upload = str(pending_day)
-                logger.info(
-                    f"[RECOVERY] Restored pending final-day totals for {self._final_totals_day_for_upload}: "
-                    f"A={pending_final.get('active_seconds', 0)} "
-                    f"I={pending_final.get('idle_seconds', 0)} "
-                    f"L={pending_final.get('locked_seconds', 0)} "
-                    f"W={pending_final.get('away_seconds', 0)}"
-                )
+                # Validate totals before restoring to prevent stale overflow data
+                total = (pending_final.get('active_seconds', 0) +
+                         pending_final.get('idle_seconds', 0) +
+                         pending_final.get('locked_seconds', 0) +
+                         pending_final.get('away_seconds', 0))
+                if total > 86400:
+                    logger.warning(
+                        f"[RECOVERY] Discarding stale final-day totals (total={total}s > 86400s) "
+                        f"- will send fresh data instead"
+                    )
+                    # Clear in-memory; deferred persist happens after full recovery.
+                    self._final_totals_for_upload = None
+                    self._final_totals_day_for_upload = None
+                    _needs_stale_persist = True
+                else:
+                    self._final_totals_for_upload = pending_final
+                    self._final_totals_day_for_upload = str(pending_day)
+                    logger.info(
+                        f"[RECOVERY] Restored pending final-day totals for {self._final_totals_day_for_upload}: "
+                        f"A={pending_final.get('active_seconds', 0)}s, "
+                        f"I={pending_final.get('idle_seconds', 0)}s, "
+                        f"L={pending_final.get('locked_seconds', 0)}s, "
+                        f"W={pending_final.get('away_seconds', 0)}s"
+                    )
 
             # 1. Recover Current Session Span
-            if "current_state" in data and "session_start" in data:
+            # Use while-False so we can 'break' out early without 'return',
+            # letting the deferred persist below always run.
+            while True:
+                if "current_state" not in data or "session_start" not in data:
+                    break
+
                 prev_state = data["current_state"]
                 session_start = float(data["session_start"])
                 now = time.time()
@@ -1023,7 +1207,7 @@ class StateDetector:
                         f"[RECOVERY] Skipping interrupted {prev_state} span after "
                         f"{last_event}; gap is handled by ScreenTimeEngine"
                     )
-                    return
+                    break
 
                 saved_day = str(data.get("date") or "")
                 today = datetime.now().date().isoformat()
@@ -1032,20 +1216,20 @@ class StateDetector:
                         f"[RECOVERY] Skipping interrupted {prev_state} span from "
                         f"previous day {saved_day}; today is {today}"
                     )
-                    return
+                    break
 
                 if prev_state not in ("active", "idle", "locked"):
                     logger.info(
                         f"[RECOVERY] Skipping unsupported interrupted state: {prev_state}"
                     )
-                    return
+                    break
 
                 if duration < 0:
                     logger.warning(
                         f"[RECOVERY] Skipping interrupted {prev_state} span with "
                         f"negative duration: {duration:.1f}s"
                     )
-                    return
+                    break
 
                 # Long gaps are ambiguous after restart. Do not rewrite them to
                 # "now - 8h"; that fabricates overnight activity after shutdown.
@@ -1056,22 +1240,37 @@ class StateDetector:
                         f"[RECOVERY] Interrupted session too long ({duration:.1f}s), "
                         f"skipping recovery"
                     )
-                    return
+                    break
 
                 if duration > 60:  # Only if > 1 minute
-                    # Create span for the interrupted session
-                    span = self._create_span(
+                    # Create span(s) for the interrupted session (FR-012: one
+                    # span per UTC day when the session crosses midnight).
+                    spans = self._create_span_segments(
                         state=prev_state,
                         start_time=session_start,
                         end_time=now,
                         duration=duration,
                     )
-                    if span:
-                        with self._state_lock:
+                    for span in spans:
+                        # Use _transition_lock (not _state_lock) - it's the lock
+                        # every other reader/writer of pending_spans uses
+                        # (_transition, get_pending_spans, persist_all_pending_spans).
+                        with self._transition_lock:
                             self.pending_spans.append(span)
+                    if spans:
                         logger.info(
-                            f"[RECOVERY] Recovered {prev_state} session: {duration:.1f}s"
+                            f"[RECOVERY] Recovered {prev_state} session: "
+                            f"{duration:.1f}s ({len(spans)} span(s))"
                         )
+                break  # end of while True — always exit after one pass
+
+            # Deferred persist: now that current_state, session_start, and pending
+            # spans are all restored, it is safe to write the cleared stale data.
+            # This block always runs even when span recovery used 'break'.
+            if _needs_stale_persist:
+                self._persist_current_state()
+                logger.info("[RECOVERY] Persisted cleared stale final-day totals")
+
         except Exception as e:
             logger.error(f"[RECOVERY] Failed to load state: {e}")
 
@@ -1108,11 +1307,12 @@ class StateDetector:
                 )
                 # Store final totals to send via next heartbeat (for yesterday's final data)
                 self._final_totals_for_upload = final_totals
+                # "Yesterday" must use the same agent-local day boundary the
+                # state machine rolled over on (core.agent_time), not a
+                # second hardcoded IST offset.
+                from core.agent_time import now as _local_now
                 self._final_totals_day_for_upload = (
-                    datetime.now(timezone.utc).astimezone(
-                        timezone(timedelta(hours=5, minutes=30))
-                    ).date()
-                    - timedelta(days=1)
+                    _local_now().date() - timedelta(days=1)
                 ).isoformat()
                 logger.info(
                     f"[STATE] Final totals ready for upload: "

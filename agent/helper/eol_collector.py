@@ -124,10 +124,13 @@ class EOLCollector:
     def _run_powershell(self, script: str, timeout: int = 120) -> Optional[str]:
         """Run PowerShell command and return output"""
         try:
+            # Force UTF-8 output to prevent JSON corruption from down-converted smart quotes
+            utf8_script = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {script}"
+            
             # Use CREATE_NO_WINDOW for robust background execution
             result = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-NonInteractive",
-                 "-ExecutionPolicy", "Bypass", "-Command", script],
+                 "-ExecutionPolicy", "Bypass", "-Command", utf8_script],
                 capture_output=True,
                 text=True,
                 encoding='utf-8',

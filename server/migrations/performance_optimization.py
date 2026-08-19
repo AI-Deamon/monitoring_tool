@@ -11,8 +11,9 @@ import psycopg2
 from datetime import datetime
 
 # Get database URL from environment
-DATABASE_URL = os.getenv('DATABASE_URL', 
-    'postgresql://sentinelserver:sentinel_edge_secure@localhost:5432/sentinel_edge_v1')
+DATABASE_URL = os.getenv('DATABASE_URL')
+if not DATABASE_URL:
+    raise SystemExit("DATABASE_URL environment variable must be set")
 
 def parse_db_url(url):
     """Parse database URL into connection parameters"""

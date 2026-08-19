@@ -32,23 +32,26 @@ class ReplayProtectionCache:
         self.window_seconds = window_seconds
         self.cache = OrderedDict()
         self.cleanup_interval = 120  # 2 minutes
-        self.last_cleanup = time.time()
+        # H-02 FIX: Use monotonic clock for cache TTL (immune to system time changes)
+        self.last_cleanup = time.monotonic()
 
     def is_valid(self, agent_id: str, timestamp: str, payload_hash: str) -> bool:
         """Check if request is valid (not replayed) and within time window"""
-        current_time = datetime.now(timezone.utc).timestamp()
+        # H-02 FIX: Use monotonic clock for internal cache timing
+        current_monotonic = time.monotonic()
 
         # Clean up old entries periodically
-        if current_time - self.last_cleanup > self.cleanup_interval:
+        if current_monotonic - self.last_cleanup > self.cleanup_interval:
             self._cleanup()
 
         try:
-            # Parse timestamp
+            # Parse timestamp (still use wall clock for request time validation)
             request_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             request_timestamp = request_time.timestamp()
+            current_wall_time = datetime.now(timezone.utc).timestamp()
 
-            # Check timestamp window (+/-60 seconds)
-            time_diff = abs(current_time - request_timestamp)
+            # Check timestamp window (+/-60 seconds) using wall clock
+            time_diff = abs(current_wall_time - request_timestamp)
             if time_diff > self.window_seconds:
                 logger.warning(
                     f"Timestamp out of window: {time_diff}s > {self.window_seconds}s"
@@ -67,8 +70,8 @@ class ReplayProtectionCache:
                 logger.warning(f"Replay detected for key: {cache_key[:20]}...")
                 return False
 
-            # Add to cache
-            self.cache[cache_key] = current_time
+            # Add to cache with monotonic timestamp
+            self.cache[cache_key] = current_monotonic
 
             # Maintain size limit
             if len(self.cache) > self.max_size:
@@ -83,8 +86,9 @@ class ReplayProtectionCache:
 
     def _cleanup(self):
         """Remove old entries from cache"""
-        current_time = datetime.now(timezone.utc).timestamp()
-        cutoff_time = current_time - self.window_seconds
+        # H-02 FIX: Use monotonic clock for cache expiry
+        current_monotonic = time.monotonic()
+        cutoff_time = current_monotonic - self.window_seconds
 
         # Remove entries older than window
         keys_to_remove = []
@@ -95,7 +99,7 @@ class ReplayProtectionCache:
         for key in keys_to_remove:
             del self.cache[key]
 
-        self.last_cleanup = current_time
+        self.last_cleanup = current_monotonic
         logger.debug(f"Replay cache cleanup: removed {len(keys_to_remove)} entries")
 
 
@@ -949,18 +953,41 @@ class IngestServer:
         self.enabled = core_config.get("enable_ingest", True)
         new_port = core_config.get("listen_port", 48123)
 
-        # Handle port change (requires restart)
+        # H-09 FIX: Handle port change - start new server before stopping old
         if self._current_port != new_port:
             self.logger.info(
                 f"[CONFIG] Ingest port changed: {self._current_port} -> {new_port}"
             )
-            if self.server:
+            if self.server and self.enabled:
+                # Save old server reference
+                old_server = self.server
+                self.server = None
+                
+                # Update port and start new server
+                self._current_port = new_port
+                self.start()
+                
+                # Give new server time to bind
+                time.sleep(0.2)
+                
+                # Now stop old server
+                try:
+                    old_server.shutdown()
+                    old_server.server_close()
+                    self.logger.info("[CONFIG] Old server stopped gracefully")
+                except Exception as e:
+                    self.logger.warning(f"[CONFIG] Error stopping old server: {e}")
+            elif self.server:
+                # Server exists but not enabled anymore
                 self.stop()
-                time.sleep(0.5)
+                self._current_port = new_port
+            else:
+                # No server running, just update port
+                self._current_port = new_port
                 if self.enabled:
                     self.start()
-
-        self._current_port = new_port
+        else:
+            self._current_port = new_port
 
         # Handle enable/disable
         if old_enabled != self.enabled:
@@ -990,6 +1017,7 @@ class IngestServer:
                 import ssl
 
                 context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
                 if os.path.exists(self.config.local_cert_path):
                     context.load_cert_chain(
                         certfile=self.config.local_cert_path,

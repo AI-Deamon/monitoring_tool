@@ -8,6 +8,7 @@ Now includes authentication - users must log in to access dashboard.
 import json
 import logging
 import re
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta, date, timezone
 from flask import (
@@ -19,6 +20,7 @@ from flask import (
     url_for,
     g,
     session,
+    send_file,
 )
 from sqlalchemy import func, desc, case, text
 from extensions import db
@@ -27,7 +29,12 @@ import server_models
 
 # Helper function to convert UTC to IST
 def utc_to_ist(utc_dt):
-    """Convert UTC datetime to IST (UTC+5:30)"""
+    """
+    Convert UTC datetime to IST (UTC+5:30) for display.
+    
+    Note: After H-10 fix, database stores all timestamps in UTC.
+    This function converts them to IST for user-facing displays.
+    """
     if not utc_dt:
         return None
     # If datetime is naive, assume it's UTC
@@ -36,6 +43,29 @@ def utc_to_ist(utc_dt):
     # Convert to IST (UTC+5:30)
     ist_dt = utc_dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
     return ist_dt.isoformat()
+
+
+def _format_ist_timestamp(dt):
+    """
+    Format timestamp for frontend display with IST timezone.
+    Handles both datetime objects and strings from database.
+    """
+    if not dt:
+        return None
+    
+    # If it's a string, parse it first
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+    
+    # If naive, assume UTC (database stores in UTC after H-10)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    
+    # Convert to IST
+    ist_dt = dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    
+    # Return in ISO format with proper IST offset
+    return ist_dt.strftime('%Y-%m-%dT%H:%M:%S+05:30')
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -106,6 +136,58 @@ def get_ist_today():
     """Get current date in IST (UTC+5:30)"""
     ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     return ist_now.date()
+
+
+def get_ist_day_range_utc(target_date):
+    """
+    Return the (start, end) naive-UTC datetime bounds covering one IST
+    calendar day, for comparing against columns that store naive UTC
+    timestamps (screen_time_spans.start_time, app_sessions.start_time,
+    domain_visits.visited_at, etc. - see
+    server_telemetry.parse_agent_timestamp, which normalizes every agent
+    timestamp to naive UTC on write).
+
+    A plain datetime.combine(target_date, ...) does NOT shift by IST's
+    +5:30 offset, so comparing it directly against UTC-stored timestamps
+    silently queries the wrong ~5.5-hour window every day. This performs
+    the actual IST -> UTC conversion before returning naive bounds.
+    """
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    ist_midnight = datetime.combine(target_date, datetime.min.time(), tzinfo=ist_tz)
+    start_dt = ist_midnight.astimezone(timezone.utc).replace(tzinfo=None)
+    end_dt = (
+        (ist_midnight + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
+        - timedelta(microseconds=1)
+    )
+    return start_dt, end_dt
+
+
+# ─── Viewer-timezone day boundaries (feature 037, D04 / FR-011) ───────────────
+#
+# get_ist_day_range_utc above is deliberately left unchanged: it is IST-only, it
+# has a dedicated regression test, and nothing is gained by making the shipped
+# helper's behaviour depend on request state. The two functions below are the
+# viewer-aware path, and they resolve the day using the SAME timezone the
+# timestamps are displayed in — so a selected date can never return records
+# whose displayed times contradict it.
+
+
+def get_viewer_today():
+    """Today's date in the viewer's timezone. 'Today' means the viewer's today."""
+    from utils.datetime_format import today_in, viewer_timezone
+    return today_in(viewer_timezone())
+
+
+def get_viewer_day_range_utc(target_date):
+    """
+    Naive-UTC (start, end) bounds covering one calendar day in the viewer's
+    timezone, for comparison against columns storing naive UTC.
+
+    Generalises get_ist_day_range_utc. Adjacent days neither overlap nor leave a
+    gap, so every record falls on exactly one day (FR-011a).
+    """
+    from utils.datetime_format import day_range_utc, viewer_timezone
+    return day_range_utc(target_date, tz=viewer_timezone())
 
 
 # ============================================================================
@@ -486,9 +568,9 @@ def api_overview():
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = get_ist_today()
+                target_date = get_viewer_today()
         else:
-            target_date = get_ist_today()
+            target_date = get_viewer_today()
 
         # 1. Agent Counts (Current State - ALWAYS Real-time)
         agent_query = server_models.Agent.query
@@ -701,7 +783,82 @@ def api_overview():
 
     except Exception as e:
         logger.error(f"Overview API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@bp.route("/api/overview/utilization-trend", methods=["GET"])
+@login_required
+@api_rate_limit
+def api_utilization_trend():
+    """Fleet screen-time split (active/idle/locked/away) aggregated per day
+    over the last N days, in hours. Powers the utilization trend line chart
+    on the overview page.
+
+    Unlike /api/overview (a single-day snapshot), this returns a dense series
+    with one point per calendar day in the window, zero-filled for days with
+    no telemetry, so the front-end can draw a continuous line.
+    """
+    try:
+        try:
+            days = int(request.args.get("days", 30))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 90))
+
+        end_date = get_viewer_today()
+        start_date = end_date - timedelta(days=days - 1)
+
+        q = db.session.query(
+            server_models.ScreenTime.date,
+            func.sum(server_models.ScreenTime.active_seconds),
+            func.sum(server_models.ScreenTime.idle_seconds),
+            func.sum(server_models.ScreenTime.locked_seconds),
+            func.sum(server_models.ScreenTime.away_seconds),
+        ).filter(
+            server_models.ScreenTime.date >= start_date,
+            server_models.ScreenTime.date <= end_date,
+        )
+
+        # Multi-tenant: non-admins only see their own org's agents.
+        if g.current_user.role != "admin":
+            q = q.join(
+                server_models.Agent,
+                server_models.ScreenTime.agent_id == server_models.Agent.agent_id,
+            ).filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        q = q.group_by(server_models.ScreenTime.date).order_by(
+            server_models.ScreenTime.date
+        )
+        rows = {r[0]: r for r in q.all()}
+
+        labels = []
+        active, idle, locked, away = [], [], [], []
+        for i in range(days):
+            d = start_date + timedelta(days=i)
+            labels.append(d.isoformat())
+            r = rows.get(d)
+            # seconds -> hours, 2dp; zero-fill days with no data
+            active.append(round((r[1] or 0) / 3600, 2) if r else 0)
+            idle.append(round((r[2] or 0) / 3600, 2) if r else 0)
+            locked.append(round((r[3] or 0) / 3600, 2) if r else 0)
+            away.append(round((r[4] or 0) / 3600, 2) if r else 0)
+
+        return jsonify(
+            {
+                "labels": labels,
+                "unit": "hours",
+                "series": {
+                    "active": active,
+                    "idle": idle,
+                    "locked": locked,
+                    "away": away,
+                },
+            }
+        ), 200
+
+    except Exception as e:
+        logger.error(f"Utilization trend error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/assets", methods=["GET"])
@@ -795,7 +952,7 @@ def get_assets_data():
         return jsonify({"data": assets})
     except Exception as e:
         logger.error(f"[DASHBOARD] Error fetching assets: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/assets/<path:agent_id>", methods=["GET"])
@@ -806,13 +963,15 @@ def get_single_asset_data(agent_id):
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
+        from datetime import timedelta
+        five_min_ago = datetime.utcnow() - timedelta(minutes=5)
+
         # Join Agent and AssetInfo to get all details
         query = (
             db.session.query(
                 server_models.Agent,
                 server_models.AssetInfo,
                 server_models.AgentCurrentStatus.username,
-                server_models.AgentCurrentStatus.is_online,
             )
             .join(
                 server_models.AssetInfo,
@@ -835,7 +994,9 @@ def get_single_asset_data(agent_id):
         if not result:
             return jsonify({"error": "Asset not found"}), 404
 
-        agent, info, username, is_online = result
+        agent, info, username = result
+        # Compute is_online based on last_seen recency (matching the rest of the file)
+        is_online = bool(agent.last_seen and agent.last_seen >= five_min_ago)
 
         # Comprehensive data structure
         data = {
@@ -851,6 +1012,9 @@ def get_single_asset_data(agent_id):
                 "domain": info.domain,
                 "workgroup": info.workgroup,
                 "bios_uuid": info.bios_uuid,
+                # D06 / FR-015: the dashboard's "BIOS Version" field needs the
+                # firmware version, not the hardware GUID above.
+                "bios_version": info.bios_version,
                 "system_uuid": info.system_uuid,
                 "asset_tag": info.asset_tag,
                 "agent_version": agent.version,
@@ -869,6 +1033,14 @@ def get_single_asset_data(agent_id):
                 "gpus": json.loads(info.gpus_json or "[]"),
                 "motherboard": info.motherboard,
                 "disks": json.loads(info.disks_json or "[]"),
+                "battery": {
+                    "name": info.battery_name,
+                    "health_percent": info.battery_health_percent,
+                    "charge_percent": info.battery_charge_percent,
+                    "cycle_count": info.battery_cycle_count,
+                }
+                if info.battery_name
+                else None,
             },
             "network": {
                 "primary_mac": info.primary_mac,
@@ -903,7 +1075,7 @@ def get_single_asset_data(agent_id):
         return jsonify(data)
     except Exception as e:
         logger.error(f"[DASHBOARD] Error fetching asset detail for {agent_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -925,7 +1097,7 @@ def api_lifecycle_fleet_summary():
         return jsonify(summary)
     except Exception as e:
         logger.error(f"[LIFECYCLE] Fleet summary error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/lifecycle/agent/<path:agent_id>", methods=["GET"])
@@ -973,7 +1145,7 @@ def api_lifecycle_agent(agent_id):
         )
     except Exception as e:
         logger.error(f"[LIFECYCLE] Agent lifecycle error for {agent_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/lifecycle/sync", methods=["POST"])
@@ -990,7 +1162,7 @@ def api_lifecycle_sync():
         return jsonify({"status": "ok", "synced": results})
     except Exception as e:
         logger.error(f"[LIFECYCLE] Sync error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/lifecycle/evaluate", methods=["POST"])
@@ -1007,7 +1179,7 @@ def api_lifecycle_evaluate():
         return jsonify({"status": "ok", "summary": summary})
     except Exception as e:
         logger.error(f"[LIFECYCLE] Evaluate error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/lifecycle/fleet-export", methods=["GET"])
@@ -1097,9 +1269,9 @@ def api_agents():
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = get_ist_today()
+                target_date = get_viewer_today()
         else:
-            target_date = get_ist_today()
+            target_date = get_viewer_today()
 
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
 
@@ -1292,6 +1464,17 @@ def api_agents():
         )
         live_map = {l.agent_id: l for l in live_records}
 
+        # Hardware model for the agents list. Collected already, and shown on
+        # the asset views, but the agents list identified a machine only by
+        # hostname — so you could not tell what kind of device a row was
+        # without opening it. One query for the page, not one per row.
+        asset_map = {}
+        if agent_ids:
+            for info in server_models.AssetInfo.query.filter(
+                server_models.AssetInfo.agent_id.in_(agent_ids)
+            ).all():
+                asset_map[info.agent_id] = info
+
         # ================================================================
         # BUILD RESULT
         # ================================================================
@@ -1369,6 +1552,20 @@ def api_agents():
                     "agent_id": str(agent.agent_id),
                     "hostname": agent.hostname or "Unknown",
                     "os": agent.os,
+                    # Device model, e.g. "HP Laptop 15-bs1xx". Manufacturer is
+                    # sent separately rather than concatenated, because vendors
+                    # often repeat their own name in the model string ("HP" +
+                    # "HP Laptop 15-bs1xx"), and the display layer can decide.
+                    "manufacturer": (
+                        asset_map[agent.agent_id].manufacturer
+                        if agent.agent_id in asset_map
+                        else None
+                    ),
+                    "model": (
+                        asset_map[agent.agent_id].model
+                        if agent.agent_id in asset_map
+                        else None
+                    ),
                     "username": username,
                     "status": "online" if is_online else "offline",
                     "is_online": is_online,
@@ -1413,7 +1610,7 @@ def api_agents():
         return jsonify({"data": result}), 200
     except Exception as e:
         logger.error(f"Agents API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/screentime", methods=["GET"])
@@ -1427,9 +1624,9 @@ def api_agent_screentime(agent_id):
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = get_ist_today()
+                target_date = get_viewer_today()
         else:
-            target_date = get_ist_today()
+            target_date = get_viewer_today()
 
         start_date = target_date - timedelta(days=6)
 
@@ -1477,7 +1674,7 @@ def api_agent_screentime(agent_id):
         return jsonify(data), 200
     except Exception as e:
         logger.error(f"Agent Screentime API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/apps", methods=["GET"])
@@ -1618,7 +1815,7 @@ def api_agent_apps(agent_id):
         ), 200
     except Exception as e:
         logger.error(f"Agent Apps API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/domains", methods=["GET"])
@@ -1741,7 +1938,7 @@ def api_agent_domains(agent_id):
         ), 200
     except Exception as e:
         logger.error(f"Agent Domains API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/inventory", methods=["GET"])
@@ -1776,7 +1973,7 @@ def api_agent_inventory(agent_id):
         return jsonify({"data": result}), 200
     except Exception as e:
         logger.error(f"Agent Inventory API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/inventory/fleet-export", methods=["GET"])
@@ -1819,7 +2016,145 @@ def api_inventory_fleet_export():
         return jsonify({"data": data}), 200
     except Exception as e:
         logger.error(f"Fleet Inventory Export API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
+
+def _empty_inventory_workbook_response():
+    """
+    The inventory workbook for a selection that matches nothing.
+
+    Built by the same builder as every other inventory download, so the
+    empty state is the same document shape as the populated one.
+    """
+    from io import BytesIO
+
+    from report_engine import build_inventory_workbook
+
+    buffer = BytesIO()
+    build_inventory_workbook([]).save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"inventory_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
+    )
+
+
+@bp.route("/api/inventory/fleet-export.xlsx", methods=["GET"])
+@login_required
+def api_inventory_fleet_export_xlsx():
+    """
+    App inventory as a multi-sheet spreadsheet, one worksheet per agent.
+
+    Feature 037 / D15 / FR-025b. The CSV form of this export concatenates every
+    agent's inventory into one undivided list, so applications common to the
+    fleet appear once per agent with nothing separating them — what QA reported
+    as inventories "displaying again and again". One sheet per agent is the fix
+    QA themselves suggested.
+
+    Reuses the same query and the same multi-tenant scoping as the CSV export
+    above, so the two formats cannot diverge in what data they expose (FR-025d).
+
+    An optional `agent_id` query parameter narrows the workbook to a single
+    agent. The agent detail page's Inventory tab uses that form so its download
+    is produced by this same builder rather than by a separate client-side
+    table scrape — one inventory template, one de-duplication rule, one set of
+    column widths, whichever page you start from. Narrowing can only ever
+    subtract rows from what the unscoped export would already return, so it
+    grants no access the caller did not already have.
+    """
+    from io import BytesIO
+
+    from report_engine import InventoryExportTooLarge, build_inventory_workbook
+
+    agent_id = (request.args.get("agent_id") or "").strip()
+
+    # app_inventory.agent_id is a native UUID column. Bind a real UUID object
+    # rather than the raw string: psycopg2 tolerates the string, but the type's
+    # bind processor calls .hex on it, so passing a str raises under any dialect
+    # that actually invokes the processor. An unparseable id can never match a
+    # UUID column, so it becomes an empty workbook rather than a 500 — the same
+    # rule as _get_agent_from_db(), which learned it the hard way when the
+    # literal "unknown" aborted the whole transaction.
+    #
+    # Note the two distinct states: "no agent_id given" means the whole fleet,
+    # while "agent_id given but unparseable" must mean NOTHING. Collapsing the
+    # second into the first would turn a typo in the query string into a
+    # full-fleet download.
+    scoped_agent = None
+    if agent_id:
+        try:
+            scoped_agent = uuid.UUID(agent_id)
+        except (ValueError, AttributeError, TypeError):
+            logger.info(
+                f"Inventory export requested for a non-UUID agent id: {agent_id!r}"
+            )
+            return _empty_inventory_workbook_response()
+
+    try:
+        query = db.session.query(
+            server_models.AppInventory, server_models.Agent.hostname
+        ).join(
+            server_models.Agent,
+            server_models.AppInventory.agent_id == server_models.Agent.agent_id,
+        )
+
+        # Multi-tenant scoping — identical to the CSV export. A non-admin must
+        # not reach another org's inventory through the new format.
+        if g.current_user.role != "admin":
+            query = query.filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        if scoped_agent is not None:
+            query = query.filter(server_models.AppInventory.agent_id == scoped_agent)
+
+        rows = [
+            {
+                "agent_id": str(inv.agent_id),
+                "agent_hostname": hostname,
+                "name": inv.name,
+                "version": inv.version,
+                "publisher": inv.publisher,
+                "source": inv.source,
+                "install_date": inv.install_date.isoformat()
+                if inv.install_date
+                else None,
+            }
+            for inv, hostname in query.all()
+        ]
+
+        workbook = build_inventory_workbook(rows)
+    except InventoryExportTooLarge as too_large:
+        # FR-025f: refuse with a message stating the limit, rather than letting
+        # the request run into the worker timeout with nothing to explain it.
+        logger.info(f"Combined inventory export refused: {too_large}")
+        return jsonify({"error": str(too_large)}), 413
+    except Exception as e:
+        logger.error(f"Fleet Inventory XLSX Export error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+
+    # FR-007 keeps the DD-MM-YYYY stamp. For a single-agent export, name the file
+    # after the machine so a folder of downloads stays tellable apart; fall back
+    # to the agent id when the hostname is blank or reduces to nothing usable.
+    stamp = datetime.now().strftime("%d-%m-%Y")
+    if agent_id:
+        hostname = next((r["agent_hostname"] for r in rows if r["agent_hostname"]), "")
+        label = "".join(
+            c if (c.isalnum() or c in "-_") else "_" for c in (hostname or agent_id)
+        ).strip("_")
+        filename = f"inventory_{label or 'agent'}_{stamp}.xlsx"
+    else:
+        filename = f"inventory_fleet_{stamp}.xlsx"
+    return send_file(
+        buffer,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 @bp.route("/api/agent/<path:agent_id>/hardware", methods=["GET"])
@@ -1848,7 +2183,7 @@ def api_agent_hardware(agent_id):
         return jsonify({"data": asset.to_dict()}), 200
     except Exception as e:
         logger.error(f"Agent Hardware API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/extended-inventory", methods=["GET"])
@@ -1981,7 +2316,7 @@ def api_agent_extended_inventory(agent_id):
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Agent Extended Inventory API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/security-indicators", methods=["GET"])
@@ -2035,7 +2370,7 @@ def api_agent_security_indicators(agent_id):
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Agent Security Indicators API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/system-visibility", methods=["GET"])
@@ -2113,7 +2448,7 @@ def api_agent_system_visibility(agent_id):
 
     except Exception as e:
         logger.error(f"Agent System Visibility API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/full-report", methods=["GET"])
@@ -2141,13 +2476,14 @@ def api_agent_full_report(agent_id):
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
-                target_date = get_ist_today()
+                target_date = get_viewer_today()
         else:
-            target_date = get_ist_today()
+            target_date = get_viewer_today()
 
-        # Date range for queries
-        start_dt = datetime.combine(target_date, datetime.min.time())
-        end_dt = datetime.combine(target_date, datetime.max.time())
+        # Date range for queries - converted from the IST calendar day to
+        # the equivalent naive-UTC window, since every stored timestamp is
+        # normalized to naive UTC on write (see get_ist_day_range_utc).
+        start_dt, end_dt = get_viewer_day_range_utc(target_date)
 
         five_min_ago = datetime.utcnow() - timedelta(minutes=5)
 
@@ -2221,7 +2557,7 @@ def api_agent_full_report(agent_id):
         )
 
         first_seen_today = (
-            first_session_today.start_time.isoformat() if first_session_today else None
+            utc_to_ist(first_session_today.start_time) if first_session_today else None
         )
 
         # Find last activity today (latest app session)
@@ -2239,9 +2575,9 @@ def api_agent_full_report(agent_id):
         total_tracked_seconds = 0
         if last_session_today:
             if last_session_today.end_time:
-                last_seen_today = last_session_today.end_time.isoformat()
+                last_seen_today = utc_to_ist(last_session_today.end_time)
             else:
-                last_seen_today = last_session_today.start_time.isoformat()
+                last_seen_today = utc_to_ist(last_session_today.start_time)
 
         # Calculate total tracked time (last - first)
         if first_session_today and last_session_today:
@@ -2267,7 +2603,7 @@ def api_agent_full_report(agent_id):
             "last_seen_today": last_seen_today,
             "total_tracked_seconds": total_tracked_seconds,
             "last_seen": utc_to_ist(agent.last_seen),
-            "is_viewing_today": target_date == get_ist_today(),
+            "is_viewing_today": target_date == get_viewer_today(),
         }
 
         # ================================================================
@@ -2520,7 +2856,7 @@ def api_agent_full_report(agent_id):
                 "domain": v.domain,
                 "url": v.url,
                 "browser": v.browser,
-                "visited_at": v.visited_at.isoformat() if v.visited_at else None,
+                "visited_at": (v.visited_at.isoformat() + "Z") if v.visited_at else None,
             }
             for v in filtered_visits
         ]
@@ -2620,8 +2956,8 @@ def api_agent_full_report(agent_id):
                 "state_events": [
                     {
                         "state": span.state,
-                        "start_time": str(span.start_time) + '+05:30' if isinstance(span.start_time, str) else span.start_time.strftime('%Y-%m-%dT%H:%M:%S+05:30'),
-                        "end_time": str(span.end_time) + '+05:30' if isinstance(span.end_time, str) else span.end_time.strftime('%Y-%m-%dT%H:%M:%S+05:30'),
+                        "start_time": _format_ist_timestamp(span.start_time),
+                        "end_time": _format_ist_timestamp(span.end_time),
                         "duration_seconds": span.duration_seconds,
                     }
                     for span in db.session.execute(
@@ -2645,7 +2981,7 @@ def api_agent_full_report(agent_id):
 
     except Exception as e:
         logger.error(f"Agent Full Report API error: {e}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/activity-timeline", methods=["GET"])
@@ -2687,7 +3023,11 @@ def api_agent_activity_timeline(agent_id):
         timeline = {}  # {hour: {app: duration}}
 
         for sess in sessions:
-            hour = sess.start_time.hour
+            # Convert UTC timestamp to IST for display
+            ist_time = sess.start_time.replace(tzinfo=timezone.utc).astimezone(
+                timezone(timedelta(hours=5, minutes=30))
+            )
+            hour = ist_time.hour
             if hour not in timeline:
                 timeline[hour] = {}
 
@@ -2722,7 +3062,7 @@ def api_agent_activity_timeline(agent_id):
 
     except Exception as e:
         logger.error(f"Activity Timeline API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -2809,7 +3149,7 @@ def api_agent_domain_visits(agent_id):
         return jsonify({"data": result}), 200
     except Exception as e:
         logger.error(f"Agent Domain Visits API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/app-sessions", methods=["GET"])
@@ -2894,7 +3234,7 @@ def api_agent_app_sessions(agent_id):
         return jsonify({"data": result}), 200
     except Exception as e:
         logger.error(f"Agent App Sessions API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/today", methods=["GET"])
@@ -2904,7 +3244,7 @@ def api_agent_today(agent_id):
     Includes: agent info, screen time, top apps, domains used, sites opened.
     """
     try:
-        today = get_ist_today()
+        today = get_viewer_today()
 
         # 1. Agent Info
         # Try to find agent by UUID first, then by numeric ID (for backwards compatibility)
@@ -3081,7 +3421,7 @@ def api_agent_today(agent_id):
 
     except Exception as e:
         logger.error(f"Agent Today API error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -3174,7 +3514,7 @@ def get_agent_current_activity(agent_id):
 
     except Exception as e:
         logger.error(f"Error fetching current activity: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/recent-activities")
@@ -3256,12 +3596,22 @@ def get_agent_recent_activities(agent_id):
 
     except Exception as e:
         logger.error(f"Error fetching recent activities: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
 # ANALYTICS API ENDPOINTS (Materialized Views)
 # ============================================================================
+
+
+def _parse_limit(raw, default=10, lo=1, hi=100):
+    """Parse a user-supplied limit safely. Never raises; clamps to [lo, hi]
+    and falls back to `default` on any bad/missing input. Prevents the raw
+    value from reaching an exception message that gets echoed to the client."""
+    try:
+        return max(lo, min(int(raw), hi))
+    except (TypeError, ValueError):
+        return default
 
 
 def _parse_overview_date_range():
@@ -3392,7 +3742,7 @@ def api_overview_productivity_metrics():
         )
     except Exception as e:
         logger.error(f"[DASHBOARD] productivity-metrics error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 
@@ -3405,7 +3755,7 @@ def api_overview_top_apps():
     """Top applications with category data from app_usage + mv_app_category_breakdown."""
     try:
         start_date, end_date = _parse_overview_date_range()
-        limit = max(1, min(int(request.args.get("limit", 10)), 100))
+        limit = _parse_limit(request.args.get("limit", 10))
         visibility_clause, visibility_params = _build_username_filter_sql("au.username")
 
         rows = db.session.execute(
@@ -3446,7 +3796,7 @@ def api_overview_top_apps():
         )
     except Exception as e:
         logger.error(f"[DASHBOARD] top-apps error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/top-domains", methods=["GET"])
@@ -3456,7 +3806,7 @@ def api_overview_top_domains():
     """Top domains with classification data from domain_usage + mv_domain_classified."""
     try:
         start_date, end_date = _parse_overview_date_range()
-        limit = max(1, min(int(request.args.get("limit", 10)), 100))
+        limit = _parse_limit(request.args.get("limit", 10))
         visibility_clause, visibility_params = _build_username_filter_sql("du.username")
 
         rows = db.session.execute(
@@ -3502,7 +3852,7 @@ def api_overview_top_domains():
         )
     except Exception as e:
         logger.error(f"[DASHBOARD] top-domains error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/after-hours-leaderboard", methods=["GET"])
@@ -3512,7 +3862,7 @@ def api_overview_after_hours_leaderboard():
     """Top after-hours workers from mv_after_hours_activity."""
     try:
         start_date, end_date = _parse_overview_date_range()
-        limit = max(1, min(int(request.args.get("limit", 10)), 100))
+        limit = _parse_limit(request.args.get("limit", 10))
         visibility_clause, visibility_params = _build_username_filter_sql("username")
 
         rows = db.session.execute(
@@ -3555,7 +3905,7 @@ def api_overview_after_hours_leaderboard():
         )
     except Exception as e:
         logger.error(f"[DASHBOARD] after-hours-leaderboard error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -3606,7 +3956,54 @@ def api_productivity_score():
         )
     except Exception as e:
         logger.error(f"Productivity score error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
+
+def _unwrap_panel(view_func):
+    """Call an overview panel view in-process and return (data, ok).
+
+    The overview page fired 5+ separate polling requests every 30s per open
+    tab, each its own round trip and DB session. This lets one bundle endpoint
+    reuse each panel's exact logic (access control, visibility filter, queries)
+    without duplicating it, by calling the view and unwrapping its JSON body.
+    A panel that errors yields ok=False rather than failing the whole bundle.
+    """
+    try:
+        rv = view_func()
+        # Views return jsonify(...) or (jsonify(...), status_code)
+        resp = rv[0] if isinstance(rv, tuple) else rv
+        status = rv[1] if isinstance(rv, tuple) else 200
+        data = resp.get_json(silent=True)
+        return data, (status == 200 and not (isinstance(data, dict) and data.get("error")))
+    except Exception as e:
+        logger.warning("[OVERVIEW-BUNDLE] panel %s failed: %s",
+                       getattr(view_func, "__name__", "?"), e)
+        return None, False
+
+
+@bp.route("/api/overview/bundle", methods=["GET"])
+@login_required
+@api_rate_limit
+def api_overview_bundle():
+    """One request returning every overview panel.
+
+    Collapses the overview page's 5 polls (KPIs, productivity, top apps, top
+    domains, category breakdown) into a single round trip. Each panel is under
+    its own key so the client can render partial results if one fails.
+    Query args (date, limit, days) pass straight through to the panel views.
+    """
+    panels = {
+        "overview": api_overview,
+        "productivity_metrics": api_overview_productivity_metrics,
+        "top_apps": api_overview_top_apps,
+        "top_domains": api_overview_top_domains,
+        "category_breakdown": api_category_breakdown,
+    }
+    result = {}
+    for key, fn in panels.items():
+        data, ok = _unwrap_panel(fn)
+        result[key] = {"ok": ok, "data": data}
+    return jsonify(result)
 
 
 @bp.route("/api/overview/category-breakdown", methods=["GET"])
@@ -3620,7 +4017,10 @@ def api_category_breakdown():
     try:
         date_str = request.args.get("date")
         if date_str:
-            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                target_date = datetime.now(timezone.utc).date()
         else:
             target_date = datetime.now(timezone.utc).date()
 
@@ -3645,30 +4045,40 @@ def api_category_breakdown():
             # Simple categorization based on app name
             if any(
                 x in app_name
-                for x in ["excel", "word", "powerpoint", "outlook", "teams", "office"]
+                for x in [
+                    "excel", "word", "powerpnt", "powerpoint", "outlook", "olk",
+                    "office", "onenote", "notion", "obsidian", "evernote", "todoist",
+                    "trello", "asana", "monday", "miro", "acrobat", "visio",
+                    "project.exe", "planner",
+                ]
             ):
                 breakdown["productivity"] += duration
             elif any(
                 x in app_name
-                for x in ["slack", "discord", "zoom", "skype", "telegram", "whatsapp"]
+                for x in [
+                    "slack", "discord", "zoom", "skype", "telegram", "whatsapp",
+                    "teams", "signal", "webex", "gotomeeting", "element", "thunderbird",
+                    "mattermost", "ringcentral", "viber",
+                ]
             ):
                 breakdown["communication"] += duration
             elif any(
                 x in app_name
-                for x in ["chrome", "firefox", "edge", "safari", "browser"]
+                for x in [
+                    "chrome", "firefox", "edge", "safari", "browser", "brave",
+                    "opera", "vivaldi", "chromium", "arc.exe", "iron.exe",
+                ]
             ):
                 breakdown["browsing"] += duration
             elif any(
                 x in app_name
                 for x in [
-                    "code",
-                    "visual studio",
-                    "pycharm",
-                    "intellij",
-                    "sublime",
-                    "vim",
-                    "terminal",
-                    "git",
+                    "code", "visual studio", "pycharm", "intellij", "sublime",
+                    "vim", "terminal", "git", "devenv", "webstorm", "goland",
+                    "phpstorm", "rubymine", "clion", "datagrip", "android studio",
+                    "eclipse", "netbeans", "postman", "insomnia", "docker",
+                    "sourcetree", "gitkraken", "notepad++", "cursor.exe",
+                    "antigravity", "windsurf", "powershell", "cmd.exe",
                 ]
             ):
                 breakdown["development"] += duration
@@ -3682,7 +4092,7 @@ def api_category_breakdown():
         return jsonify(breakdown)
     except Exception as e:
         logger.error(f"Category breakdown error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/idle-analysis", methods=["GET"])
@@ -3717,7 +4127,11 @@ def api_idle_analysis():
 
         for session in sessions:
             if session.start_time:
-                hour = session.start_time.hour
+                # Convert UTC to IST for display
+                ist_time = session.start_time.replace(tzinfo=timezone.utc).astimezone(
+                    timezone(timedelta(hours=5, minutes=30))
+                )
+                hour = ist_time.hour
                 duration = session.duration_seconds or 0
                 state = getattr(session, "system_state", "active") or "active"
 
@@ -3738,7 +4152,7 @@ def api_idle_analysis():
         )
     except Exception as e:
         logger.error(f"Idle analysis error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/activity-heatmap", methods=["GET"])
@@ -3799,7 +4213,7 @@ def api_activity_heatmap():
         )
     except Exception as e:
         logger.error(f"Activity heatmap error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -3836,7 +4250,7 @@ def api_os_distribution():
         return jsonify(distribution)
     except Exception as e:
         logger.error(f"OS distribution error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/app-categories", methods=["GET"])
@@ -3928,7 +4342,7 @@ def api_app_categories():
         return jsonify(categories)
     except Exception as e:
         logger.error(f"App categories error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/overview/browser-usage", methods=["GET"])
@@ -3973,7 +4387,7 @@ def api_browser_usage():
         return jsonify(usage)
     except Exception as e:
         logger.error(f"Browser usage error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/database/status", methods=["GET"])
@@ -4016,7 +4430,7 @@ def api_database_status():
         )
     except Exception as e:
         logger.error(f"Database status error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/monitoring/failed-events", methods=["GET"])
@@ -4117,7 +4531,7 @@ def api_agent_versions():
         return jsonify(versions)
     except Exception as e:
         logger.error(f"Agent versions error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/database/table-sizes", methods=["GET"])
@@ -4149,7 +4563,7 @@ def api_table_sizes():
         return jsonify(tables)
     except Exception as e:
         logger.error(f"Table sizes error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ============================================================================
@@ -4199,17 +4613,35 @@ def api_set_target_version():
             )
         agent_id = data.get("agent_id")
 
+        # Manually re-targeting an agent only touches the agents row here -
+        # it does NOT go through the agent's own poll response, which is the
+        # only other place a 'pending' update_history row gets written. If
+        # this agent has an old, never-terminally-resolved row for the SAME
+        # target_version sitting in update_history (e.g. a prior episode
+        # that was cleared via retryUpdate() without ever recording success/
+        # failed/rolled_back), the stale-update watchdog's episode-scoping
+        # logic has nothing newer to anchor on and can auto-reset this fresh
+        # trigger within its next cycle, before the agent even gets a chance
+        # to poll. Writing a fresh 'pending' row here - mirroring exactly
+        # what /api/v1/updates/latest does for an agent-initiated poll -
+        # closes that gap.
+        from server_updates import _log_update_event
+
         if agent_id:
             # Single agent
             agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
             if not agent:
                 return jsonify({"error": "Agent not found"}), 404
 
+            queuing_update = agent.version != target
             agent.target_version = target
-            agent.update_status = "pending" if agent.version != target else "up_to_date"
+            agent.update_status = "pending" if queuing_update else "up_to_date"
             agent.update_attempts = 0
             agent.last_update_error = None
             db.session.commit()
+            if queuing_update:
+                _log_update_event(agent_id, 'version_check', target,
+                                  f'manual retarget from={agent.version}')
 
             logger.info(f"[UPDATES] Target set to {target} for agent {agent_id}")
             return jsonify({"updated": 1, "target_version": target})
@@ -4218,13 +4650,15 @@ def api_set_target_version():
             agents = server_models.Agent.query.all()
             updated = 0
             for agent in agents:
+                queuing_update = agent.version != target
                 agent.target_version = target
-                agent.update_status = (
-                    "pending" if agent.version != target else "up_to_date"
-                )
+                agent.update_status = "pending" if queuing_update else "up_to_date"
                 agent.update_attempts = 0
                 agent.last_update_error = None
                 updated += 1
+                if queuing_update:
+                    _log_update_event(str(agent.agent_id), 'version_check',
+                                      target, f'manual retarget from={agent.version}')
 
             db.session.commit()
 
@@ -4234,7 +4668,7 @@ def api_set_target_version():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Set target version error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/updates/summary", methods=["GET"])
@@ -4323,7 +4757,7 @@ def api_updates_summary():
 
     except Exception as e:
         logger.error(f"Updates summary error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/updates/retry", methods=["POST"])
@@ -4360,7 +4794,7 @@ def api_retry_update():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Retry update error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/updates/canary-deploy", methods=["POST"])
@@ -4443,7 +4877,7 @@ def api_canary_deploy():
     except Exception as e:
         db.session.rollback()
         logger.error(f"Canary deploy error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/api/agent/<path:agent_id>/delete", methods=["POST"])
@@ -4472,4 +4906,4 @@ def delete_agent(agent_id):
     except Exception as e:
         db.session.rollback()
         logger.error(f"[DASHBOARD] delete-agent error for {agent_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500

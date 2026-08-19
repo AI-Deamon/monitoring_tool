@@ -4,14 +4,14 @@ Password Reset Module
 Handles generation, validation, and usage of password reset tokens, as well as sending emails.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from sqlalchemy import text
 from flask import current_app, url_for
 import secrets
 import hashlib
 import logging
 from extensions import db
-from auth import DashboardUser
+from auth import DashboardUser, as_naive_utc, utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +32,21 @@ class PasswordResetToken(db.Model):
     @classmethod
     def cleanup_expired(cls):
         """Remove expired tokens"""
-        expired_tokens = cls.query.filter(cls.expires_at < datetime.now(timezone.utc)).all()
+        # Naive UTC on both sides: expires_at is TIMESTAMP WITHOUT TIME ZONE,
+        # and binding an aware value here would make Postgres reinterpret the
+        # column using the session TimeZone rather than UTC.
+        expired_tokens = cls.query.filter(cls.expires_at < utcnow_naive()).all()
         for token in expired_tokens:
             db.session.delete(token)
         db.session.commit()
 
     def is_valid(self):
         """Check if token is valid and not used"""
+        expires_at = as_naive_utc(self.expires_at)
         return (
-            self.expires_at > datetime.now(timezone.utc) and
-            self.used_at is None
+            expires_at is not None
+            and expires_at > utcnow_naive()
+            and self.used_at is None
         )
 
 class PasswordResetService:
@@ -56,7 +61,7 @@ class PasswordResetService:
         token = secrets.token_hex(cls.TOKEN_LENGTH)
         token_hash = cls._hash_token(token)
         
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=cls.TOKEN_EXPIRY_HOURS)
+        expires_at = utcnow_naive() + timedelta(hours=cls.TOKEN_EXPIRY_HOURS)
         
         reset_token = PasswordResetToken(
             user_id=user_id,
@@ -97,14 +102,17 @@ class PasswordResetService:
             
         # Update password
         user.set_password(new_password)
-        
+        # Invalidate any existing sessions - a reset must not leave a
+        # previously-hijacked session valid (login_required checks session_version).
+        user.session_version = (user.session_version or 1) + 1
+
         # Atomically mark token as used to prevent race conditions
         token_hash_val = cls._hash_token(token)
         result = db.session.execute(
             db.update(PasswordResetToken)
             .where(PasswordResetToken.token_hash == token_hash_val)
             .where(PasswordResetToken.used_at.is_(None))
-            .values(used_at=datetime.now(timezone.utc))
+            .values(used_at=utcnow_naive())
         )
         
         if result.rowcount == 0:

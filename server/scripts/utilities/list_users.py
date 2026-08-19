@@ -65,9 +65,9 @@ def main():
     print("SentinelEdge - User/Agent Listing")
     print("=" * 40)
     
-    # Set database URL from environment
-    os.environ['DATABASE_URL'] = 'postgresql://sentinelserver:sentinel_edge_secure@localhost:5432/sentinel_edge_v1'
-    
+    if not os.environ.get('DATABASE_URL'):
+        raise SystemExit("DATABASE_URL environment variable must be set")
+
     list_all_users()
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Team Weekly Activity Report</title>
-    <style>
+    <style nonce="{{ csp_nonce() }}">
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
@@ -134,7 +134,7 @@
                 <h1>Team Weekly Activity Report</h1>
                 <div class="subtitle">Organization Overview</div>
                 <div class="report-meta">
-                    <span>{{ start_date.strftime('%B %d, %Y') }} - {{ end_date.strftime('%B %d, %Y') }}</span>
+                    <span>{{ start_date | fmt_date }} - {{ end_date | fmt_date }}</span>
                     <span>{{ active_members }} Active Members</span>
                 </div>
             </header>
@@ -169,7 +169,8 @@
                     {% for member in team_members[:10] %}
                     <tr>
                         <td class="rank">{{ loop.index }}</td>
-                        <td>{{ member.username }}</td>
+                        {# D16 / FR-023 scenario 3: attribute each row to its own agent. #}
+                        <td>{{ member.username }}<br><small>{{ member.agent_info.agent_name or member.agent_info.hostname or 'Unnamed agent' }}</small></td>
                         <td>{{ member.screen_time.days_worked }}</td>
                         <td>{{ member.screen_time.total_active | format_hours }}h</td>
                     </tr>
@@ -256,7 +257,7 @@
             </table>
             
             <footer>
-                Generated on {{ generated_at.strftime('%Y-%m-%d at %H:%M') }} | SentinelEdge Monitoring System
+                Generated on {{ generated_at | fmt_datetime_tz }} | SentinelEdge Monitoring System
             </footer>
         </div>
     </div>

@@ -80,9 +80,9 @@ def main():
     print(f"Agent ID: {agent_id}")
     print()
     
-    # Set database URL from environment
-    os.environ['DATABASE_URL'] = 'postgresql://sentinelserver:sentinel_edge_secure@localhost:5432/sentinel_edge_v1'
-    
+    if not os.environ.get('DATABASE_URL'):
+        raise SystemExit("DATABASE_URL environment variable must be set")
+
     domain_history = get_domain_history_for_agent(agent_id)
     
     if not domain_history or 'agent_info' not in domain_history:

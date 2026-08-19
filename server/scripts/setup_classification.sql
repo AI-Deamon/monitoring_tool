@@ -77,7 +77,40 @@ VALUES
     ('notion', 'substring', 'notion.so', 'map', 50),
     ('github', 'substring', 'github.com', 'map', 50),
     ('stackoverflow', 'substring', 'stackoverflow.com', 'map', 50),
-    ('linkedin', 'substring', 'linkedin.com', 'map', 100)
+    ('linkedin', 'substring', 'linkedin.com', 'map', 100),
+
+    -- Productivity / dev / cloud
+    ('gitlab.com', 'substring', 'gitlab.com', 'map', 50),
+    ('bitbucket.org', 'substring', 'bitbucket.org', 'map', 50),
+    ('atlassian.net', 'substring', 'atlassian.net', 'map', 50),
+    ('trello.com', 'substring', 'trello.com', 'map', 50),
+    ('asana.com', 'substring', 'asana.com', 'map', 50),
+    ('monday.com', 'substring', 'monday.com', 'map', 50),
+    ('dropbox.com', 'substring', 'dropbox.com', 'map', 50),
+    ('sharepoint.com', 'substring', 'sharepoint.com', 'map', 50),
+
+    -- Communication / meetings
+    ('teams.microsoft.com', 'substring', 'teams.microsoft.com', 'map', 50),
+    ('zoom.us', 'substring', 'zoom.us', 'map', 50),
+    ('webex.com', 'substring', 'webex.com', 'map', 50),
+    ('web.telegram.org', 'substring', 'telegram.org', 'map', 50),
+
+    -- AI tools
+    ('claude.ai', 'substring', 'claude.ai', 'map', 50),
+    ('gemini.google', 'substring', 'gemini.google.com', 'map', 50),
+    ('copilot.microsoft.com', 'substring', 'copilot.microsoft.com', 'map', 50),
+    ('huggingface.co', 'substring', 'huggingface.co', 'map', 50),
+
+    -- Social / entertainment
+    ('pinterest.com', 'substring', 'pinterest.com', 'map', 100),
+    ('tiktok.com', 'substring', 'tiktok.com', 'map', 100),
+    ('twitch.tv', 'substring', 'twitch.tv', 'map', 100),
+    ('spotify.com', 'substring', 'spotify.com', 'map', 100),
+
+    -- Learning
+    ('medium.com', 'substring', 'medium.com', 'map', 50),
+    ('udemy.com', 'substring', 'udemy.com', 'map', 50),
+    ('coursera.org', 'substring', 'coursera.org', 'map', 50)
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================

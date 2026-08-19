@@ -5,14 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Add User - SentinelEdge</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
-<style>
+    <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
+  <!-- Tailwind (precompiled) -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+<style nonce="{{ csp_nonce() }}">
   * {
     font-family: "Space Grotesk", sans-serif !important;
   }
@@ -200,7 +196,7 @@
             </form>
         </div>
     </div>
-<script>
+<script nonce="{{ csp_nonce() }}">
   function togglePasswordField() {
     const authType = document.getElementById('auth_type').value;
     const passwordField = document.getElementById('password_field');
@@ -218,7 +214,7 @@
   // Initialize on page load
   document.addEventListener('DOMContentLoaded', togglePasswordField);
 </script>
-<script>
+<script nonce="{{ csp_nonce() }}">
   const passwordInput = document.getElementById("password");
   const togglePassword = document.getElementById("togglePassword");
 
@@ -241,7 +237,7 @@
     });
   }
 </script>
-<script>
+<script nonce="{{ csp_nonce() }}">
 
   document.querySelectorAll("[data-no-emoji]").forEach((input) => {
     input.addEventListener("input", () => {

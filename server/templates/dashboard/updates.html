@@ -3,7 +3,7 @@
 {% block title %}Updates Dashboard - SentinelEdge{% endblock %}
 
 {% block extra_head %}
-<style>
+<style nonce="{{ csp_nonce() }}">
     .update-card {
         transition: all 0.2s ease-in-out;
     }
@@ -117,6 +117,13 @@
 
 {% block content %}
 <div class="px-6 py-6 max-w-7xl mx-auto">
+    <!-- Load failure banner. Without this, a failed /summary call left the
+         version dropdown silently empty and indistinguishable from a healthy
+         page with no versions published. -->
+    <div id="load-error" role="alert"
+        class="hidden mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl text-sm font-medium text-red-800 dark:text-red-300">
+    </div>
+
     <!-- Stale Alert Banner -->
     <div id="stale-alert"
         class="hidden mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl">
@@ -355,7 +362,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce() }}">
     let allAgents = [];
 
     async function initUpdates() {
@@ -451,14 +458,13 @@
             body.update_window_end = document.getElementById('policy-window-end').value;
         }
 
-        try {
-            await fetch('/api/v1/updates/policy', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            });
-        } catch (e) {
-            console.error('Policy save error:', e);
+        const { ok, status, data } = await apiSend('/api/v1/updates/policy', 'PUT', body);
+        if (handleAuthFailure(status, data)) return;
+        if (!ok) {
+            // Previously swallowed: the toggle stayed visually "on" while the
+            // policy was never saved.
+            alert('Failed to save policy: ' + (data.error || 'Unknown error'));
+            initUpdates();   // snap the controls back to server truth
         }
     }
 
@@ -587,7 +593,11 @@
             body.innerHTML = history.map(h => `
                 <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
                     <td class="px-6 py-3 text-xs text-gray-500">${formatRelativeTime(h.created_at)}</td>
-                    <td class="px-6 py-3 text-xs font-mono text-gray-700 dark:text-gray-300">${h.agent_id.slice(0, 8)}...</td>
+                    {# D21 / FR-026: this showed only the first 8 characters of the
+                       agent UUID and no name at all, so a row could not be tied to
+                       a machine. Now the human-readable name leads, with the full
+                       identifier beneath it and both retrievable in full. #}
+                    <td class="px-6 py-3 text-xs text-gray-700 dark:text-gray-300 max-w-[220px]">${AgentFmt.nameWithIdHtml(h)}</td>
                     <td class="px-6 py-3 text-xs font-mono">
                         <span class="text-gray-500">${h.from_version || '?'}</span>
                         <span class="text-gray-400 mx-1">→</span>
@@ -620,17 +630,14 @@
 
         if (!confirm(`Deploy version v${v} to ALL agents?`)) return;
 
-        const resp = await fetch('/dashboard/api/updates/set-target', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_version: v })
-        });
-        const data = await resp.json();
-        if (resp.ok) {
+        const { ok, status, data } = await apiSend(
+            '/dashboard/api/updates/set-target', 'POST', { target_version: v });
+        if (handleAuthFailure(status, data)) return;
+        if (ok) {
             alert(`Rollout of v${v} started for ${data.updated} agents.`);
             initUpdates();
         } else {
-            alert(`Error: ${data.error}`);
+            alert(`Error: ${data.error || 'Unknown error'}`);
         }
     }
 
@@ -642,17 +649,15 @@
         const pct = parseInt(document.getElementById('canary-range').value);
         if (!confirm(`Deploy v${v} to ${pct}% of eligible agents?`)) return;
 
-        const resp = await fetch('/dashboard/api/updates/canary-deploy', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target_version: v, percentage: pct })
-        });
-        const data = await resp.json();
-        if (resp.ok) {
+        const { ok, status, data } = await apiSend(
+            '/dashboard/api/updates/canary-deploy', 'POST',
+            { target_version: v, percentage: pct });
+        if (handleAuthFailure(status, data)) return;
+        if (ok) {
             alert(`Canary: v${v} deployed to ${data.updated}/${data.total_eligible} agents.`);
             initUpdates();
         } else {
-            alert(`Error: ${data.error}`);
+            alert(`Error: ${data.error || 'Unknown error'}`);
         }
     }
 
@@ -660,69 +665,132 @@
         const v = prompt('Enter manual target version (e.g. 2.7.0):');
         if (!v) return;
 
-        const resp = await fetch('/dashboard/api/updates/set-target', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agent_id: agentId, target_version: v })
-        });
-        if (resp.ok) {
+        const { ok, status, data } = await apiSend(
+            '/dashboard/api/updates/set-target', 'POST',
+            { agent_id: agentId, target_version: v });
+        if (handleAuthFailure(status, data)) return;
+        if (ok) {
             initUpdates();
         } else {
-            const data = await resp.json();
-            alert(`Error: ${data.error}`);
+            alert(`Error: ${data.error || 'Unknown error'}`);
         }
     }
 
     async function retryUpdate(agentId) {
         if (!confirm('Reset this agent\'s update status? This will clear the stuck state and target version.')) return;
-        const resp = await fetch('/dashboard/api/updates/retry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agent_id: agentId })
-        });
-        if (resp.ok) {
+        const { ok, status, data } = await apiSend(
+            '/dashboard/api/updates/retry', 'POST', { agent_id: agentId });
+        if (handleAuthFailure(status, data)) return;
+        if (ok) {
             initUpdates();
         } else {
-            const err = await resp.json();
-            alert('Failed: ' + (err.error || 'Unknown error'));
+            alert('Failed: ' + (data.error || 'Unknown error'));
         }
     }
 
     async function triggerCheck(agentId) {
-        const resp = await fetch('/api/v1/updates/trigger-check', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ agent_id: agentId })
-        });
-        if (resp.ok) {
+        const { ok, status, data } = await apiSend(
+            '/api/v1/updates/trigger-check', 'POST', { agent_id: agentId });
+        if (handleAuthFailure(status, data)) return;
+        if (ok) {
             alert('Update check triggered. Agent will check on next poll.');
+        } else {
+            // Previously this branch was empty: a failed trigger looked
+            // identical to a successful one.
+            alert('Failed to trigger check: ' + (data.error || 'Unknown error'));
         }
     }
 
     function formatRelativeTime(isoStr) {
         if (!isoStr) return 'Never';
-        const d = new Date(isoStr);
+        // parseStored, not new Date(): naive ISO from the API is UTC, but JS
+        // would read it as local time and skew every relative age.
+        const d = DateFmt.parseStored(isoStr);
+        if (!d) return 'Never';
         const diff = Math.floor((new Date() - d) / 1000);
         if (diff < 60) return 'Just now';
         if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
         if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-        return d.toLocaleDateString();
+        return DateFmt.formatDate(isoStr);
     }
 
     function resultError(data) {
         if (!data || data.error) {
             console.error('Update operation failed', data?.error);
+            // Console-only was how an empty version dropdown looked identical
+            // to a working one. Show it on the page instead.
+            const banner = document.getElementById('load-error');
+            if (banner) {
+                banner.textContent =
+                    'Could not load update data: ' + (data?.error || 'unknown error');
+                banner.classList.remove('hidden');
+            }
             return true;
         }
+        const banner = document.getElementById('load-error');
+        if (banner) banner.classList.add('hidden');
         return false;
     }
 
-    async function fetchJSON(url) {
+    // ---- Dashboard API layer -------------------------------------------
+    //
+    // A lapsed session used to be completely invisible on this page.
+    // login_required answered an API call with a 302 to the HTML login page,
+    // fetch() followed it transparently, and `await resp.json()` threw a
+    // SyntaxError on the HTML body — rejecting the promise BEFORE any alert()
+    // could run. Clicking "Deploy All" did nothing at all, with no error
+    // anywhere except the browser console.
+    //
+    // The server now returns a JSON 401/403 for API paths. These helpers never
+    // throw, always yield a usable {ok, status, data}, and treat a non-JSON
+    // body as an error rather than letting it bubble.
+
+    let authFailureHandled = false;
+
+    function handleAuthFailure(status, data) {
+        if (status !== 401 && status !== 403) return false;
+        if (authFailureHandled) return true;   // don't stack alerts on the poll timer
+        authFailureHandled = true;
+        const msg = (data && data.message) || 'Your session has expired.';
+        alert(msg + '\n\nTaking you back to the sign-in page.');
+        window.location.href = '/auth/login?next=' +
+            encodeURIComponent(window.location.pathname);
+        return true;
+    }
+
+    async function apiRequest(url, options) {
+        let resp;
         try {
-            const r = await fetch(url);
-            if (!r.ok) return { error: `HTTP ${r.status}` };
-            return await r.json();
-        } catch (e) { return { error: 'Network failure' }; }
+            resp = await fetch(url, options);
+        } catch (e) {
+            return { ok: false, status: 0,
+                     data: { error: 'Network failure - is the server reachable?' } };
+        }
+
+        let data = null;
+        if ((resp.headers.get('content-type') || '').includes('application/json')) {
+            try { data = await resp.json(); } catch (e) { data = null; }
+        }
+        if (data === null) {
+            // HTML login page, error page, or empty body. Surface it.
+            data = { error: resp.ok ? 'Unexpected non-JSON response from server'
+                                    : `HTTP ${resp.status}` };
+        }
+        return { ok: resp.ok, status: resp.status, data };
+    }
+
+    async function apiSend(url, method, body) {
+        return apiRequest(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+    }
+
+    async function fetchJSON(url) {
+        const { ok, status, data } = await apiRequest(url);
+        if (handleAuthFailure(status, data)) return { error: data.error || 'Session expired' };
+        return ok ? data : { error: data.error || `HTTP ${status}` };
     }
 
     document.addEventListener('DOMContentLoaded', initUpdates);

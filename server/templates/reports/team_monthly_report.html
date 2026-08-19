@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Team Monthly Activity Report</title>
-    <style>
+    <style nonce="{{ csp_nonce() }}">
         * {
             margin: 0;
             padding: 0;
@@ -296,7 +296,7 @@
             <h1>Team Monthly Activity Report</h1>
             <div class="subtitle">Organization Overview</div>
             <div class="report-meta">
-                <span>📅 {{ start_date.strftime('%B %d, %Y') }} - {{ end_date.strftime('%B %d, %Y') }}</span>
+                <span>📅 {{ start_date | fmt_date }} - {{ end_date | fmt_date }}</span>
                 <span>👥 {{ active_members }} Active Members</span>
             </div>
         </header>
@@ -326,7 +326,10 @@
                         <div class="member-avatar">{{ member.username[:2]|upper }}</div>
                         <div>
                             <div class="member-name">{{ member.username }}</div>
-                            <div class="member-meta">{{ member.screen_time.days_worked }} days worked</div>
+                            {# D16 / FR-023 scenario 3: a multi-agent report must attribute
+                               each section to its own agent, not carry one identity for the
+                               whole document. #}
+                            <div class="member-meta">{{ member.agent_info.agent_name or member.agent_info.hostname or 'Unnamed agent' }} &middot; {{ member.screen_time.days_worked }} days worked</div>
                         </div>
                     </div>
                     <div class="member-stats">
@@ -428,7 +431,7 @@
         </div>
         
         <footer>
-            Generated on {{ generated_at.strftime('%Y-%m-%d at %H:%M') }} | SentinelEdge Monitoring System
+            Generated on {{ generated_at | fmt_datetime_tz }} | SentinelEdge Monitoring System
         </footer>
     </div>
 </body>

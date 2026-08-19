@@ -75,9 +75,9 @@ def main():
     print(f"User: {username}")
     print()
     
-    # Set database URL from environment
-    os.environ['DATABASE_URL'] = 'postgresql://sentinelserver:sentinel_edge_secure@localhost:5432/sentinel_edge_v1'
-    
+    if not os.environ.get('DATABASE_URL'):
+        raise SystemExit("DATABASE_URL environment variable must be set")
+
     domain_history = get_domain_history_for_user(username)
     
     if not domain_history:

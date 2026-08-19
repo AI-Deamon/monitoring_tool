@@ -22,15 +22,19 @@ class BackgroundScheduler:
         self.shutdown_event = Event()
         self.thread = None
         self.tasks = []
+        from leader_election import get_leader
+        self.leader = get_leader(app)
 
-    def add_job(self, func, hour, minute, name):
-        """Add a job to run at a specific time daily (UTC)"""
+    def add_job(self, func, hour, minute, name, day_of_week=None):
+        """Add a job to run at a specific time daily (UTC), optionally
+        restricted to one weekday (0=Monday..6=Sunday)."""
         self.tasks.append(
             {
                 "type": "daily",
                 "func": func,
                 "hour": hour,
                 "minute": minute,
+                "day_of_week": day_of_week,
                 "name": name,
                 "last_run": None,
             }
@@ -71,9 +75,18 @@ class BackgroundScheduler:
         logger.info("[SCHEDULER] Background tasks stopped")
 
     def _run_loop(self):
-        """Main scheduler loop"""
+        """Main scheduler loop with crash recovery"""
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        
         while self.running and not self.shutdown_event.is_set():
             try:
+                # Only the elected leader process runs jobs; other gunicorn
+                # workers idle here and take over if the leader dies.
+                if not self.leader.check():
+                    self.shutdown_event.wait(30)
+                    continue
+
                 now = datetime.now(timezone.utc)
                 now_ts = time.time()
 
@@ -81,7 +94,8 @@ class BackgroundScheduler:
                     should_run = False
 
                     if task["type"] == "daily":
-                        if now.hour == task["hour"] and now.minute == task["minute"]:
+                        dow_ok = task.get("day_of_week") is None or now.weekday() == task["day_of_week"]
+                        if dow_ok and now.hour == task["hour"] and now.minute == task["minute"]:
                             if task["last_run"] != now.strftime("%Y-%m-%d %H:%M"):
                                 should_run = True
                                 task["last_run"] = now.strftime("%Y-%m-%d %H:%M")
@@ -92,19 +106,58 @@ class BackgroundScheduler:
                             task["last_run_time"] = now_ts
 
                     if should_run:
-                        logger.info(f"[SCHEDULER] Running: {task['name']}")
+                        task_name = task['name']
+                        logger.info(f"[SCHEDULER] Running: {task_name}")
                         try:
                             with self.app.app_context():
                                 task["func"]()
+                            # H-13 FIX: Track successful execution
+                            task["failures"] = 0
                         except Exception as e:
-                            logger.error(f"[SCHEDULER] Error in {task['name']}: {e}")
+                            # H-13 FIX: Enhanced error handling with failure tracking
+                            task["failures"] = task.get("failures", 0) + 1
+                            logger.error(
+                                f"[SCHEDULER] Error in {task_name} (failure #{task['failures']}): {e}",
+                                exc_info=True
+                            )
+                            
+                            # Alert on repeated failures
+                            if task["failures"] >= 3:
+                                logger.critical(
+                                    f"[SCHEDULER] ALERT: {task_name} has failed {task['failures']} times! "
+                                    "Manual intervention may be required."
+                                )
+                            
+                            # Reset failure counter if task recovers after restart
+                            if task["failures"] >= 5:
+                                logger.warning(f"[SCHEDULER] Resetting failure counter for {task_name}")
+                                task["failures"] = 0
 
                 # Sleep for 10 seconds (more responsive than 30s)
                 self.shutdown_event.wait(10)
+                # H-13 FIX: Reset error counter on successful iteration
+                consecutive_errors = 0
 
             except Exception as e:
-                logger.error(f"[SCHEDULER] Error in scheduler loop: {e}")
-                self.shutdown_event.wait(60)
+                # H-13 FIX: Enhanced crash recovery
+                consecutive_errors += 1
+                logger.error(
+                    f"[SCHEDULER] Error in scheduler loop (#{consecutive_errors}): {e}",
+                    exc_info=True
+                )
+                
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.critical(
+                        f"[SCHEDULER] FATAL: Scheduler crashed {consecutive_errors} times! "
+                        "Stopping scheduler to prevent infinite crash loop."
+                    )
+                    self.running = False
+                    break
+                
+                # Exponential backoff: 10s, 20s, 40s, 60s, 60s
+                backoff = min(10 * (2 ** (consecutive_errors - 1)), 60)
+                logger.warning(f"[SCHEDULER] Restarting in {backoff}s...")
+                self.shutdown_event.wait(backoff)
 
 
 def sync_yesterday_data():
@@ -134,16 +187,16 @@ def sync_yesterday_data():
         )
         logger.info("[SYNC] [OK] Domain usage synced")
 
-        # Sync screen time from sessions
-        result = db.session.execute(
-            text("""
-            SELECT * FROM sync_screen_time_from_sessions(:date)
-        """),
-            {"date": yesterday},
-        )
-
-        rows = result.fetchall()
-        logger.info(f"[SYNC] [OK] Screen time synced for {len(rows)} agents")
+        # screen_time.active_seconds is intentionally NOT synced here via a
+        # cumulative merge: process_screentime_event (server_telemetry.py)
+        # remains the live in-progress-day writer, but for fully-elapsed days
+        # sync_screen_time_from_spans is the sanctioned writer — it
+        # reconcile-and-sets the row from the full span sum (idempotent,
+        # corrects downward). The 7-elapsed-UTC-day reconcile sweep lives in
+        # reconcile_elapsed_screentime_days() (scheduled separately at 2:15
+        # AM) — kept as the single implementation of that policy rather than
+        # duplicated here, since running the same idempotent sweep twice
+        # 15 minutes apart is redundant load with no behavioral benefit.
 
         db.session.commit()
         logger.info(f"[SYNC] Daily sync completed successfully")
@@ -151,6 +204,40 @@ def sync_yesterday_data():
     except Exception as e:
         db.session.rollback()
         logger.error(f"[SYNC] Error during daily sync: {e}")
+
+
+def reconcile_elapsed_screentime_days(reference_date=None, days=7):
+    """Reconcile screen_time rows for the last N fully-elapsed UTC days from
+    screen_time_spans (authoritative source for elapsed days, FR-006).
+
+    The UTC-day window advances with each call (defaults to today in UTC), so
+    a span that arrives late for an elapsed day is reconciled within one 24h
+    sweep cycle (SC-004). Uses the same UTC-date convention as
+    sync_yesterday_data()."""
+    from extensions import db
+
+    if reference_date is None:
+        reference_date = datetime.now(timezone.utc).date()
+
+    reconciled = 0
+    try:
+        for d in range(days, 0, -1):
+            elapsed_day = reference_date - timedelta(days=d)
+            db.session.execute(
+                text("SELECT sync_screen_time_from_spans(:d)"),
+                {"d": elapsed_day},
+            )
+            reconciled += 1
+        db.session.commit()
+        logger.info(
+            f"[SPAN-RECONCILE] Reconcile {reconciled} elapsed UTC day(s) "
+            f"ending {reference_date - timedelta(days=1)} from spans"
+        )
+        return reconciled
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"[SPAN-RECONCILE] Error reconciling elapsed days: {e}")
+        return 0
 
 
 def reprocess_failed_events():
@@ -371,6 +458,89 @@ def sync_nvd_cache():
         logger.error(f"[NVD] NVD cache sync failed: {e}")
 
 
+def _update_episode_reference_time(agent, server_models):
+    """
+    When did the agent's CURRENT update episode last show real progress?
+
+    Deliberately NOT Agent.last_update_check - that refreshes on every
+    successful poll regardless of outcome, so an agent that polls on
+    schedule but silently rejects the update every time (e.g. a signature
+    mismatch) never looks stale to a check based on it, even after days
+    stuck at the same status. Scoped to the agent's current target_version
+    so a resolved prior episode can't mask a genuinely-stuck new one.
+
+    That version-scoping alone isn't enough if the SAME target_version is
+    pushed a second time after an earlier attempt already resolved (failed/
+    rolled_back leave target_version set - only success clears it). Without
+    also excluding rows from before that resolution, a freshly re-queued
+    agent would inherit the old episode's ancient pending/downloading rows
+    and could get auto-reset within minutes of being re-queued. So: find the
+    last terminal (success/failed/rolled_back) row for this version, if any,
+    and only consider progress/pending rows created after it.
+    """
+    last_terminal = (
+        server_models.UpdateHistory.query.filter_by(
+            agent_id=agent.agent_id, to_version=agent.target_version
+        )
+        .filter(server_models.UpdateHistory.status.in_(
+            ["success", "failed", "rolled_back"]
+        ))
+        .order_by(server_models.UpdateHistory.created_at.desc())
+        .first()
+    )
+    since = last_terminal.created_at if last_terminal else None
+
+    progress_query = server_models.UpdateHistory.query.filter_by(
+        agent_id=agent.agent_id, to_version=agent.target_version
+    ).filter(server_models.UpdateHistory.status.in_(["downloading", "installing"]))
+    if since is not None:
+        progress_query = progress_query.filter(
+            server_models.UpdateHistory.created_at > since
+        )
+    progress = progress_query.order_by(
+        server_models.UpdateHistory.created_at.desc()
+    ).first()
+    if progress:
+        return progress.created_at
+
+    pending_query = server_models.UpdateHistory.query.filter_by(
+        agent_id=agent.agent_id, to_version=agent.target_version, status="pending",
+    )
+    if since is not None:
+        pending_query = pending_query.filter(
+            server_models.UpdateHistory.created_at > since
+        )
+    pending_rows = pending_query.order_by(
+        server_models.UpdateHistory.created_at.asc()
+    ).all()
+    if pending_rows:
+        # The absolute-earliest pending row isn't automatically the episode
+        # start: an agent can be manually re-targeted (dashboard "push
+        # update") after a PRIOR attempt at the same version was abandoned
+        # without ever writing a terminal row - e.g. cleared via
+        # retryUpdate(), which resets update_status but doesn't record an
+        # outcome. That leaves an orphaned old pending row with nothing
+        # terminal to scope past. A large time gap between consecutive
+        # pending rows is the signal that the earlier ones belong to that
+        # disconnected, already-abandoned attempt, not the current one -
+        # judge staleness from the run that actually contains "now".
+        # RESET_GAP mirrors the watchdog's own reset_cutoff: a stuck episode
+        # never produces a gap this size between consecutive polls/retargets
+        # on its own, so any gap this large is itself evidence of a reset.
+        RESET_GAP = timedelta(minutes=60)
+        episode_start = pending_rows[0].created_at
+        for prev_row, curr_row in zip(pending_rows, pending_rows[1:]):
+            if curr_row.created_at - prev_row.created_at > RESET_GAP:
+                episode_start = curr_row.created_at
+        return episode_start
+
+    # No UpdateHistory row at all (legacy agent predating this table), or
+    # the only rows are the resolved prior episode itself (agent freshly
+    # re-queued, no new row landed yet this cycle) - fall back to the old
+    # behavior rather than never firing.
+    return agent.last_update_check
+
+
 def check_stale_updates():
     """
     Watchdog: detect agents stuck in update states for >30 minutes (AUE-13).
@@ -383,22 +553,34 @@ def check_stale_updates():
         warn_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
         reset_cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
 
-        # Phase 1: Warn about agents stuck >30 min
-        warn_agents = server_models.Agent.query.filter(
+        candidates = server_models.Agent.query.filter(
             server_models.Agent.update_status.in_(
                 ["pending", "downloading", "installing"]
-            ),
-            server_models.Agent.last_update_check < warn_cutoff,
-            server_models.Agent.last_update_check >= reset_cutoff,
+            )
         ).all()
 
+        warn_agents = []
+        reset_agents = []
+        for agent in candidates:
+            reference_ts = _update_episode_reference_time(agent, server_models)
+            if not reference_ts:
+                continue
+            if reference_ts.tzinfo is None:
+                reference_ts = reference_ts.replace(tzinfo=timezone.utc)
+
+            if reference_ts < reset_cutoff:
+                reset_agents.append((agent, reference_ts))
+            elif reference_ts < warn_cutoff:
+                warn_agents.append((agent, reference_ts))
+
+        # Phase 1: Warn about agents stuck >30 min
         if warn_agents:
             logger.warning(
                 f"[STALE-WATCHDOG] {len(warn_agents)} agents stuck (warning):"
             )
-            for agent in warn_agents[:10]:
+            for agent, reference_ts in warn_agents[:10]:
                 minutes_stuck = int(
-                    (datetime.now(timezone.utc) - agent.last_update_check).total_seconds() / 60
+                    (datetime.now(timezone.utc) - reference_ts).total_seconds() / 60
                 )
                 logger.warning(
                     f"[STALE-WATCHDOG]   {str(agent.agent_id)[:12]}... "
@@ -407,22 +589,15 @@ def check_stale_updates():
                 )
 
         # Phase 2: Auto-reset agents stuck >60 min
-        reset_agents = server_models.Agent.query.filter(
-            server_models.Agent.update_status.in_(
-                ["pending", "downloading", "installing"]
-            ),
-            server_models.Agent.last_update_check < reset_cutoff,
-        ).all()
-
         if reset_agents:
             logger.warning(
                 f"[STALE-WATCHDOG] Auto-resetting {len(reset_agents)} agents stuck >60min:"
             )
-            for agent in reset_agents:
+            for agent, reference_ts in reset_agents:
                 old_status = agent.update_status
                 old_target = agent.target_version
                 minutes_stuck = int(
-                    (datetime.now(timezone.utc) - agent.last_update_check).total_seconds() / 60
+                    (datetime.now(timezone.utc) - reference_ts).total_seconds() / 60
                 )
                 agent.update_status = "up_to_date"
                 agent.target_version = None
@@ -548,6 +723,13 @@ def start_background_tasks(app):
         func=sync_yesterday_data, hour=2, minute=0, name="Daily data sync"
     )
 
+    # Reconcile elapsed-day screen_time from spans (authoritative) at 2:15 AM
+    # UTC — the window advances each run, so late spans land within 24h (SC-004).
+    scheduler.add_job(
+        func=reconcile_elapsed_screentime_days, hour=2, minute=15,
+        name="Screen-time span reconcile",
+    )
+
     # Run cleanup at 3 AM UTC (8:30 AM IST)
     scheduler.add_job(
         func=cleanup_old_data, hour=3, minute=0, name="Daily data cleanup"
@@ -570,7 +752,7 @@ def start_background_tasks(app):
 
     # Run NVD cache sync weekly (Sundays at 1:30 AM UTC — supplementary)
     scheduler.add_job(
-        func=sync_nvd_cache, hour=1, minute=30, name="NVD vulnerability cache sync"
+        func=sync_nvd_cache, hour=1, minute=30, day_of_week=6, name="NVD vulnerability cache sync"
     )
 
     # ── Auto-Update Background Jobs ──────────────────────────────

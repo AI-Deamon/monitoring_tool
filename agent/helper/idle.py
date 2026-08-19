@@ -156,7 +156,8 @@ class IdleDetector:
             self._is_idle = True
             self.idle_start_ts = now
             logger.info(f"[IDLE] Became idle (threshold: {threshold}s)")
-            return "idle_start"
+            # M-05 FIX: Removed dead return value (not used by caller)
+            return
 
         # =====================================================================
         # TRANSITION: idle -> active (CRITICAL FIX - was missing!)
@@ -169,9 +170,7 @@ class IdleDetector:
                 logger.info(f"[IDLE] Became active after {duration:.1f}s of idle")
             self._is_idle = False
             self.idle_start_ts = None
-            return "idle_end"
-
-        return None
+            # M-05 FIX: Removed dead return value (not used by caller)
 
     def complete_idle(self, now: float):
         """Standardized FIX 1: Clean idle completion (One Authority)"""

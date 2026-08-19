@@ -5,18 +5,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Edit User - SentinelEdge</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
-<style>
+    <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
+  <!-- Tailwind (precompiled) -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+<style nonce="{{ csp_nonce() }}">
   * {
     font-family: "Space Grotesk", sans-serif !important;
   }
   </style>
-    <style>
+    <style nonce="{{ csp_nonce() }}">
         :root {
             --bg-color: #f4f7f9;
             --primary-color: #4a90e2;
@@ -248,9 +245,9 @@
       <div class="mb-6 p-4 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-700 leading-6">
           <strong>Username:</strong> {{ user.username }}<br>
           <strong>Created:</strong>
-          {{ user.created_at.strftime('%Y-%m-%d %H:%M') if user.created_at else 'Unknown' }}<br>
+          {{ user.created_at | fmt_datetime if user.created_at else 'Unknown' }}<br>
           <strong>Last Login:</strong>
-          {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Never' }}
+          {{ user.last_login | fmt_datetime if user.last_login else 'Never' }}
       </div>
 
       <form method="POST" action="{{ url_for('auth.edit_user', user_id=user.id) }}" class="space-y-6">
@@ -375,7 +372,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce() }}">
   function togglePasswordField() {
     const authType = document.getElementById('auth_type').value;
     const passwordField = document.getElementById('password_field');

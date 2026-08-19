@@ -92,8 +92,17 @@ class CoreCommunicator:
             
             # Prepare request
             json_data = json.dumps(data).encode('utf-8')
+
+            # Replay protection: suppress an exact-duplicate payload instead of
+            # sending it again (guards against a caller-side bug or retry loop
+            # re-submitting the same request body).
+            payload_hash = hashlib.sha256(json_data).hexdigest()
+            if not self.replay_cache.add_and_check(payload_hash):
+                logger.warning(f"[COMM] Duplicate payload suppressed for {endpoint}")
+                return {'status': 'duplicate_suppressed'}
+
             headers = self._build_signed_headers(json_data)
-            
+
             req = urllib.request.Request(
                 url,
                 data=json_data,
@@ -105,6 +114,7 @@ class CoreCommunicator:
             if url.startswith('https://') and self.config.ssl_enabled:
                 import ssl
                 context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
                 if os.path.exists(self.config.client_cert_path):
                     try:
                         context.load_cert_chain(
@@ -113,8 +123,9 @@ class CoreCommunicator:
                         )
                         context.load_verify_locations(cafile=self.config.ca_cert_path)
                         context.verify_mode = ssl.CERT_REQUIRED
-                        # For local communication, hostname check can be tricky with self-signed
-                        context.check_hostname = False 
+                        # Core's local cert (server.crt) carries a SAN covering
+                        # localhost/127.0.0.1, and core_url is always localhost,
+                        # so hostname verification can stay enabled here.
                         logger.debug("[SECURITY] Loaded mTLS certificates for Core communication")
                     except Exception as e:
                         logger.error(f"[SECURITY] Failed to load mTLS certificates: {e}")
@@ -150,11 +161,20 @@ class CoreCommunicator:
         except urllib.error.HTTPError as e:
             logger.error(f"HTTP error {e.code} for {endpoint}: {e.reason}")
             
-            # Auto-reload identity if 401 occurs
+            # Auto-reload identity if 401 occurs (HMAC key mismatch after Core restart)
             if e.code == 401:
-                logger.error("[SYNC] 401 Unauthorized - reloading identity from Core")
-                # This will be handled by the main loop's safety check
-                return None
+                logger.warning("[SYNC] 401 Unauthorized - Core may have restarted with new key, reloading identity...")
+                try:
+                    from helper.identity_sync import IdentitySynchronizer
+                    sync = IdentitySynchronizer(self.config)
+                    if sync.sync_from_core():
+                        logger.info("[SYNC] Identity reloaded successfully, retrying request...")
+                        # Retry the request once with new key
+                        return self._make_request(endpoint, data, timeout)
+                    else:
+                        logger.error("[SYNC] Failed to reload identity from Core")
+                except Exception as sync_err:
+                    logger.error(f"[SYNC] Error during identity reload: {sync_err}")
             return None
         except urllib.error.URLError as e:
             logger.error(f"URL error for {endpoint}: {e.reason}")

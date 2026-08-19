@@ -45,14 +45,17 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    # Load environment variables
+    # Load environment variables.
+    # override=True MUST match server_config.py: without it a stale shell
+    # DATABASE_URL silently beats .env and Alembic migrates a DIFFERENT
+    # database than the server runs against.
     from dotenv import load_dotenv
-    load_dotenv()
-    
+    load_dotenv(override=True)
+
     url = os.getenv('DATABASE_URL')
     if not url:
         raise ValueError("DATABASE_URL is not set in the environment.")
-    
+
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -72,13 +75,18 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    # Load environment variables
+    # Load environment variables.
+    # override=True MUST match server_config.py (see run_migrations_offline).
     from dotenv import load_dotenv
-    load_dotenv()
-    
+    load_dotenv(override=True)
+
     database_url = os.getenv('DATABASE_URL')
     if not database_url:
         raise ValueError("DATABASE_URL is not set in the environment.")
+    # Print the target so a wrong-database run is obvious, never silent.
+    print("[alembic] target database: "
+          + (database_url.rsplit('@', 1)[-1] if '@' in database_url
+             else database_url))
     
     # Override the config URL with the correct database URL
     configuration = config.get_section(config.config_ini_section, {})

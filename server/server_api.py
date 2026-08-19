@@ -3,17 +3,50 @@ import json
 import os
 import re
 import uuid
+import sqlalchemy as sa
 from datetime import datetime, date, timezone, timedelta
 from flask import Blueprint, request, jsonify, current_app
 from extensions import db
 import server_models
 from server_auth import generate_api_key, generate_api_token, require_auth
+from server_telemetry import parse_agent_timestamp
 from schemas import RegisterSchema, AppInventorySchema, DomainUsageSchema, HeartbeatSchema
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 bp = Blueprint('api', __name__)
-telemetry_bp = Blueprint('telemetry_api', __name__)
+
+
+def inventory_dedup_key(app_data):
+    """
+    Identity of one installed application, for de-duplicating an inventory batch.
+
+    Returns None for an entry with no usable name, so callers can skip it.
+
+    Feature 037 / FR-018, FR-019. This previously keyed on name alone, which
+    de-duplicated correctly for repeated reports (FR-018) but also collapsed
+    genuinely distinct installations — two versions of the same application, or
+    a per-machine and a per-user install of it — into a single row. FR-019
+    requires those to stay distinguishable, so version and install location are
+    part of the identity.
+
+    Name matching is case-insensitive and ignores surrounding whitespace: the
+    same application reported with inconsistent casing is one application, not
+    two. Version and location are compared exactly, since a case difference
+    there is meaningful.
+
+    Must stay in step with the uniqueness constraint on AppInventory. If the key
+    is wider than the constraint, ingestion computes distinct entries and the
+    insert then fails on a constraint violation.
+    """
+    name = (app_data.get('name') or '').strip()
+    if not name:
+        return None
+    return (
+        name.casefold(),
+        (app_data.get('version') or '').strip(),
+        (app_data.get('install_location') or '').strip(),
+    )
 
 
 # =============================================================================
@@ -59,6 +92,37 @@ def validate_agent_id(agent_id: str) -> bool:
         return False
 
 
+# H-11 FIX: Input validation helper
+def validate_request_payload(required_fields=None, max_size_kb=1024):
+    """
+    Validate basic request payload requirements.
+    
+    Args:
+        required_fields: List of required field names
+        max_size_kb: Maximum payload size in KB
+    
+    Returns:
+        (data, error_response) tuple. error_response is None if valid.
+    """
+    # Check content type
+    if not request.is_json:
+        return None, (jsonify({'error': 'Content-Type must be application/json'}), 415)
+    
+    # Check payload size
+    if request.content_length and request.content_length > max_size_kb * 1024:
+        return None, (jsonify({'error': f'Payload too large (max {max_size_kb}KB)'}), 413)
+    
+    data = request.get_json() or {}
+    
+    # Check required fields
+    if required_fields:
+        missing = [f for f in required_fields if f not in data]
+        if missing:
+            return None, (jsonify({'error': 'Missing required fields', 'fields': missing}), 400)
+    
+    return data, None
+
+
 if REGISTRATION_SECRET:
     logger.info("[SECURITY] Registration secret is configured (new agents must authenticate)")
 elif not _is_dev_mode:
@@ -77,6 +141,36 @@ def short_agent_id(agent_id):
     # Convert to string in case agent_id is an integer
     agent_id_str = str(agent_id)
     return agent_id_str[-6:] if len(agent_id_str) > 6 else agent_id_str
+
+
+def normalize_network_addresses(network):
+    """
+    Extract (primary_ip, all_ips) from a network payload, discarding blanks.
+
+    D24 / FR-035. Callers use "did this payload carry any address at all?" to
+    decide whether a network partial describes a real state or an adapter
+    caught mid-transition. Blank-but-present values are the normal shape of an
+    empty reading, so '' , '   ', [''] and [None] must all normalise away —
+    testing only for key presence would let them through.
+
+    Returns:
+        (str, list[str]) — primary IP ('' if none) and non-blank addresses.
+    """
+    if not isinstance(network, dict):
+        return '', []
+
+    primary_ip = network.get('primary_ip')
+    primary_ip = primary_ip.strip() if isinstance(primary_ip, str) else ''
+
+    raw_ips = network.get('all_ips')
+    if not isinstance(raw_ips, list):
+        raw_ips = []
+    all_ips = [
+        ip.strip() for ip in raw_ips
+        if isinstance(ip, str) and ip.strip()
+    ]
+
+    return primary_ip, all_ips
 
 
 def should_ignore_domain_session(session_data):
@@ -176,9 +270,10 @@ def register():
     # BUG-008 Fix: Enforce registration secret in production
     # ========================================================================
     if REGISTRATION_SECRET:
-        # Secret is configured - verify it
-        provided_secret = request.headers.get('X-Registration-Secret')
-        if provided_secret != REGISTRATION_SECRET:
+        # Secret is configured - verify it (constant-time compare)
+        import hmac as _hmac
+        provided_secret = request.headers.get('X-Registration-Secret') or ''
+        if not _hmac.compare_digest(provided_secret, REGISTRATION_SECRET):
             logger.warning(f"[REGISTER] Invalid or missing registration secret from {request.remote_addr}")
             return jsonify({'error': 'Invalid registration secret'}), 403
     elif not _is_dev_mode:
@@ -242,12 +337,19 @@ def register():
         stored_key = existing.local_agent_key
         provided_key = payload.local_agent_key
         
-        if stored_key and provided_key:
+        # SECURITY: if this agent identity already has a local_agent_key on
+        # record, a re-registration MUST prove possession of it. Otherwise
+        # anyone who can reach /register and knows a hostname/agent_id could
+        # take over the existing identity and be issued fresh credentials.
+        if stored_key:
             import hmac
-            if hmac.compare_digest(str(stored_key), str(provided_key)):
-                logger.info(f"[REGISTER] Agent {agent_id} key verified ✓")
-            else:
-                logger.warning(f"[REGISTER] Agent {agent_id} key changed (re-install assumed)")
+            if not provided_key:
+                logger.warning(f"[REGISTER] Agent {agent_id} re-registration missing local_agent_key - rejecting")
+                return jsonify({'error': 'local_agent_key required for re-registration'}), 403
+            if not hmac.compare_digest(str(stored_key), str(provided_key)):
+                logger.warning(f"[REGISTER] Agent {agent_id} local_agent_key mismatch - rejecting")
+                return jsonify({'error': 'local_agent_key mismatch'}), 403
+            logger.info(f"[REGISTER] Agent {agent_id} key verified ✓")
         elif provided_key:
             logger.info(f"[REGISTER] Agent {agent_id} providing key for first time")
         else:
@@ -315,6 +417,50 @@ def register():
             }
         }), 201
         
+    except sa.exc.IntegrityError as e:
+        # C-07 FIX: Handle TOCTOU race - another request won the race
+        db.session.rollback()
+        logger.warning(f"[REGISTER] Race condition detected for {agent_id}, retrying as update")
+        
+        # Fetch the agent that was created by the parallel request
+        existing = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+        if existing:
+            # Update it with our credentials
+            existing.api_key = api_key_hashed
+            existing.api_token = api_token
+            existing.agent_name = agent_name
+            existing.hostname = hostname
+            existing.os = os_version
+            existing.os_build = os_build
+            existing.windows_edition = windows_edition
+            existing.architecture = architecture
+            existing.version = agent_version
+            if payload.local_agent_key:
+                existing.local_agent_key = payload.local_agent_key
+            existing.status = 'active'
+            existing.last_seen = datetime.utcnow()
+            
+            try:
+                db.session.commit()
+                logger.info(f"[REGISTER] Race resolved - updated existing agent {agent_id}")
+                return jsonify({
+                    'message': 'Agent registered successfully',
+                    'api_key': api_token,
+                    'agent': {
+                        'agent_id': agent_id,
+                        'hostname': hostname,
+                        'status': 'active',
+                        'last_seen': datetime.now(timezone.utc).isoformat() + 'Z'
+                    }
+                }), 201
+            except Exception as retry_error:
+                db.session.rollback()
+                logger.error(f"[REGISTER] Retry failed: {retry_error}")
+                return jsonify({'error': 'Registration failed after retry', 'message': str(retry_error)}), 500
+        else:
+            logger.error(f"[REGISTER] Race condition but agent not found: {agent_id}")
+            return jsonify({'error': 'Registration conflict'}), 409
+            
     except Exception as e:
         db.session.rollback()
         logger.error(f"[REGISTER] ERROR: {e}")
@@ -328,7 +474,11 @@ def inventory():
     Update application inventory - Full Sync "Replace All" model.
     """
     from flask import g
-    data = request.get_json() or {}
+    
+    # H-11 FIX: Validate request payload
+    data, error = validate_request_payload(required_fields=['agent_id'], max_size_kb=2048)
+    if error:
+        return error
 
     auth_agent_id = str(g.current_agent.agent_id) if g.current_agent else None
     payload_agent_id = data.get('agent_id')
@@ -418,19 +568,22 @@ def inventory():
             deleted_count = server_models.AppInventory.query.filter_by(agent_id=agent_id).delete()
             logger.debug(f"[AGENT {agent_id}] Deleted {deleted_count} old inventory records")
             
-            # Track seen apps to prevent duplicates in the same batch
+            # Track seen apps to prevent duplicates in the same batch.
+            # Keyed on name + version + install location (FR-018, FR-019) so a
+            # repeated report collapses, but two genuinely distinct installs of
+            # the same application do not. See inventory_dedup_key().
             seen_apps = set()
-            
+
             for app_data in apps:
                 app_name = app_data.get('name')
-                if not app_name:
+                dedup_key = inventory_dedup_key(app_data)
+                if dedup_key is None:
                     continue
-                
-                # Skip if we've already processed this app name in this batch
-                if app_name in seen_apps:
+
+                if dedup_key in seen_apps:
                     continue
-                
-                seen_apps.add(app_name)
+
+                seen_apps.add(dedup_key)
                 
                 # Parse install_date - handle various formats
                 install_date_raw = app_data.get('install_date')
@@ -525,9 +678,7 @@ def domain_usage():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         logger.warning(f"Domain usage: Missing agent_id in request or JWT")
@@ -590,9 +741,12 @@ def domain_usage():
 def heartbeat():
     """Heartbeat health check."""
     from flask import g
+    payload = None
     try:
         payload = HeartbeatSchema.parse_obj(request.get_json() or {'agent_id': request.headers.get('X-Agent-ID'), 'timestamp': ''})
     except ValidationError as e:
+        # A non-dict/malformed body raises before payload is assigned; keep it
+        # None so the later `if payload:` checks don't hit UnboundLocalError.
         logger.debug(f"Heartbeat validation: {e}")
     
     agent_id = str(g.current_agent.agent_id) if g.current_agent else "unknown"
@@ -668,7 +822,7 @@ def update_agent_status():
         if not data:
             return jsonify({"error": "No data provided"}), 400
         
-        agent_id = data.get('agent_id')
+        agent_id = _resolve_agent_id_from_request(data)
         operational_status = data.get('operational_status', 'UNKNOWN')
         status_reason = data.get('status_reason', '')
         diagnostics = data.get('diagnostics', {})
@@ -752,11 +906,8 @@ def app_usage():
     """Handle app usage at /api/v1/app-usage (agent compatibility)."""
     from flask import g
     data = request.get_json() or {}
-    agent_id = data.get('agent_id')
-    
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
-    
+    agent_id = _resolve_agent_id_from_request(data)
+
     if not agent_id:
         logger.warning("App usage: Missing agent_id")
         return jsonify({'status': 'error', 'message': 'Missing agent_id'}), 400
@@ -863,28 +1014,6 @@ def app_active():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@telemetry_bp.route("/event", methods=["POST"])
-@require_auth
-def telemetry_event():
-    """
-    Gateway for all authoritative telemetry events.
-    Matches Step 367 Refined Plan.
-    """
-    from server_telemetry import process_state_duration_event
-    payload = request.get_json(force=True)
-    agent_id = str(g.current_agent.agent_id) if g.current_agent else None
-    
-    if not agent_id:
-        return jsonify({"error": "Missing agent authentication"}), 401
-
-    if payload.get("event") == "state_duration":
-        # Inject agent_id for the processor
-        payload["agent_id"] = agent_id
-        return process_state_duration_event(payload)
-
-    return jsonify({"status": "ignored"}), 200
-
-
 @bp.route('/app-switch', methods=['POST'])
 @require_auth
 def app_switch():
@@ -918,6 +1047,20 @@ def app_switch():
         duration = (end_time - start_time).total_seconds()
     
     try:
+        # IDEMPOTENCY: a retried/duplicated delivery (common after a network
+        # blip or buffered replay) must not double-count into AppUsage. The
+        # canonical /api/v1/telemetry/app-switch path already skips duplicates;
+        # mirror that here for this legacy alias.
+        existing_session = server_models.AppSession.query.filter_by(
+            agent_id=agent_id,
+            app=app_name,
+            start_time=start_time,
+            end_time=end_time
+        ).first()
+        if existing_session:
+            logger.info(f"[AGENT {agent_id}] app-switch duplicate ignored: {app_name}")
+            return jsonify({'status': 'skipped', 'message': 'duplicate session'}), 200
+
         session = server_models.AppSession(
             agent_id=agent_id,
             username=data.get('username'),
@@ -928,7 +1071,7 @@ def app_switch():
             duration_seconds=duration
         )
         db.session.add(session)
-        
+
         session_date = start_time.date()
         app_usage_rec = server_models.AppUsage.query.filter_by(
             agent_id=agent_id,
@@ -970,9 +1113,7 @@ def domain_active_batch():
     """
     from flask import g
     data = request.get_json() or {}
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     if not agent_id:
         logger.warning("Domain active: Missing agent_id")
         return jsonify({'status': 'error', 'message': 'Missing agent_id'}), 400
@@ -1023,8 +1164,9 @@ def domain_active_batch():
                 domain=domain,
                 start_time=start_naive
             ).first()
-            
-            if not domain_rec:
+            is_new_session = domain_rec is None
+
+            if is_new_session:
                 end_naive = None
                 if end_str:
                     try:
@@ -1032,7 +1174,7 @@ def domain_active_batch():
                         end_naive = end_ts.replace(tzinfo=None) if end_ts.tzinfo else end_ts
                     except:
                         pass
-                
+
                 domain_rec = server_models.DomainSession(
                     agent_id=agent_id,
                     domain=domain,
@@ -1046,7 +1188,13 @@ def domain_active_batch():
                 )
                 db.session.add(domain_rec)
                 logger.debug(f"Created DomainSession: {domain} ({duration}s)")
-            
+            else:
+                # IDEMPOTENCY: this exact session was already ingested (e.g. a
+                # buffered/retried batch after an outage). The daily aggregate
+                # already includes it - skip STEP 2 to avoid double-counting.
+                logger.debug(f"Duplicate DomainSession ignored: {domain} @ {start_naive}")
+                continue
+
             # ================================================================
             # STEP 2: Aggregate into domain_usage table (DASHBOARD SOURCE!)
             # ================================================================
@@ -1225,15 +1373,11 @@ def domains():
                 url = domain_data.get('url')
                 browser = domain_data.get('browser')
                 visited_str = domain_data.get('visited_at') or domain_data.get('timestamp')
-                if visited_str:
-                    try:
-                        visited_at = datetime.fromisoformat(visited_str.replace('Z', '+00:00'))
-                        # Convert to naive datetime for DB comparison
-                        visited_at = visited_at.replace(tzinfo=None) if visited_at.tzinfo else visited_at
-                    except:
-                        visited_at = datetime.now(timezone.utc)
-                else:
-                    visited_at = datetime.now(timezone.utc)
+                visited_at = (
+                    parse_agent_timestamp(visited_str, agent_id=agent_id)
+                    if visited_str
+                    else datetime.now(timezone.utc).replace(tzinfo=None)
+                )
             
             if not domain:
                 continue
@@ -1299,9 +1443,7 @@ def asset_hardware():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -1346,6 +1488,10 @@ def asset_hardware():
         existing.manufacturer = identity.get('manufacturer', '')
         existing.model = identity.get('model', '')
         existing.bios_uuid = identity.get('bios_uuid', '')
+        # D06 / FR-015: firmware version. Collected by the agent but previously
+        # dropped here, so it never reached the database and the dashboard field
+        # stayed a placeholder. Distinct from bios_uuid, which is an identifier.
+        existing.bios_version = identity.get('bios_version', '')
         existing.system_uuid = identity.get('system_uuid', '')
         existing.asset_tag = identity.get('asset_tag', '')
         existing.domain = identity.get('domain', '')
@@ -1370,6 +1516,13 @@ def asset_hardware():
         
         existing.disks_json = json.dumps(hardware.get('disks', []))
         existing.motherboard = hardware.get('motherboard', '')
+        
+        # Battery fields (laptops only; left NULL when the agent reports none)
+        battery = hardware.get('battery') or {}
+        existing.battery_name = battery.get('name') or None
+        existing.battery_health_percent = battery.get('health_percent')
+        existing.battery_charge_percent = battery.get('charge_percent')
+        existing.battery_cycle_count = battery.get('cycle_count')
         
         # Network fields
         existing.primary_mac = network.get('primary_mac', '')
@@ -1421,9 +1574,7 @@ def asset_hardware_network():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -1442,12 +1593,47 @@ def asset_hardware_network():
             return jsonify({'error': 'No existing asset record'}), 404
         
         network = data.get('network', {})
-        
-        # Update only network fields
-        existing.primary_mac = network.get('primary_mac', '') or existing.primary_mac
-        existing.primary_ip = network.get('primary_ip', '') or existing.primary_ip
+
+        # D24 / FR-035: never apply half of a network partial.
+        #
+        # The scalar fields below used `X or existing.X` while the list fields
+        # were overwritten unconditionally. An empty payload therefore produced a
+        # self-contradictory row - primary_ip retained from an older reading,
+        # all_ips emptied - and refreshed collected_at, so a stale address looked
+        # freshly verified. Worse, the fallback made primary_ip monotonically
+        # sticky: once a wrong address was stored, no empty payload could ever
+        # clear it.
+        #
+        # Agents send empty readings when adapters are mid-transition (a USB NIC
+        # renegotiating its link is the reproducer). 4.2.5 guards this agent-side,
+        # but this handler must hold the line for every already-deployed agent
+        # and for empty partials still draining out of buffers.
+        #
+        # Answer 200/'skipped' rather than 4xx on purpose: 'skipped' is in
+        # ServerUploader.ACK_SUCCESS_STATUSES, so the agent marks the record
+        # uploaded and moves on. A 4xx would fail the ACK and _upload_network_
+        # partials() breaks on first failure, so the bad record would block every
+        # newer one behind it - the head-of-line stall 4.2.5 just fixed.
+        primary_ip, all_ips = normalize_network_addresses(network)
+        if not primary_ip and not all_ips:
+            logger.info(
+                f"[ASSET {sid}] Network partial carried no addresses "
+                f"(adapter transition) — ignoring, keeping last known state"
+            )
+            return jsonify({
+                'status': 'skipped',
+                'reason': 'no_network_addresses',
+            }), 200
+
+        # Update only network fields. Scalars are written as received rather than
+        # falling back to the existing value: the guard above already rejected the
+        # only case the fallback was protecting against, and keeping it would let
+        # the scalars drift out of agreement with the lists again - which is the
+        # defect. This now matches the full-asset handler's semantics.
+        existing.primary_mac = network.get('primary_mac', '')
+        existing.primary_ip = primary_ip
         existing.all_macs_json = json.dumps(network.get('all_macs', []))
-        existing.all_ips_json = json.dumps(network.get('all_ips', []))
+        existing.all_ips_json = json.dumps(all_ips)
         existing.dns_servers_json = json.dumps(network.get('dns_servers', []))
         existing.domain_joined = network.get('domain_joined', existing.domain_joined)
         existing.domain_name = network.get('domain_name', '') or existing.domain_name
@@ -1470,17 +1656,29 @@ def asset_hardware_network():
 # =============================================================================
 
 def _resolve_agent_id_from_request(data):
-    """Resolve agent_id from payload first, then authenticated agent context."""
+    """Resolve agent_id, always preferring the authenticated agent identity.
+
+    SECURITY: never let a client-supplied payload agent_id override the agent
+    authenticated by require_auth - otherwise a valid agent could write data
+    under another agent's UUID (cross-agent spoofing). The payload value is only
+    used as a fallback when there is no authenticated agent context, and a
+    mismatch between the two is logged and ignored.
+    """
     from flask import g
 
-    agent_id = None
+    auth_agent_id = str(g.current_agent.agent_id) if getattr(g, 'current_agent', None) else None
+
+    payload_agent_id = None
     if isinstance(data, dict):
-        agent_id = data.get('agent_id')
+        payload_agent_id = data.get('agent_id')
 
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if getattr(g, 'current_agent', None) else None
+    if payload_agent_id and auth_agent_id and payload_agent_id != auth_agent_id:
+        logger.warning(
+            f"Payload agent_id mismatch (payload={payload_agent_id}, auth={auth_agent_id}); "
+            f"using authenticated agent_id"
+        )
 
-    return agent_id
+    return auth_agent_id or payload_agent_id
 
 
 def _normalize_inventory_items(data, category_key):
@@ -1546,7 +1744,15 @@ def _process_inventory_category_upload(category_key, upsert_func):
         if items:
             result = upsert_func(agent_id, items)
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except sa.exc.IntegrityError:
+            # Concurrent request for the same agent_id raced us and inserted first.
+            # Retry as update instead of losing the entire batch.
+            db.session.rollback()
+            if items:
+                result = upsert_func(agent_id, items)
+            db.session.commit()
 
         # Keep lifecycle risk model current for categories that can impact lifecycle views.
         if items:
@@ -1579,9 +1785,7 @@ def extended_inventory():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -1706,9 +1910,7 @@ def security_indicators():
     from flask import g
     data = request.get_json() or {}
     
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
     
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -1790,9 +1992,7 @@ def system_visibility():
     from flask import g
     data = request.get_json() or {}
 
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
 
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -2084,9 +2284,7 @@ def eol_data():
     from flask import g
     data = request.get_json() or {}
 
-    agent_id = data.get('agent_id')
-    if not agent_id:
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else None
+    agent_id = _resolve_agent_id_from_request(data)
 
     if not agent_id:
         return jsonify({'error': 'Missing agent_id'}), 400
@@ -2323,13 +2521,8 @@ def register_root_endpoint(app):
     @app.route('/domains', methods=['POST'])
     @require_auth
     def domains_root():
-        """Handle domains data (agent-specific endpoint)."""
-        from flask import g
-        agent_id = str(g.current_agent.agent_id) if g.current_agent else "unknown"
-        data = request.get_json() or {}
-        domain_count = len(data.get('domains', []))
-        logger.info(f"[AGENT {agent_id}] Domains root endpoint from {request.remote_addr}: {domain_count} domains")
-        return jsonify({'status': 'ok'}), 200
+        """Legacy root alias - forward to the real handler so data is persisted."""
+        return domains()
 
     @app.route('/asset-hardware', methods=['POST'])
     @require_auth

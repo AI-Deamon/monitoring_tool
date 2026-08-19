@@ -146,11 +146,12 @@ def get_hidden_imports():
         # root-level modules
         "logger",
         
-        # core modules (13 files)
+        # core modules (14 files)
         "core",
         "core.service",
         "core.config",
         "core.config_schema",
+        "core.agent_time",
         "core.ingest",
         "core.buffer",
         "core.uploader",
@@ -179,9 +180,13 @@ def get_hidden_imports():
         "helper.performance",
         "helper.persistence",
         "helper.state_detector",
-        "helper.state_detector_spans",
         "helper.identity_sync",
         "helper.app_names",
+        # Statically imported by helper/main.py, so Analysis would normally
+        # find it — listed explicitly because every other helper module is,
+        # and a module missing from this list is invisible until someone
+        # notices the feature is absent from a shipped binary.
+        "helper.network_watcher",
     ]
 
 
