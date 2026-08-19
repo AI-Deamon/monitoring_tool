@@ -58,6 +58,15 @@ check_server_status.py
 check_spans_flow.py
 clear_agent_data.py
 
+# Legacy pre-EXE deployment pipeline (superseded by *_exe.bat / build_exe.py)
+install.bat
+uninstall.bat
+view_logs.bat
+build_package.bat
+create_python_bundle.bat
+harden_install.py
+nssm/win32/
+
 # PyInstaller & Build artifacts
 *.spec
 

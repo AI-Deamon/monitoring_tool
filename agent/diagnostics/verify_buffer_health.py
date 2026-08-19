@@ -7,7 +7,11 @@ Usage:
 """
 import argparse
 import json
+import sys
 from pathlib import Path
+
+# core/ lives one level up, in agent/ - this script runs from agent/diagnostics/
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.buffer import BufferDB
 

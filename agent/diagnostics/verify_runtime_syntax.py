@@ -11,7 +11,9 @@ TARGETS = [
 
 
 def main():
-    root = Path(__file__).resolve().parent
+    # sentinel_*.py, helper/, core/ live one level up, in agent/ - this
+    # script runs from agent/diagnostics/
+    root = Path(__file__).resolve().parent.parent
     targets = [root / t for t in TARGETS]
     targets.extend(sorted((root / "helper").glob("*.py")))
     targets.extend(sorted((root / "core").glob("*.py")))
