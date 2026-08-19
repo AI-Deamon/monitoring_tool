@@ -16,7 +16,8 @@ Usage:
 
 import logging
 import re
-from datetime import datetime, date, timedelta, timezone
+import time
+from datetime import datetime, timezone, timedelta
 
 import requests
 from extensions import db
@@ -278,42 +279,39 @@ def sync_lifecycle_data(products=None):
             
         try:
             url = f'https://endoflife.date/api/{product_key}.json'
-            
-            # H-18 FIX: Retry with exponential backoff on rate limit (429)
+
+            # H-18 FIX: retry with exponential backoff on rate limit (429).
+            # ~23 products are synced back-to-back with no inter-request delay,
+            # so a single 429 previously aborted that product's sync silently.
             max_retries = 3
-            retry_delay = 1  # Start with 1 second
-            
+            retry_delay = 1  # seconds
+            cycles = None
             for attempt in range(max_retries):
                 try:
                     resp = requests.get(url, timeout=15)
-                    
-                    # Handle rate limiting
                     if resp.status_code == 429:
                         if attempt < max_retries - 1:
-                            # Exponential backoff: 1s, 2s, 4s
                             wait_time = retry_delay * (2 ** attempt)
                             logger.warning(f"[EOL] Rate limited on '{product_key}', waiting {wait_time}s...")
-                            import time
                             time.sleep(wait_time)
                             continue
                         else:
                             logger.error(f"[EOL] Rate limit exceeded for '{product_key}' after {max_retries} attempts")
                             results[product_key] = 'error: rate limit exceeded'
                             break
-                    
                     resp.raise_for_status()
                     cycles = resp.json()
-                    break  # Success, exit retry loop
-                    
+                    break
                 except requests.Timeout:
                     if attempt < max_retries - 1:
                         logger.warning(f"[EOL] Timeout on '{product_key}', retrying...")
                         continue
                     raise
             else:
-                # All retries exhausted without success
                 continue
-            
+            if cycles is None:
+                continue
+
             synced = 0
             for cycle_data in cycles:
                 cycle_id = cycle_data.get('cycle', '')
@@ -738,8 +736,9 @@ def _match_app_lifecycle(app_name, app_version, product_key):
 
 
 def _evaluate_cycle(cycle, risk_weight):
-    """Evaluate a matched lifecycle cycle against today's date."""
-    today = date.today()
+    """Evaluate a matched lifecycle cycle against today's date (UTC, matching
+    the rest of the system's day-boundary handling)."""
+    today = datetime.now(timezone.utc).date()
     eol = cycle.eol_date
     
     if eol is None:

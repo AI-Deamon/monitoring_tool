@@ -631,7 +631,7 @@ def inventory():
         
         # EOL-002: Trigger lifecycle evaluation after inventory update
         try:
-            from eol_engine import evaluate_agent_lifecycle
+            from engines.eol_engine import evaluate_agent_lifecycle
             agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
             if agent:
                 evaluate_agent_lifecycle(agent)
@@ -1755,7 +1755,7 @@ def _process_inventory_category_upload(category_key, upsert_func):
         # Keep lifecycle risk model current for categories that can impact lifecycle views.
         if items:
             try:
-                from eol_engine import evaluate_extended_inventory_lifecycle, evaluate_agent_lifecycle
+                from engines.eol_engine import evaluate_extended_inventory_lifecycle, evaluate_agent_lifecycle
                 evaluate_extended_inventory_lifecycle(agent)
                 evaluate_agent_lifecycle(agent)
             except Exception as eol_error:
@@ -1838,7 +1838,7 @@ def extended_inventory():
         # EOL-002: Trigger lifecycle evaluation after extended inventory update
         # This is critical for CLI tools and portable apps risk detection
         try:
-            from eol_engine import evaluate_extended_inventory_lifecycle, evaluate_agent_lifecycle
+            from engines.eol_engine import evaluate_extended_inventory_lifecycle, evaluate_agent_lifecycle
             # Evaluate extended first
             evaluate_extended_inventory_lifecycle(agent)
             # Then run general agent evaluation to ensure OS/Apps are also up to date

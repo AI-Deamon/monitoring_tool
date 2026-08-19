@@ -1089,7 +1089,7 @@ def api_lifecycle_fleet_summary():
     org_id = g.current_user.org_id if g.current_user.role != "admin" else None
 
     try:
-        from eol_engine import get_fleet_lifecycle_summary
+        from engines.eol_engine import get_fleet_lifecycle_summary
 
         summary = get_fleet_lifecycle_summary(org_id=org_id)
         return jsonify(summary)
@@ -1154,7 +1154,7 @@ def api_lifecycle_sync():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        from eol_engine import sync_lifecycle_data
+        from engines.eol_engine import sync_lifecycle_data
 
         results = sync_lifecycle_data()
         return jsonify({"status": "ok", "synced": results})
@@ -1171,7 +1171,7 @@ def api_lifecycle_evaluate():
     org_id = g.current_user.org_id if g.current_user.role != "admin" else None
 
     try:
-        from eol_engine import evaluate_fleet_lifecycle
+        from engines.eol_engine import evaluate_fleet_lifecycle
 
         summary = evaluate_fleet_lifecycle(org_id=org_id)
         return jsonify({"status": "ok", "summary": summary})

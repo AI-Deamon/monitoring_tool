@@ -57,3 +57,7 @@ check_screentime_heartbeat.py
 check_server_status.py
 check_spans_flow.py
 clear_agent_data.py
+
+# Redundant duplicate of engines/admin_classification.py - not importable
+# as a script (defines a Flask Blueprint, no __main__), nothing referenced it
+scripts/admin/admin_classification.py

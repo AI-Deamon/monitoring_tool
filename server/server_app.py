@@ -273,7 +273,7 @@ def create_app():
         from server_api import bp as api_bp, register_root_endpoint
         from server_telemetry import bp as telemetry_bp_v1, register_root_telemetry_endpoints
         from server_dashboard import bp as dash_bp
-        from admin_classification import admin_classification_bp
+        from engines.admin_classification import admin_classification_bp
         from server_integrity import bp as integrity_bp, register_integrity_endpoints
         
         # ================================================================

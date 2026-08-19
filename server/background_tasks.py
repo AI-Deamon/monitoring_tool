@@ -424,7 +424,7 @@ def sync_eol_data():
     Primary intelligence source for EOL tracking.
     """
     try:
-        from eol_engine import sync_lifecycle_data
+        from engines.eol_engine import sync_lifecycle_data
 
         logger.info("[EOL] Starting endoflife.date sync...")
         results = sync_lifecycle_data()
@@ -442,7 +442,7 @@ def sync_nvd_cache():
     """
     try:
         import os
-        from nvd_cache import NVDCache
+        from engines.nvd_cache import NVDCache
 
         api_key = os.environ.get("NVD_API_KEY")
         cache = NVDCache(api_key=api_key)
