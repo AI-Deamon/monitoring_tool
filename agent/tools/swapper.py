@@ -13,6 +13,7 @@ import sys
 import time
 import zipfile
 from datetime import datetime, timedelta, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -32,18 +33,25 @@ LOGGER.propagate = False
 
 
 def _ensure_logger_file(log_path: Path) -> None:
-    """Attach a file handler once for the given path."""
+    """Attach a rotating file handler once for the given path.
+
+    Plain FileHandler grew swapper_fallback.log/swapper.log unbounded forever
+    - unlike core.log/helper.log, which have used RotatingFileHandler via
+    logger.py's setup_logger from the start. Same 5MB x3-backup bound here.
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     target = str(log_path.resolve()).lower()
     for handler in LOGGER.handlers:
-        if isinstance(handler, logging.FileHandler):
+        if isinstance(handler, RotatingFileHandler):
             try:
                 if str(Path(handler.baseFilename).resolve()).lower() == target:
                     return
             except Exception:
                 continue
 
-    file_handler = logging.FileHandler(str(log_path), encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        str(log_path), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s [SWAPPER] %(levelname)s %(message)s")
     )
