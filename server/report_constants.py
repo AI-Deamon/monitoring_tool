@@ -1,6 +1,6 @@
 """
 report_constants.py — Shared classification maps and formatting helpers for report generation.
-Imported by report_engine.py. weekly_cron generators maintain their own copies.
+Imported by engines/report_engine.py. weekly_cron generators maintain their own copies.
 """
 
 APP_CATEGORIES = {

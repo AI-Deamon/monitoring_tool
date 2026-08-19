@@ -29,7 +29,7 @@ from report_constants import (
     fmt_hours as _fmt_hours,
 )
 
-TEMPLATE_DIR = Path(__file__).parent / 'templates' / 'reports'
+TEMPLATE_DIR = Path(__file__).parent.parent / 'templates' / 'reports'
 
 
 def _make_jinja_env():

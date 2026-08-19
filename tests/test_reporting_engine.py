@@ -34,8 +34,8 @@ class TestRunScheduledReports:
         }
 
         with patch("extensions.db") as mock_db, \
-             patch("report_engine.create_job", return_value="job-123"), \
-             patch("report_engine.run_report_job") as mock_run, \
+             patch("engines.report_engine.create_job", return_value="job-123"), \
+             patch("engines.report_engine.run_report_job") as mock_run, \
              patch("server_reports._calc_next_run", return_value=datetime(2026, 6, 2, 9, 0, tzinfo=timezone.utc)):
 
             mock_db.session.execute.return_value.fetchall.return_value = [mock_row]
@@ -58,7 +58,7 @@ class TestRunReportJobEmailFailure:
         When auto_email=True and SMTP fails, job.status must remain 'completed'
         and job.error_message must contain 'email failed'.
         """
-        from report_engine import run_report_job
+        from engines.report_engine import run_report_job
 
         mock_db = MagicMock()
         mock_job = MagicMock()
@@ -66,11 +66,11 @@ class TestRunReportJobEmailFailure:
         mock_job.error_message = None
         mock_db.session.get.return_value = mock_job
 
-        with patch("report_engine.build_team_report", return_value={"_html": None, "start_date": None, "end_date": None}), \
-             patch("report_engine.build_individual_report", return_value=None), \
-             patch("report_engine.render_report_html", return_value="<html>report</html>"), \
-             patch("report_engine.update_job_progress"), \
-             patch("report_engine.send_report_email", return_value=(False, "SMTP credentials not configured")):
+        with patch("engines.report_engine.build_team_report", return_value={"_html": None, "start_date": None, "end_date": None}), \
+             patch("engines.report_engine.build_individual_report", return_value=None), \
+             patch("engines.report_engine.render_report_html", return_value="<html>report</html>"), \
+             patch("engines.report_engine.update_job_progress"), \
+             patch("engines.report_engine.send_report_email", return_value=(False, "SMTP credentials not configured")):
 
             run_report_job(
                 app=None, db=mock_db, job_id="job-1",
@@ -115,7 +115,7 @@ class TestCompleteJobTimezone:
     def test_completed_at_is_naive_utc(self):
         from datetime import datetime, timezone
 
-        from report_engine import complete_job
+        from engines.report_engine import complete_job
 
         mock_db = MagicMock()
         mock_job = MagicMock()
@@ -139,7 +139,7 @@ class TestCompleteJobTimezone:
 
     def test_fail_job_completed_at_is_naive_utc(self):
         """fail_job() shares the column and must match."""
-        from report_engine import fail_job
+        from engines.report_engine import fail_job
 
         mock_db = MagicMock()
         mock_job = MagicMock()

@@ -28,8 +28,8 @@ from datetime import date
 
 import pytest
 
-import report_engine
-from report_engine import (
+from engines import report_engine
+from engines.report_engine import (
     REASON_AGENT_NOT_FOUND,
     REASON_NO_DATA,
     build_individual_report,
@@ -127,9 +127,9 @@ class TestFailureReasonsAreDistinct:
     def _source(self):
         from pathlib import Path
 
-        return (Path(__file__).parent.parent / "server" / "report_engine.py").read_text(
-            encoding="utf-8"
-        )
+        return (
+            Path(__file__).parent.parent / "server" / "engines" / "report_engine.py"
+        ).read_text(encoding="utf-8")
 
     def test_job_runner_does_not_use_one_generic_message(self):
         src = self._source()

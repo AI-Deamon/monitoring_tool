@@ -5,5 +5,6 @@
 # - eol_engine.py - End-of-life lifecycle sync and evaluation
 # - nvd_cache.py - NVD (CVE) data caching
 # - admin_classification.py - Admin domain-classification blueprint
+# - report_engine.py - Report generation (email/PDF), job queue, template rendering
 # - risk_scoring.py - Risk scoring (not yet wired into the app)
 # - normalization_engine.py - App/publisher name normalization (not yet wired into the app)

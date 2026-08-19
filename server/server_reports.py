@@ -80,7 +80,7 @@ def _calc_next_run(frequency, day_of_week, day_of_month, send_hour):
 
 def _run_schedule(schedule_id):
     """Execute a schedule: generate report and send email."""
-    from report_engine import build_individual_report, build_team_report, render_report_html, send_report_email
+    from engines.report_engine import build_individual_report, build_team_report, render_report_html, send_report_email
 
     row = db.session.execute(text(
         "SELECT * FROM report_schedules WHERE id = :id"
@@ -145,7 +145,7 @@ def _get_date_range(report_type, frequency):
 @login_required
 def generate_report():
     """Generate report HTML and return it for preview in new tab."""
-    from report_engine import build_individual_report, build_team_report, render_report_html
+    from engines.report_engine import build_individual_report, build_team_report, render_report_html
 
     data = request.get_json(force=True)
     report_type = data.get('report_type', 'weekly')   # weekly/monthly/daily
@@ -203,7 +203,7 @@ def generate_report():
 @admin_required
 def email_report():
     """Generate report and send email immediately."""
-    from report_engine import build_individual_report, build_team_report, render_report_html, send_report_email
+    from engines.report_engine import build_individual_report, build_team_report, render_report_html, send_report_email
 
     data = request.get_json(force=True)
     report_type = data.get('report_type', 'weekly')
@@ -324,7 +324,7 @@ def run_schedule_now(schedule_id):
 @reports_bp.route('/dashboard/reports/unified/generate', methods=['POST'])
 @login_required
 def unified_generate():
-    from report_engine import create_job, run_report_job
+    from engines.report_engine import create_job, run_report_job
     data = request.get_json(force=True)
     report_type = data.get('report_type', 'weekly')
     scope = data.get('scope', 'team')
@@ -376,7 +376,7 @@ def unified_generate():
 @reports_bp.route('/dashboard/reports/unified/jobs/<job_id>', methods=['GET'])
 @login_required
 def get_job_status(job_id):
-    from report_engine import get_job
+    from engines.report_engine import get_job
     from server_models import ReportGenerationJob
 
     job = get_job(db, job_id)
@@ -420,7 +420,7 @@ def list_jobs():
 @reports_bp.route('/dashboard/reports/agents', methods=['GET'])
 @login_required
 def list_report_agents():
-    from report_engine import _query
+    from engines.report_engine import _query
     from auth import get_user_filter
 
     # Non-admins must not receive the full agent/username roster: scope the
@@ -504,7 +504,7 @@ def create_unified_schedule():
 @admin_required
 def email_job_result(job_id):
     """Send already-generated report HTML from a completed job (BUG-010)."""
-    from report_engine import get_job, send_report_email
+    from engines.report_engine import get_job, send_report_email
     data = request.get_json(force=True)
     recipients = data.get('recipients', [])
     if not recipients:

@@ -199,7 +199,7 @@ class TestTemplateParity:
             assert wanted in str(ws.cell(row=2, column=1).value)
 
     def test_sheet_uses_the_shared_column_headers(self, app):
-        from report_engine import _INVENTORY_HEADERS
+        from engines.report_engine import _INVENTORY_HEADERS
 
         with app.app_context():
             wanted = _make_agent('alpha-host', apps=[('Alpha App', '1.0')])

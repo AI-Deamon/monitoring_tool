@@ -6,7 +6,7 @@ import pytest
 from datetime import date
 from pathlib import Path
 
-from report_engine import _make_jinja_env
+from engines.report_engine import _make_jinja_env
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "server" / "templates" / "reports"
 

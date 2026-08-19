@@ -24,8 +24,8 @@ class TestRunScheduledReports:
         """BUG-001: must pass report_type and scope from DB row, not None."""
         from background_tasks import run_scheduled_reports
         with patch("extensions.db") as db, \
-             patch("report_engine.create_job", return_value="j1"), \
-             patch("report_engine.run_report_job") as mock_run, \
+             patch("engines.report_engine.create_job", return_value="j1"), \
+             patch("engines.report_engine.run_report_job") as mock_run, \
              patch("server_reports._calc_next_run", return_value=datetime(2026,6,2,9,0,tzinfo=timezone.utc)):
             db.session.execute.return_value.fetchall.return_value = [_row(SCHEDULE)]
             run_scheduled_reports()
@@ -42,8 +42,8 @@ class TestRunScheduledReports:
             return datetime(2026,6,4,14,0,tzinfo=timezone.utc)
         s = {**SCHEDULE, "send_hour": 14, "day_of_week": 2}
         with patch("extensions.db") as db, \
-             patch("report_engine.create_job", return_value="j2"), \
-             patch("report_engine.run_report_job"), \
+             patch("engines.report_engine.create_job", return_value="j2"), \
+             patch("engines.report_engine.run_report_job"), \
              patch("server_reports._calc_next_run", side_effect=fake_calc):
             db.session.execute.return_value.fetchall.return_value = [_row(s)]
             run_scheduled_reports()

@@ -2026,7 +2026,7 @@ def _empty_inventory_workbook_response():
     """
     from io import BytesIO
 
-    from report_engine import build_inventory_workbook
+    from engines.report_engine import build_inventory_workbook
 
     buffer = BytesIO()
     build_inventory_workbook([]).save(buffer)
@@ -2064,7 +2064,7 @@ def api_inventory_fleet_export_xlsx():
     """
     from io import BytesIO
 
-    from report_engine import InventoryExportTooLarge, build_inventory_workbook
+    from engines.report_engine import InventoryExportTooLarge, build_inventory_workbook
 
     agent_id = (request.args.get("agent_id") or "").strip()
 

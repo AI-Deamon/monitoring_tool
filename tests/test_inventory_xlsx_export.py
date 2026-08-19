@@ -21,7 +21,7 @@ import pytest
 
 openpyxl = pytest.importorskip("openpyxl", reason="openpyxl is required for FR-025b")
 
-from report_engine import (  # noqa: E402
+from engines.report_engine import (  # noqa: E402
     MAX_COMBINED_EXPORT_AGENTS,
     InventoryExportTooLarge,
     build_inventory_workbook,

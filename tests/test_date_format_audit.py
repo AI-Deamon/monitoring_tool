@@ -160,7 +160,7 @@ class TestFormatterIsReachable(unittest.TestCase):
         for email/PDF. A filter registered in only one breaks the other at render
         time — the same split that caused D12.
         """
-        for rel in ("server_app.py", "report_engine.py"):
+        for rel in ("server_app.py", "engines/report_engine.py"):
             body = (SERVER / rel).read_text(encoding="utf-8", errors="replace")
             self.assertIn("fmt_date", body, f"{rel} does not register fmt_date")
             self.assertIn("fmt_datetime", body, f"{rel} does not register fmt_datetime")
