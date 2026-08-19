@@ -39,6 +39,7 @@ from typing import Dict, Any, Optional
 
 from flask import Blueprint, jsonify, request, send_file, current_app
 from server_auth import require_auth
+from utils.dt import utcnow_naive
 
 logger = logging.getLogger(__name__)
 
@@ -212,11 +213,30 @@ def _write_update_history(agent_id: str, event: str, version: str, details: str 
         if not status:
             return  # Not a lifecycle event worth auditing
 
+        # A lifecycle episode needs a target to be an episode OF. Writing a
+        # 'pending' row with to_version='' (which trigger-check did for an
+        # agent that had no target_version) left a phantom episode that never
+        # reached a terminal status, which is exactly the un-anchored row the
+        # stale-watchdog episode scoping warns about in
+        # server_dashboard.api_set_target_version.
+        if status in ('pending', 'downloading', 'installing') and not (version or '').strip():
+            logger.debug(
+                f"[UPDATES] Skipping {event} audit row for {agent_id}: no target version"
+            )
+            return
+
         agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
         if not agent:
             return
 
-        now = datetime.now(timezone.utc)
+        # D02 / FR-009: started_at/completed_at are naive-UTC columns. Writing
+        # an aware value here made Postgres cast it through the session
+        # TimeZone, storing IST wall-clock — 5.5h ahead of the row's own
+        # created_at. _update_episode_reference_time() then returned a
+        # timestamp in the future, so the stale-update watchdog's
+        # `reference_ts < reset_cutoff` test could never be true and a
+        # genuinely stuck agent was never auto-reset.
+        now = utcnow_naive()
         history = server_models.UpdateHistory(
             agent_id=agent_id,
             from_version=agent.version,

@@ -817,12 +817,46 @@ class ServerUploader:
         except Exception as e:
             logger.error(f"Upload batch error: {e}", exc_info=True)
 
+    #: Server statuses that mean "the data is safely on the server", so the
+    #: buffered record must be marked uploaded.
+    #:
+    #: The asset endpoints answer with the ACTION they performed rather than a
+    #: generic 'ok':
+    #:   /asset-hardware          -> 'created' | 'updated'   (server_api.py)
+    #:   /asset-hardware/network  -> 'network_updated'
+    #:   bulk inventory           -> 'partial' (some rows deduped by the DB)
+    #:
+    #: None of those were listed here, so hardware and network records were
+    #: NEVER marked uploaded. Because _upload_hardware() breaks on the first
+    #: unacknowledged record, the OLDEST snapshot became a permanent
+    #: head-of-line block: it was re-sent and re-applied on every cycle while
+    #: every newer snapshot queued behind it forever.
+    #:
+    #: Observed on L180701PB: 251 buffered snapshots, all uploaded=0, the
+    #: oldest from 2026-05-21. The server kept re-applying that May record --
+    #: stamping collected_at=now() so it looked fresh -- while the current
+    #: adapter, and later the battery data, never arrived at all.
+    #:
+    #: (HTTP 304 is already normalised to 'ok' by _make_request, so
+    #: 'unchanged' does not need to appear here -- it is listed for clarity
+    #: in case that normalisation is ever removed.)
+    ACK_SUCCESS_STATUSES = frozenset({
+        'ok',
+        'success',
+        'skipped',
+        'created',
+        'updated',
+        'unchanged',
+        'network_updated',
+        'partial',
+    })
+
     def _is_ack_success(self, response: Optional[Dict]) -> bool:
         """Treat only explicit success-like statuses as upload ACKs."""
         if not response:
             return False
         status = str(response.get('status', '')).lower()
-        return status in ('ok', 'success', 'skipped')
+        return status in self.ACK_SUCCESS_STATUSES
 
     def _is_permanent_rejection(self, response: Optional[Dict]) -> bool:
         """True if the server rejected the payload with HTTP 400 - i.e. the

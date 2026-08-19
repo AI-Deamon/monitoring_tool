@@ -13,7 +13,7 @@
                 Dashboard Overview
             </h1>
             <p class="text-gray-600 dark:text-gray-400 text-sm">
-                Fleet-wide activity and agent status summary
+                Team-wide activity and agent status summary
             </p>
         </div>
         <div class="flex items-center gap-3">
@@ -67,35 +67,7 @@
         </div>
     </div>
 
-    <!-- Row 1: Fleet Utilization Trend (hero — full width, change-over-time) -->
-    <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
-        <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl flex items-center justify-between flex-wrap gap-2">
-            <h3 class="text-sm font-semibold">Fleet Utilization Trend</h3>
-            <div class="flex items-center gap-4">
-                <!-- Legend: swatch + label so identity is never color-alone -->
-                <div class="flex items-center gap-3 text-xs">
-                    <span class="flex items-center gap-1.5"><span class="inline-block w-3.5 h-0.5 rounded-full" style="background:#10b981"></span><span class="text-gray-600 dark:text-gray-400">Active</span></span>
-                    <span class="flex items-center gap-1.5"><span class="inline-block w-3.5 h-0.5 rounded-full" style="background:#d97706"></span><span class="text-gray-600 dark:text-gray-400">Idle</span></span>
-                    <span class="flex items-center gap-1.5"><span class="inline-block w-3.5 h-0.5 rounded-full" style="background:#6b7280"></span><span class="text-gray-600 dark:text-gray-400">Locked</span></span>
-                </div>
-                <!-- Range filter (one row, above the plot) -->
-                <div class="flex gap-1" id="trend-range" role="group" aria-label="Trend range">
-                    <button type="button" data-days="7" class="trend-range-btn px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">7d</button>
-                    <button type="button" data-days="30" class="trend-range-btn px-2 py-0.5 text-xs font-medium rounded bg-indigo-600 text-white">30d</button>
-                    <button type="button" data-days="90" class="trend-range-btn px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">90d</button>
-                </div>
-            </div>
-        </div>
-        <div class="p-4 relative" style="height: 320px;">
-            <canvas id="utilizationTrendChart"></canvas>
-            <div id="utilizationTrendEmpty"
-                 class="hidden absolute inset-0 flex items-center justify-center text-xs text-gray-400">
-                No screen-time recorded in this range
-            </div>
-        </div>
-    </div>
-
-    <!-- Row 2: Fleet health — Agent Status | Fleet Screen Time | Lifecycle Risk -->
+    <!-- Row 1: Fleet health — Agent Status | Fleet Screen Time | Lifecycle Risk -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Agent Status (donut) -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
@@ -112,18 +84,18 @@
         <!-- Fleet Screen Time (100%-stacked bar) -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
             <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
-                <h3 class="text-sm font-semibold">Fleet Screen Time</h3>
+                <h3 class="text-sm font-semibold">Team Screen Time</h3>
             </div>
             <!-- One 100%-stacked bar: segments sum to the day's total screen time,
                  so the states are directly comparable (part-to-whole). 2px gaps
                  reveal the track surface between fills (mark spec). -->
             <div class="p-4 flex-1 flex flex-col justify-center gap-4">
                 <div class="flex justify-between items-baseline">
-                    <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Fleet day split</h4>
+                    <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Team day split</h4>
                     <span class="text-xs text-gray-500">Total <span id="fleet-total-time" class="font-semibold text-gray-700 dark:text-gray-200">0h 0m</span></span>
                 </div>
                 <div id="fleet-stack" class="flex w-full h-5 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-700 gap-[2px]"
-                     role="img" aria-label="Fleet screen-time split by state">
+                     role="img" aria-label="Team screen-time split by state">
                     <div id="fleet-active-seg" class="h-full" style="width:0%; background:#10b981"></div>
                     <div id="fleet-idle-seg"   class="h-full" style="width:0%; background:#d97706"></div>
                     <div id="fleet-locked-seg" class="h-full" style="width:0%; background:#6b7280"></div>
@@ -154,7 +126,7 @@
         <!-- Fleet Lifecycle Risk (donut) -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
             <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl flex justify-between items-center">
-                <h3 class="text-sm font-semibold">Fleet Lifecycle Risk</h3>
+                <h3 class="text-sm font-semibold">Device Lifecycle Risk</h3>
                 <span class="text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-600 dark:text-gray-200 px-2 py-0.5 rounded-full font-bold inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>LIVE</span>
             </div>
             <div class="p-4 flex flex-col flex-1 items-center justify-center">
@@ -175,7 +147,7 @@
         </div>
     </div>
 
-    <!-- Row 3: Analytics — App Usage by Category | Top 10 by screen time -->
+    <!-- Row 2: Analytics — App Usage by Category | Top 10 by screen time -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- App Usage by Category -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
@@ -252,7 +224,7 @@
         </div>
     </div>
 
-    <!-- Row 4: Top Performance (full-width leaderboards) -->
+    <!-- Row 3: Top Performance (full-width leaderboards) -->
     <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
         <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
             <h3 class="text-sm font-semibold flex items-center gap-2">
@@ -375,11 +347,6 @@ window.switchTopTab = function(tab) {
 
 async function loadAnalyticsCharts() {
     try {
-        // Fleet utilization trend (change-over-time). Runs concurrently with the
-        // rest; it owns its own error handling so a trend failure never aborts
-        // the category chart below.
-        loadUtilizationTrend();
-
         // Load productivity metrics for Avg Productivity KPI
         const prodResp = await fetch('/dashboard/api/overview/productivity-metrics?days=7');
         const prodData = await prodResp.json();
@@ -411,8 +378,13 @@ async function loadAnalyticsCharts() {
             if (empty) empty.classList.toggle('hidden', hasData);
             ctx1.classList.toggle('hidden', !hasData);
 
-            if (chartInstances.appCategory) chartInstances.appCategory.destroy();
-            if (hasData) {
+            if (hasData && chartInstances.appCategory) {
+                // Update in place — destroy()+recreate blanked the canvas for a
+                // frame on every 30s auto-refresh, which read as a visible flicker.
+                chartInstances.appCategory.data.labels = order.map(k => k.charAt(0).toUpperCase() + k.slice(1));
+                chartInstances.appCategory.data.datasets[0].data = values;
+                chartInstances.appCategory.update();
+            } else if (hasData) {
                 const catColors = categoryColors();
                 const catAxis = trendAxisColors();  // hoisted; shared recessive grid/tick steps
                 chartInstances.appCategory = new Chart(ctx1, {
@@ -474,27 +446,7 @@ async function loadAnalyticsCharts() {
     }
 }
 
-// ---- Fleet Utilization Trend ----------------------------------------------
-// Change-over-time line chart of fleet screen-time split. Colors are the shared
-// validated STATE_COLORS (green Active / amber Idle / neutral-gray Locked) that
-// passed the CVD + contrast checks on both the light (#fff) and dark (#1f2937)
-// dashboard surfaces; the legend adds a text label so identity is never
-// colour-alone.
-let trendDays = 30;
 let topRangeDays = 7;
-
-// Shared state palette (Active/Idle/Locked/Away). CVD-validated (--pairs all)
-// on both surfaces; Active uses the page's success token #10b981 so the entity
-// "Active" is the same colour here, in the stacked Fleet Screen Time bar, and
-// in the KPI/Top-Performance labels. Green<->amber sits in the 6-8 CVD band,
-// which is legal because every chart using it carries an always-present legend.
-const STATE_COLORS = { active: '#10b981', idle: '#d97706', locked: '#6b7280', away: '#7c3aed' };
-
-const TREND_SERIES = [
-    { key: 'active', label: 'Active', color: STATE_COLORS.active },
-    { key: 'idle',   label: 'Idle',   color: STATE_COLORS.idle },
-    { key: 'locked', label: 'Locked', color: STATE_COLORS.locked },
-];
 
 function trendAxisColors() {
     // Recessive grid/ticks, stepped for the current theme against its surface.
@@ -504,101 +456,6 @@ function trendAxisColors() {
         tick: dark ? '#9ca3af' : '#6b7280',
     };
 }
-
-function fmtHours(v) {
-    const h = Math.floor(v);
-    const m = Math.round((v - h) * 60);
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
-async function loadUtilizationTrend() {
-    const canvas = document.getElementById('utilizationTrendChart');
-    if (!canvas) return;
-    try {
-        const resp = await fetch(`/dashboard/api/overview/utilization-trend?days=${trendDays}`);
-        const data = await resp.json();
-        if (data.error) throw new Error(data.error);
-
-        const labels = (data.labels || []).map(iso => {
-            // "2026-07-20" -> "Jul 20"
-            // Chart axis label. Kept short, but via the shared formatter so it
-            // cannot drift into a browser-locale format (FR-007).
-            return DateFmt.formatDate(iso + 'T00:00:00').slice(0, 5);  // DD-MM
-        });
-        const series = data.series || {};
-        const hasData = TREND_SERIES.some(s => (series[s.key] || []).some(v => v > 0));
-
-        const empty = document.getElementById('utilizationTrendEmpty');
-        if (empty) empty.classList.toggle('hidden', hasData);
-        canvas.classList.toggle('hidden', !hasData);
-
-        if (chartInstances.utilTrend) chartInstances.utilTrend.destroy();
-        if (!hasData) return;
-
-        const axis = trendAxisColors();
-        chartInstances.utilTrend = new Chart(canvas, {
-            type: 'line',
-            data: {
-                labels,
-                datasets: TREND_SERIES.map(s => ({
-                    label: s.label,
-                    data: series[s.key] || [],
-                    borderColor: s.color,
-                    backgroundColor: s.color,
-                    borderWidth: 2,           // 2px lines (mark spec)
-                    tension: 0.25,
-                    pointRadius: 0,           // thin marks; reveal on hover
-                    pointHoverRadius: 4,
-                    pointHoverBorderWidth: 2,
-                    pointHoverBorderColor: document.documentElement.classList.contains('dark') ? '#1f2937' : '#ffffff',
-                })),
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },  // crosshair-style hover
-                scales: {
-                    x: {
-                        grid: { color: axis.grid, drawBorder: false },
-                        ticks: { color: axis.tick, maxRotation: 0, autoSkip: true, maxTicksLimit: 10, font: { size: 10 } },
-                    },
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: axis.grid, drawBorder: false },
-                        ticks: { color: axis.tick, font: { size: 10 }, callback: v => `${v}h` },
-                        title: { display: true, text: 'Fleet hours', color: axis.tick, font: { size: 10 } },
-                    },
-                },
-                plugins: {
-                    legend: { display: false },  // rendered as HTML legend in the card header
-                    tooltip: {
-                        callbacks: { label: c => `${c.dataset.label}: ${fmtHours(c.parsed.y || 0)}` },
-                    },
-                },
-            },
-        });
-    } catch (error) {
-        console.error('Utilization trend error:', error);
-    }
-}
-
-// Range filter (7d / 30d / 90d) — repaints the button state and reloads.
-document.addEventListener('DOMContentLoaded', function () {
-    const group = document.getElementById('trend-range');
-    if (!group) return;
-    group.querySelectorAll('.trend-range-btn').forEach(btn => {
-        btn.addEventListener('click', function () {
-            trendDays = parseInt(this.dataset.days, 10) || 30;
-            group.querySelectorAll('.trend-range-btn').forEach(b => {
-                const on = b === this;
-                b.className = 'trend-range-btn px-2 py-0.5 text-xs font-medium rounded ' +
-                    (on ? 'bg-indigo-600 text-white'
-                        : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300');
-            });
-            loadUtilizationTrend();
-        });
-    });
-});
 
 // Top 10 range filter (Today / 7d / 30d) — repaints button state and reloads.
 document.addEventListener('DOMContentLoaded', function () {

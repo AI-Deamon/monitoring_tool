@@ -6,11 +6,13 @@ import os
 import json
 import smtplib
 import logging
+from contextlib import nullcontext
 from datetime import timedelta, date, datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from utils.dt import utcnow_naive
 
 # IST timezone (UTC+5:30)
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -439,7 +441,7 @@ def complete_job(db, job_id, html):
     if job:
         job.status = 'completed'
         job.result_html = html
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = utcnow_naive()  # D02 / FR-009: naive UTC column
         db.session.commit()
 
 
@@ -449,7 +451,7 @@ def fail_job(db, job_id, error):
     if job:
         job.status = 'failed'
         job.error_message = str(error)
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = utcnow_naive()  # D02 / FR-009: naive UTC column
         db.session.commit()
 
 
@@ -487,71 +489,78 @@ REASON_UNKNOWN_SCOPE = "That report scope is not recognised."
 
 
 def run_report_job(app, db, job_id, report_type, scope, agent_id, start_date, end_date, auto_email=False, recipients=None, include_pdf=False):
-    """Run report generation synchronously. Caller is responsible for running in a background thread."""
-    try:
-        update_job_progress(db, job_id, 0, 1, 'starting')
+    """Run report generation synchronously. Caller is responsible for running in a background thread.
 
-        def on_progress(current, total, agent_name):
-            update_job_progress(db, job_id, current, total, agent_name)
+    `app` is the real Flask app when called from a raw Thread (e.g. the
+    unified_generate endpoint) -- that thread has no app context of its own,
+    so we push one here. When called from the scheduler (background_tasks.py),
+    `app` is None because the caller already runs inside a pushed context.
+    """
+    with (app.app_context() if app is not None else nullcontext()):
+        try:
+            update_job_progress(db, job_id, 0, 1, 'starting')
 
-        if scope == 'team':
-            ctx = build_team_report(db, start_date, end_date, on_progress=on_progress)
-        else:
-            ctx = build_individual_report(db, agent_id, start_date, end_date)
+            def on_progress(current, total, agent_name):
+                update_job_progress(db, job_id, current, total, agent_name)
 
-        if not ctx:
-            # FR-021: name the actual cause. build_individual_report returns
-            # None only when the agent itself cannot be found — an agent with no
-            # activity still returns a context and renders an empty-state report
-            # (FR-022), so reaching here for an individual scope means the agent
-            # is missing, not that the week was quiet.
-            reason = REASON_AGENT_NOT_FOUND if scope != 'team' else REASON_NO_DATA
-            fail_job(db, job_id, reason)
-            return
-
-        html = render_report_html(report_type, scope, ctx)
-
-        # PDF generation
-        pdf_path = None
-        if include_pdf:
-            import tempfile, os
-            tmp = tempfile.NamedTemporaryFile(
-                suffix='.pdf', prefix=f'sentineledge_{report_type}_{scope}_',
-                delete=False, dir=tempfile.gettempdir()
-            )
-            tmp.close()
-            ok, result = generate_pdf(html, tmp.name)
-            if ok:
-                pdf_path = result
+            if scope == 'team':
+                ctx = build_team_report(db, start_date, end_date, on_progress=on_progress)
             else:
-                try:
-                    os.unlink(tmp.name)
-                except Exception:
-                    pass
+                ctx = build_individual_report(db, agent_id, start_date, end_date)
 
-        # Save job result
-        from server_models import ReportGenerationJob
-        job = db.session.get(ReportGenerationJob, job_id)
-        if job:
-            job.status = 'completed'
-            job.result_html = html
-            job.result_pdf_path = pdf_path
-            job.completed_at = datetime.now(timezone.utc)
-            db.session.commit()
+            if not ctx:
+                # FR-021: name the actual cause. build_individual_report returns
+                # None only when the agent itself cannot be found — an agent with no
+                # activity still returns a context and renders an empty-state report
+                # (FR-022), so reaching here for an individual scope means the agent
+                # is missing, not that the week was quiet.
+                reason = REASON_AGENT_NOT_FOUND if scope != 'team' else REASON_NO_DATA
+                fail_job(db, job_id, reason)
+                return
 
-        if auto_email and recipients:
-            subject = f"SentinelEdge {report_type.title()} {scope.title()} Report \u2014 {start_date} to {end_date}"
-            ok, err = send_report_email(html, recipients, subject)
-            if not ok:
-                logger.warning(f"[REPORTS] Job {job_id}: email failed — {err}")
-                job = db.session.get(ReportGenerationJob, job_id)
-                if job:
-                    job.error_message = f"Report generated but email failed: {err}"
-                    db.session.commit()
+            html = render_report_html(report_type, scope, ctx)
 
-    except Exception as e:
-        logger.exception(f"[REPORTS] Job {job_id} failed: {e}")
-        fail_job(db, job_id, str(e))
+            # PDF generation
+            pdf_path = None
+            if include_pdf:
+                import tempfile, os
+                tmp = tempfile.NamedTemporaryFile(
+                    suffix='.pdf', prefix=f'sentineledge_{report_type}_{scope}_',
+                    delete=False, dir=tempfile.gettempdir()
+                )
+                tmp.close()
+                ok, result = generate_pdf(html, tmp.name)
+                if ok:
+                    pdf_path = result
+                else:
+                    try:
+                        os.unlink(tmp.name)
+                    except Exception:
+                        pass
+
+            # Save job result
+            from server_models import ReportGenerationJob
+            job = db.session.get(ReportGenerationJob, job_id)
+            if job:
+                job.status = 'completed'
+                job.result_html = html
+                job.result_pdf_path = pdf_path
+                job.completed_at = utcnow_naive()  # D02 / FR-009: naive UTC column
+                db.session.commit()
+
+            if auto_email and recipients:
+                subject = f"SentinelEdge {report_type.title()} {scope.title()} Report \u2014 {start_date} to {end_date}"
+                ok, err = send_report_email(html, recipients, subject)
+                if not ok:
+                    logger.warning(f"[REPORTS] Job {job_id}: email failed — {err}")
+                    job = db.session.get(ReportGenerationJob, job_id)
+                    if job:
+                        job.error_message = f"Report generated but email failed: {err}"
+                        db.session.commit()
+
+        except Exception as e:
+            logger.exception(f"[REPORTS] Job {job_id} failed: {e}")
+            fail_job(db, job_id, str(e))
 
 
 # ── Multi-sheet inventory export (feature 037, D15 / FR-025b–h) ───────────────

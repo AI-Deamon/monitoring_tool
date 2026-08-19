@@ -182,6 +182,11 @@ def get_hidden_imports():
         "helper.state_detector",
         "helper.identity_sync",
         "helper.app_names",
+        # Statically imported by helper/main.py, so Analysis would normally
+        # find it — listed explicitly because every other helper module is,
+        # and a module missing from this list is invisible until someone
+        # notices the feature is absent from a shipped binary.
+        "helper.network_watcher",
     ]
 
 

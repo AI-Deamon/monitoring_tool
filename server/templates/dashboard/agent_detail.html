@@ -352,16 +352,6 @@
                 <input type="text" id="app-search" placeholder="Search apps..."
                     class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
             </div>
-            <div id="app-ongoing-section"
-                class="hidden bg-green-50 dark:bg-green-900/20 p-3 border-b border-gray-200 dark:border-gray-700">
-                <div class="text-xs font-semibold text-green-700 dark:text-green-300 uppercase tracking-wide mb-1">🎯
-                    Currently Using</div>
-                <div class="flex justify-between items-center">
-                    <span id="ongoing-app-name" class="font-semibold text-gray-900 dark:text-gray-100">--</span>
-                    <span id="ongoing-app-duration"
-                        class="font-mono font-semibold text-green-600 dark:text-green-400">--</span>
-                </div>
-            </div>
             <div class="max-h-96 overflow-y-auto">
                 <table class="w-full" id="apps-table">
                     <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
@@ -370,7 +360,7 @@
                                 class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Application</th>
                             <th
-                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                class="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Sessions</th>
                             <th
                                 class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -394,7 +384,8 @@
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
                 <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img
-                        src="{{ url_for('static', filename='globe.png') }}" class="w-6 h-6" /> Domain Usage</h3>
+                        src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 inline mr-2" /> Domain
+                    Usage</h3>
                 <span id="domains-count"
                     class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
                     domains</span>
@@ -402,16 +393,6 @@
             <div class="p-4 border-b border-gray-200 dark:border-gray-700">
                 <input type="text" id="domain-search" placeholder="Search domains..."
                     class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-            </div>
-            <div id="domain-ongoing-section"
-                class="hidden bg-green-50 dark:bg-green-900/20 p-3 border-b border-gray-200 dark:border-gray-700">
-                <div class="text-xs font-semibold text-green-700 dark:text-green-300 uppercase tracking-wide mb-1">🌍
-                    Currently Browsing</div>
-                <div class="flex justify-between items-center">
-                    <span id="ongoing-domain-name" class="font-semibold text-gray-900 dark:text-gray-100">--</span>
-                    <span id="ongoing-domain-duration"
-                        class="font-mono font-semibold text-green-600 dark:text-green-400">--</span>
-                </div>
             </div>
             <div class="max-h-96 overflow-y-auto">
                 <table class="w-full" id="domains-table">
@@ -421,7 +402,7 @@
                                 class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Domain</th>
                             <th
-                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                class="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Sessions</th>
                             <th
                                 class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -476,9 +457,9 @@
                 <span id="inventory-count"
                     class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
                     apps</span>
-                <button onclick="exportTableToCSV('inventory-table', 'inventory.csv')"
-                    class="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
-                    Export CSV
+                <button id="btn-inventory-xlsx" onclick="downloadInventoryWorkbook()"
+                    class="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+                    Export Excel
                 </button>
             </div>
         </div>

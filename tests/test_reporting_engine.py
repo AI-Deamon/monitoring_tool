@@ -91,10 +91,30 @@ class TestRunReportJobEmailFailure:
 
 
 class TestCompleteJobTimezone:
-    """BUG-006: complete_job() must store timezone-aware datetime in completed_at."""
+    """
+    complete_job() must store NAIVE UTC in completed_at (D02 / FR-009).
 
-    def test_completed_at_is_timezone_aware(self):
-        """complete_job() must set completed_at to a timezone-aware UTC datetime."""
+    This previously asserted the opposite ("BUG-006: must be timezone-aware").
+    That was the wrong layer. ReportGenerationJob.completed_at is
+    `db.Column(db.DateTime)` — TIMESTAMP WITHOUT TIME ZONE — so an aware value
+    is not stored as-is: psycopg2 sends the offset and Postgres casts
+    timestamptz -> timestamp using the SESSION TimeZone, landing 5:30 ahead of
+    UTC on an IST server. The same defect put update_history.started_at at
+    16:35 for an instant its own created_at recorded as 11:05.
+
+    The assertion passed only because the job is a MagicMock: it pinned the
+    in-Python type and never observed what reached the database.
+
+    The rest of the stack already assumes naive UTC — utils.datetime_format
+    treats a stored naive value as UTC, and the dashboard parses these strings
+    with DateFmt.parseStored() precisely because "naive ISO from the API is
+    UTC" (templates/dashboard/updates.html). A column that genuinely wants an
+    aware value declares it, as TabSession does with db.DateTime(timezone=True).
+    """
+
+    def test_completed_at_is_naive_utc(self):
+        from datetime import datetime, timezone
+
         from report_engine import complete_job
 
         mock_db = MagicMock()
@@ -105,5 +125,28 @@ class TestCompleteJobTimezone:
         complete_job(mock_db, "job-1", "<html>report</html>")
 
         assert mock_job.completed_at is not None, "completed_at must be set"
-        assert mock_job.completed_at.tzinfo is not None, \
-            "completed_at must be timezone-aware (not naive datetime)"
+        assert mock_job.completed_at.tzinfo is None, (
+            "completed_at must be NAIVE — an aware value is silently shifted by "
+            "the session timezone when written to a TIMESTAMP WITHOUT TIME ZONE "
+            "column"
+        )
+        # ...and naive means naive *UTC*, not local wall-clock.
+        drift = abs(
+            (mock_job.completed_at - datetime.now(timezone.utc).replace(tzinfo=None))
+            .total_seconds()
+        )
+        assert drift < 5, f"completed_at is not UTC — drifted {drift}s"
+
+    def test_fail_job_completed_at_is_naive_utc(self):
+        """fail_job() shares the column and must match."""
+        from report_engine import fail_job
+
+        mock_db = MagicMock()
+        mock_job = MagicMock()
+        mock_job.completed_at = None
+        mock_db.session.get.return_value = mock_job
+
+        fail_job(mock_db, "job-1", "boom")
+
+        assert mock_job.completed_at is not None
+        assert mock_job.completed_at.tzinfo is None

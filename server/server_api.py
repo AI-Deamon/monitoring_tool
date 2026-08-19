@@ -143,6 +143,36 @@ def short_agent_id(agent_id):
     return agent_id_str[-6:] if len(agent_id_str) > 6 else agent_id_str
 
 
+def normalize_network_addresses(network):
+    """
+    Extract (primary_ip, all_ips) from a network payload, discarding blanks.
+
+    D24 / FR-035. Callers use "did this payload carry any address at all?" to
+    decide whether a network partial describes a real state or an adapter
+    caught mid-transition. Blank-but-present values are the normal shape of an
+    empty reading, so '' , '   ', [''] and [None] must all normalise away —
+    testing only for key presence would let them through.
+
+    Returns:
+        (str, list[str]) — primary IP ('' if none) and non-blank addresses.
+    """
+    if not isinstance(network, dict):
+        return '', []
+
+    primary_ip = network.get('primary_ip')
+    primary_ip = primary_ip.strip() if isinstance(primary_ip, str) else ''
+
+    raw_ips = network.get('all_ips')
+    if not isinstance(raw_ips, list):
+        raw_ips = []
+    all_ips = [
+        ip.strip() for ip in raw_ips
+        if isinstance(ip, str) and ip.strip()
+    ]
+
+    return primary_ip, all_ips
+
+
 def should_ignore_domain_session(session_data):
     """
     Check if domain session should be ignored (localhost/internal).
@@ -1563,12 +1593,47 @@ def asset_hardware_network():
             return jsonify({'error': 'No existing asset record'}), 404
         
         network = data.get('network', {})
-        
-        # Update only network fields
-        existing.primary_mac = network.get('primary_mac', '') or existing.primary_mac
-        existing.primary_ip = network.get('primary_ip', '') or existing.primary_ip
+
+        # D24 / FR-035: never apply half of a network partial.
+        #
+        # The scalar fields below used `X or existing.X` while the list fields
+        # were overwritten unconditionally. An empty payload therefore produced a
+        # self-contradictory row - primary_ip retained from an older reading,
+        # all_ips emptied - and refreshed collected_at, so a stale address looked
+        # freshly verified. Worse, the fallback made primary_ip monotonically
+        # sticky: once a wrong address was stored, no empty payload could ever
+        # clear it.
+        #
+        # Agents send empty readings when adapters are mid-transition (a USB NIC
+        # renegotiating its link is the reproducer). 4.2.5 guards this agent-side,
+        # but this handler must hold the line for every already-deployed agent
+        # and for empty partials still draining out of buffers.
+        #
+        # Answer 200/'skipped' rather than 4xx on purpose: 'skipped' is in
+        # ServerUploader.ACK_SUCCESS_STATUSES, so the agent marks the record
+        # uploaded and moves on. A 4xx would fail the ACK and _upload_network_
+        # partials() breaks on first failure, so the bad record would block every
+        # newer one behind it - the head-of-line stall 4.2.5 just fixed.
+        primary_ip, all_ips = normalize_network_addresses(network)
+        if not primary_ip and not all_ips:
+            logger.info(
+                f"[ASSET {sid}] Network partial carried no addresses "
+                f"(adapter transition) — ignoring, keeping last known state"
+            )
+            return jsonify({
+                'status': 'skipped',
+                'reason': 'no_network_addresses',
+            }), 200
+
+        # Update only network fields. Scalars are written as received rather than
+        # falling back to the existing value: the guard above already rejected the
+        # only case the fallback was protecting against, and keeping it would let
+        # the scalars drift out of agreement with the lists again - which is the
+        # defect. This now matches the full-asset handler's semantics.
+        existing.primary_mac = network.get('primary_mac', '')
+        existing.primary_ip = primary_ip
         existing.all_macs_json = json.dumps(network.get('all_macs', []))
-        existing.all_ips_json = json.dumps(network.get('all_ips', []))
+        existing.all_ips_json = json.dumps(all_ips)
         existing.dns_servers_json = json.dumps(network.get('dns_servers', []))
         existing.domain_joined = network.get('domain_joined', existing.domain_joined)
         existing.domain_name = network.get('domain_name', '') or existing.domain_name

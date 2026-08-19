@@ -225,8 +225,8 @@ async function loadFullReport(isManual = false) {
     renderFlipCards(data.screen_time || {}, data.state_events || []);
 
     // Render tables
-    renderAppUsage(data.app_usage, data.live_status);
-    renderDomainUsage(data.domain_usage, data.live_status);
+    renderAppUsage(data.app_usage);
+    renderDomainUsage(data.domain_usage);
     renderDomainVisits(data.domain_visits);
     renderInventory(data.inventory);
     loadScreenTimeHistory();
@@ -234,24 +234,10 @@ async function loadFullReport(isManual = false) {
     loadSystemVisibility();
 }
 
-function renderAppUsage(appData, liveStatus) {
+function renderAppUsage(appData) {
     const tbody = document.getElementById('apps-body');
     tbody.innerHTML = '';
     document.getElementById('apps-count').textContent = `${appData?.count || 0} apps`;
-
-    if (liveStatus?.current_app) {
-        document.getElementById('app-ongoing-section').classList.remove('hidden');
-        document.getElementById('ongoing-app-name').textContent = liveStatus.current_app;
-        const appDurationEl = document.getElementById('ongoing-app-duration');
-        if (liveStatus.duration_seconds > 0) {
-            appDurationEl.textContent = formatTime(liveStatus.duration_seconds);
-            appDurationEl.classList.remove('hidden');
-        } else {
-            appDurationEl.classList.add('hidden');
-        }
-    } else {
-        document.getElementById('app-ongoing-section').classList.add('hidden');
-    }
 
     if (!appData?.data?.length) {
         tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No data</td></tr>';
@@ -264,7 +250,7 @@ function renderAppUsage(appData, liveStatus) {
         tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
         tr.innerHTML = `
                 <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${app.app}</td>
-                <td class="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-300">${app.session_count || '-'}</td>
+                <td class="px-4 py-3 text-center text-sm text-gray-600 dark:text-gray-300">${app.session_count || '-'}</td>
                 <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(app.duration_seconds)}</td>
                 <td class="px-4 py-3 text-right">
                     <div class="flex items-center justify-end gap-2">
@@ -279,24 +265,10 @@ function renderAppUsage(appData, liveStatus) {
     });
 }
 
-function renderDomainUsage(domainData, liveStatus) {
+function renderDomainUsage(domainData) {
     const tbody = document.getElementById('domains-body');
     tbody.innerHTML = '';
     document.getElementById('domains-count').textContent = `${domainData?.count || 0} domains`;
-
-    if (liveStatus?.current_domain) {
-        document.getElementById('domain-ongoing-section').classList.remove('hidden');
-        document.getElementById('ongoing-domain-name').textContent = liveStatus.current_domain;
-        const domainDurationEl = document.getElementById('ongoing-domain-duration');
-        if (liveStatus.domain_duration > 0 || liveStatus.domain_duration_seconds > 0) {
-            domainDurationEl.textContent = formatTime(liveStatus.domain_duration || liveStatus.domain_duration_seconds || 0);
-            domainDurationEl.classList.remove('hidden');
-        } else {
-            domainDurationEl.classList.add('hidden');
-        }
-    } else {
-        document.getElementById('domain-ongoing-section').classList.add('hidden');
-    }
 
     if (!domainData?.data?.length) {
         tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No data</td></tr>';
@@ -310,7 +282,7 @@ function renderDomainUsage(domainData, liveStatus) {
         tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
         tr.innerHTML = `
                 <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${d.domain}</td>
-                <td class="px-4 py-3 text-right text-sm text-gray-600 dark:text-gray-300">${d.session_count || '-'}</td>
+                <td class="px-4 py-3 text-center text-sm text-gray-600 dark:text-gray-300">${d.session_count || '-'}</td>
                 <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(d.duration_seconds)}</td>
                 <td class="px-4 py-3 text-right">
                     <div class="flex items-center justify-end gap-2">
@@ -475,20 +447,58 @@ async function loadScreenTimeHistory() {
     });
 }
 
-function exportTableToCSV(tableId, filename) {
-    const table = document.getElementById(tableId);
-    let csv = [];
-    table.querySelectorAll('tr').forEach(row => {
-        let cols = [];
-        row.querySelectorAll('th, td').forEach(col => cols.push('"' + col.textContent.trim().replace(/"/g, '""') + '"'));
-        csv.push(cols.join(','));
-    });
-    const blob = new Blob([csv.join('\\n')], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
+// Inventory export (D15 / FR-025b).
+//
+// This used to scrape the rendered #inventory-table into CSV in the browser.
+// That produced a document unlike the one the Reports page hands out for the
+// same data: no title, no agent identity, no de-duplication, and whatever
+// columns the table happened to show. It was also broken — rows were joined on
+// the literal two-character sequence \n, so every export was one long line.
+//
+// Both downloads now come from build_inventory_workbook() on the server, so
+// there is one inventory template rather than two that drift apart.
+async function downloadInventoryWorkbook() {
+    const btn = document.getElementById('btn-inventory-xlsx');
+    const original = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = 'Preparing…';
+    }
+    try {
+        const resp = await fetch(
+            `/dashboard/api/inventory/fleet-export.xlsx?agent_id=${encodeURIComponent(AGENT_ID)}`
+        );
+        if (!resp.ok) {
+            let msg = 'Failed to generate the spreadsheet.';
+            try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch (e) { /* non-JSON error body */ }
+            alert(msg);
+            return;
+        }
+
+        // Honour the server's Content-Disposition so the DD-MM-YYYY filename
+        // (FR-007) is defined in exactly one place.
+        let filename = 'inventory.xlsx';
+        const disposition = resp.headers.get('Content-Disposition') || '';
+        const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+        if (match) filename = decodeURIComponent(match[1]);
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('Failed to generate the spreadsheet: ' + e);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = original;
+        }
+    }
 }
 
 // Hardware data loader

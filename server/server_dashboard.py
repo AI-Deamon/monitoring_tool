@@ -8,6 +8,7 @@ Now includes authentication - users must log in to access dashboard.
 import json
 import logging
 import re
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta, date, timezone
 from flask import (
@@ -2018,11 +2019,33 @@ def api_inventory_fleet_export():
         return jsonify({"error": "Internal server error"}), 500
 
 
+def _empty_inventory_workbook_response():
+    """
+    The inventory workbook for a selection that matches nothing.
+
+    Built by the same builder as every other inventory download, so the
+    empty state is the same document shape as the populated one.
+    """
+    from io import BytesIO
+
+    from report_engine import build_inventory_workbook
+
+    buffer = BytesIO()
+    build_inventory_workbook([]).save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"inventory_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
+    )
+
+
 @bp.route("/api/inventory/fleet-export.xlsx", methods=["GET"])
 @login_required
 def api_inventory_fleet_export_xlsx():
     """
-    Combined app inventory as a multi-sheet spreadsheet, one worksheet per agent.
+    App inventory as a multi-sheet spreadsheet, one worksheet per agent.
 
     Feature 037 / D15 / FR-025b. The CSV form of this export concatenates every
     agent's inventory into one undivided list, so applications common to the
@@ -2032,10 +2055,42 @@ def api_inventory_fleet_export_xlsx():
 
     Reuses the same query and the same multi-tenant scoping as the CSV export
     above, so the two formats cannot diverge in what data they expose (FR-025d).
+
+    An optional `agent_id` query parameter narrows the workbook to a single
+    agent. The agent detail page's Inventory tab uses that form so its download
+    is produced by this same builder rather than by a separate client-side
+    table scrape — one inventory template, one de-duplication rule, one set of
+    column widths, whichever page you start from. Narrowing can only ever
+    subtract rows from what the unscoped export would already return, so it
+    grants no access the caller did not already have.
     """
     from io import BytesIO
 
     from report_engine import InventoryExportTooLarge, build_inventory_workbook
+
+    agent_id = (request.args.get("agent_id") or "").strip()
+
+    # app_inventory.agent_id is a native UUID column. Bind a real UUID object
+    # rather than the raw string: psycopg2 tolerates the string, but the type's
+    # bind processor calls .hex on it, so passing a str raises under any dialect
+    # that actually invokes the processor. An unparseable id can never match a
+    # UUID column, so it becomes an empty workbook rather than a 500 — the same
+    # rule as _get_agent_from_db(), which learned it the hard way when the
+    # literal "unknown" aborted the whole transaction.
+    #
+    # Note the two distinct states: "no agent_id given" means the whole fleet,
+    # while "agent_id given but unparseable" must mean NOTHING. Collapsing the
+    # second into the first would turn a typo in the query string into a
+    # full-fleet download.
+    scoped_agent = None
+    if agent_id:
+        try:
+            scoped_agent = uuid.UUID(agent_id)
+        except (ValueError, AttributeError, TypeError):
+            logger.info(
+                f"Inventory export requested for a non-UUID agent id: {agent_id!r}"
+            )
+            return _empty_inventory_workbook_response()
 
     try:
         query = db.session.query(
@@ -2049,6 +2104,9 @@ def api_inventory_fleet_export_xlsx():
         # not reach another org's inventory through the new format.
         if g.current_user.role != "admin":
             query = query.filter(server_models.Agent.org_id == g.current_user.org_id)
+
+        if scoped_agent is not None:
+            query = query.filter(server_models.AppInventory.agent_id == scoped_agent)
 
         rows = [
             {
@@ -2078,7 +2136,19 @@ def api_inventory_fleet_export_xlsx():
     buffer = BytesIO()
     workbook.save(buffer)
     buffer.seek(0)
-    filename = f"inventory_fleet_{datetime.now().strftime('%d-%m-%Y')}.xlsx"
+
+    # FR-007 keeps the DD-MM-YYYY stamp. For a single-agent export, name the file
+    # after the machine so a folder of downloads stays tellable apart; fall back
+    # to the agent id when the hostname is blank or reduces to nothing usable.
+    stamp = datetime.now().strftime("%d-%m-%Y")
+    if agent_id:
+        hostname = next((r["agent_hostname"] for r in rows if r["agent_hostname"]), "")
+        label = "".join(
+            c if (c.isalnum() or c in "-_") else "_" for c in (hostname or agent_id)
+        ).strip("_")
+        filename = f"inventory_{label or 'agent'}_{stamp}.xlsx"
+    else:
+        filename = f"inventory_fleet_{stamp}.xlsx"
     return send_file(
         buffer,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -3975,30 +4045,40 @@ def api_category_breakdown():
             # Simple categorization based on app name
             if any(
                 x in app_name
-                for x in ["excel", "word", "powerpoint", "outlook", "teams", "office"]
+                for x in [
+                    "excel", "word", "powerpnt", "powerpoint", "outlook", "olk",
+                    "office", "onenote", "notion", "obsidian", "evernote", "todoist",
+                    "trello", "asana", "monday", "miro", "acrobat", "visio",
+                    "project.exe", "planner",
+                ]
             ):
                 breakdown["productivity"] += duration
             elif any(
                 x in app_name
-                for x in ["slack", "discord", "zoom", "skype", "telegram", "whatsapp"]
+                for x in [
+                    "slack", "discord", "zoom", "skype", "telegram", "whatsapp",
+                    "teams", "signal", "webex", "gotomeeting", "element", "thunderbird",
+                    "mattermost", "ringcentral", "viber",
+                ]
             ):
                 breakdown["communication"] += duration
             elif any(
                 x in app_name
-                for x in ["chrome", "firefox", "edge", "safari", "browser"]
+                for x in [
+                    "chrome", "firefox", "edge", "safari", "browser", "brave",
+                    "opera", "vivaldi", "chromium", "arc.exe", "iron.exe",
+                ]
             ):
                 breakdown["browsing"] += duration
             elif any(
                 x in app_name
                 for x in [
-                    "code",
-                    "visual studio",
-                    "pycharm",
-                    "intellij",
-                    "sublime",
-                    "vim",
-                    "terminal",
-                    "git",
+                    "code", "visual studio", "pycharm", "intellij", "sublime",
+                    "vim", "terminal", "git", "devenv", "webstorm", "goland",
+                    "phpstorm", "rubymine", "clion", "datagrip", "android studio",
+                    "eclipse", "netbeans", "postman", "insomnia", "docker",
+                    "sourcetree", "gitkraken", "notepad++", "cursor.exe",
+                    "antigravity", "windsurf", "powershell", "cmd.exe",
                 ]
             ):
                 breakdown["development"] += duration

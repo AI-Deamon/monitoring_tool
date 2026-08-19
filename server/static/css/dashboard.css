@@ -1492,16 +1492,19 @@ main.container {
     }
 }
 
-/* Refresh Indicator */
+/* Refresh Indicator — always laid out, faded in/out so a background
+   auto-refresh doesn't pop the spinner in and out of existence. */
 .refresh-indicator {
-    display: none;
+    display: flex;
     align-items: center;
     gap: 0.5rem;
     color: var(--brand-primary);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
 }
 
 .refresh-indicator.active {
-    display: flex;
+    opacity: 1;
 }
 
 /* Footer Enhancements */

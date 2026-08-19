@@ -507,8 +507,48 @@ class TabSession(db.Model):
 # CONFIGURATION
 # ============================================================================
 
-MAX_FAILED_ATTEMPTS = 5
-LOCKOUT_DURATION_MINUTES = 30
+# Account lockout. Environment-configurable per the constitution's Configurable
+# Security principle; the defaults are the previous hard-coded values, so an
+# unconfigured deployment is unchanged.
+#
+# MAX_FAILED_LOGIN_ATTEMPTS=0 DISABLES lockout entirely. That is intended for
+# test/QA environments where a scanner (ZAP) or repeated manual testing would
+# otherwise lock every account — never for production, where lockout is the
+# only control here that bounds online password guessing.
+def resolve_lockout_config(env=None):
+    """(max_attempts, duration_minutes) from the environment.
+
+    A function rather than inline os.getenv so the precedence and the
+    disable switch are testable without reimporting this module — reloading
+    auth re-declares its SQLAlchemy models against the same base.
+
+    A non-numeric value falls back to the secure default rather than raising
+    at import time and taking the whole server down.
+    """
+    env = os.environ if env is None else env
+
+    def _int(name, default):
+        try:
+            return int(str(env.get(name, default)).strip())
+        except (TypeError, ValueError):
+            logger.warning(
+                f"[AUTH] Invalid {name}={env.get(name)!r}; using default {default}"
+            )
+            return default
+
+    return _int("MAX_FAILED_LOGIN_ATTEMPTS", 5), _int("LOCKOUT_DURATION_MINUTES", 30)
+
+
+MAX_FAILED_ATTEMPTS, LOCKOUT_DURATION_MINUTES = resolve_lockout_config()
+
+#: False when lockout is switched off by configuration.
+LOCKOUT_ENABLED = MAX_FAILED_ATTEMPTS > 0
+
+
+# D02 / FR-009 storage convention: every db.DateTime column here is naive UTC.
+# Re-exported so existing callers keep importing these from auth; utils.dt
+# carries the full rationale.
+from utils.dt import as_naive_utc, utcnow_naive  # noqa: E402,F401
 
 # Session limits (feature 037, FR-002b). Two independent limits: an idle window
 # and an absolute lifetime. Flask's PERMANENT_SESSION_LIFETIME expresses only
@@ -643,14 +683,46 @@ def hash_tab_token(raw_token):
 # ============================================================================
 
 
+def wants_json_response() -> bool:
+    """
+    True when the caller is a fetch/XHR client rather than a browser navigation.
+
+    Redirecting an API call to the HTML login page is what made every dashboard
+    admin action fail SILENTLY once a session lapsed: fetch() transparently
+    follows the 302, the handler calls `await resp.json()` on a login page, and
+    the resulting SyntaxError rejects the promise before any alert() runs. The
+    user sees a click that does nothing. Returning a JSON 401/403 lets the page
+    say "your session expired" instead.
+    """
+    if "/api/" in request.path:
+        return True
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return True
+    # Accept: */* (the fetch default) must NOT count as a JSON preference, or
+    # ordinary navigations would stop redirecting to the login page.
+    return request.is_json
+
+
+def _auth_failure(reason: str, message: str, status: int, redirect_to):
+    """JSON for API callers, flash+redirect for browser navigations."""
+    if wants_json_response():
+        return jsonify({"error": reason, "message": message}), status
+    flash(message, "warning" if status == 401 else "danger")
+    return redirect(redirect_to)
+
+
 def login_required(f):
     """Decorator: Require user to be logged in"""
 
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if "user_id" not in session:
-            flash("Please log in to access this page.", "warning")
-            return redirect(url_for("auth.login", next=request.url))
+            return _auth_failure(
+                "authentication_required",
+                "Please log in to access this page.",
+                401,
+                url_for("auth.login", next=request.url),
+            )
 
         # Load current user
         user = DashboardUser.query.filter_by(id=session["user_id"]).first()
@@ -668,11 +740,13 @@ def login_required(f):
                     f"[AUTH] Terminated outdated session for {user.username} (Version mismatch or inactive)"
                 )
             session.clear()
-            flash(
-                "Your session has expired or your password was changed. Please log in again.",
-                "warning",
+            return _auth_failure(
+                "session_expired",
+                "Your session has expired or your password was changed. "
+                "Please log in again.",
+                401,
+                url_for("auth.login"),
             )
-            return redirect(url_for("auth.login"))
 
         # Per-tab authentication and session limits (FR-002a, FR-002b).
         #
@@ -734,11 +808,12 @@ def login_required(f):
                 db.session.commit()
             reason = expiry or TabSession.REASON_SIGNED_OUT
             session.clear()
-            flash(
+            return _auth_failure(
+                reason,
                 SESSION_END_MESSAGES.get(reason, "Please sign in again."),
-                "warning",
+                401,
+                url_for("auth.login"),
             )
-            return redirect(url_for("auth.login"))
 
         # Still valid — advance the idle window (FR-002b).
         tab.last_seen_at = datetime.now(timezone.utc)
@@ -764,12 +839,13 @@ def login_required(f):
             "auth.logout",
             "static",
         ):
-            flash(
+            return _auth_failure(
+                "password_change_required",
                 "Your password does not meet the current policy. "
                 "Please set a new one to continue.",
-                "warning",
+                403,
+                url_for("auth.change_password"),
             )
-            return redirect(url_for("auth.change_password"))
 
         return f(*args, **kwargs)
 
@@ -783,8 +859,12 @@ def admin_required(f):
     @login_required
     def decorated_function(*args, **kwargs):
         if g.current_user.role != "admin":
-            flash("Administrator access required.", "danger")
-            return redirect(url_for("dashboard.dashboard_home"))
+            return _auth_failure(
+                "admin_required",
+                "Administrator access required.",
+                403,
+                url_for("dashboard.dashboard_home"),
+            )
         return f(*args, **kwargs)
 
     return decorated_function
@@ -1065,19 +1145,60 @@ def login():
         ad_failure_count = int(session.get(ad_failure_key, 0))
 
         if user:
+            # Lockout switched off by configuration (MAX_FAILED_LOGIN_ATTEMPTS=0).
+            # Clear a lock left over from when it was enabled rather than
+            # stranding the account — this is what makes the setting take effect
+            # for accounts that are ALREADY locked, with no SQL required.
+            # Committed here because two paths below return without a commit
+            # (AD circuit breaker, deactivated account).
+            if user.is_locked and not LOCKOUT_ENABLED:
+                logger.info(
+                    f"[AUTH] Lockout disabled by configuration; clearing "
+                    f"existing lock on: {username}"
+                )
+                user.is_locked = False
+                user.failed_login_count = 0
+                user.locked_until = None
+                db.session.commit()
+
             # Check if account is locked
             if user.is_locked:
-                if user.locked_until and user.locked_until > datetime.now(timezone.utc):
-                    remaining = (
-                        user.locked_until - datetime.now(timezone.utc)
-                    ).seconds // 60
-                    flash(
-                        f"Account is locked. Try again in {remaining} minutes.",
-                        "danger",
+                # locked_until is a naive-UTC column; compare naive-to-naive.
+                # Comparing it against an aware datetime.now(timezone.utc) used
+                # to raise TypeError here, which made this branch a 500 and left
+                # the account locked forever because the expiry/unlock path
+                # below was never reached.
+                locked_until = as_naive_utc(user.locked_until)
+                now_naive = utcnow_naive()
+                if locked_until and locked_until > now_naive:
+                    # total_seconds(), not .seconds: the latter discards the
+                    # days component and misreports negative deltas. +1 so a
+                    # sub-minute remainder never displays as "0 minutes".
+                    remaining = int((locked_until - now_naive).total_seconds() // 60) + 1
+                    # The lockout is RECORDED but never DISCLOSED.
+                    #
+                    # "Account is locked" told an unauthenticated caller that the
+                    # username exists, and since anyone can *cause* a lockout with
+                    # MAX_FAILED_ATTEMPTS bad guesses, that was a username oracle
+                    # on demand. The caller now gets the same message, and the same
+                    # 0.5s delay, as every other failure — so neither the text nor
+                    # the response time distinguishes this branch. The real reason
+                    # goes to the audit table and the server log, where an admin
+                    # investigating a lockout can actually see it.
+                    _log_login_attempt(
+                        user.id,
+                        username,
+                        user.auth_type,
+                        request,
+                        False,
+                        f"Account locked, {remaining} minutes remaining",
                     )
                     logger.warning(
-                        f"[AUTH] Login attempt on locked account: {username}"
+                        f"[AUTH] Login attempt on locked account: {username} "
+                        f"({remaining} minutes remaining)"
                     )
+                    time.sleep(0.5)  # Constant-time delay, matches other failure branches
+                    flash("Invalid username or password.", "danger")
                     return render_template("auth/login.html")
                 else:
                     # Lockout period has passed, unlock
@@ -1186,7 +1307,7 @@ def login():
                 # to the viewer's timezone for display, which is what makes the
                 # displayed sign-in time correct rather than 5.5 hours out for an
                 # IST viewer — the reported "last logged in time is showing wrong".
-                user.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+                user.last_login = utcnow_naive()
                 db.session.commit()
                 
                 # Log successful login
@@ -1218,24 +1339,30 @@ def login():
             else:
                 # Wrong password
                 user.failed_login_count += 1
-                if user.failed_login_count >= MAX_FAILED_ATTEMPTS:
+                if LOCKOUT_ENABLED and user.failed_login_count >= MAX_FAILED_ATTEMPTS:
                     user.is_locked = True
-                    user.locked_until = datetime.now(timezone.utc) + timedelta(
+                    # D02 / FR-009: store NAIVE UTC, matching last_login below
+                    # and every other db.DateTime column in the schema.
+                    user.locked_until = utcnow_naive() + timedelta(
                         minutes=LOCKOUT_DURATION_MINUTES
                     )
                     logger.warning(
                         f"[AUTH] Account locked after {MAX_FAILED_ATTEMPTS} failed attempts: {username}"
                     )
-                    flash(
-                        f"Account locked due to too many failed attempts. Try again in {LOCKOUT_DURATION_MINUTES} minutes.",
-                        "danger",
-                    )
-                else:
+                elif LOCKOUT_ENABLED:
                     remaining = MAX_FAILED_ATTEMPTS - user.failed_login_count
                     logger.warning(
                         f"[AUTH] Failed login attempt for: {username} ({remaining} attempts remaining)"
                     )
-                    flash("Invalid username or password.", "danger")
+                else:
+                    logger.warning(
+                        f"[AUTH] Failed login attempt for: {username} (lockout disabled)"
+                    )
+                # One message for every wrong-password outcome. Announcing
+                # "Account locked due to too many failed attempts" was the other
+                # half of the username oracle: an unknown username never reaches
+                # this branch, so five guesses confirmed the account exists.
+                flash("Invalid username or password.", "danger")
                 db.session.commit()
         else:
             # User doesn't exist - don't reveal this

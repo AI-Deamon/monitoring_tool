@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from extensions import db
+from utils.dt import utcnow_naive
 from sqlalchemy.dialects import postgresql
 import uuid
 
@@ -1783,5 +1784,8 @@ class ReportGenerationJob(db.Model):
     result_pdf_path = db.Column(db.String(500), nullable=True)
     error_message = db.Column(db.Text, nullable=True)
     created_by = db.Column(db.String(100), nullable=True)
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    # D02 / FR-009: naive UTC. An aware default here was stored through the
+    # session TimeZone, putting created_at 5.5h ahead of completed_at's own
+    # clock and making job durations nonsense.
+    created_at = db.Column(db.DateTime, default=utcnow_naive, nullable=False)
     completed_at = db.Column(db.DateTime, nullable=True)

@@ -82,10 +82,13 @@
         const ctxStatus = document.getElementById('agent-status-chart');
         if (!ctxStatus) {
             console.error('Canvas element agent-status-chart not found!');
+        } else if (window.statusChart) {
+            // Update in place — destroy()+recreate blanked the canvas for a
+            // frame on every 30s auto-refresh, which read as a visible flicker.
+            window.statusChart.data.datasets[0].data = [data.active_agents, data.offline_agents];
+            window.statusChart.update();
         } else {
             try {
-                if (window.statusChart) window.statusChart.destroy();
-
                 window.statusChart = new Chart(ctxStatus, {
                     type: 'doughnut',
                     data: {
@@ -129,10 +132,14 @@
         const ctxScreen = document.getElementById('screentime-chart');
         if (!ctxScreen) {
             console.error('Canvas element screentime-chart not found!');
+        } else if (window.screenChart) {
+            window.screenChart.data.datasets[0].data = [
+                data.screen_time.active, data.screen_time.idle,
+                data.screen_time.locked, data.screen_time.away || 0,
+            ];
+            window.screenChart.update();
         } else {
             try {
-                if (window.screenChart) window.screenChart.destroy();
-
                 const awayTime = data.screen_time.away || 0;
                 window.screenChart = new Chart(ctxScreen, {
                     type: 'doughnut',

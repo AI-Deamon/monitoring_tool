@@ -379,8 +379,12 @@
     // reported, so the field is never blank.
     document.getElementById('r-first-seen').textContent =
       DateFmt.formatDateTime(agent.first_seen || agent.registered_at);
+    // Last Seen should reflect the selected date's last activity, not the
+    // agent's live overall last_seen (which is always "now" when online).
+    // Fall back to the live value only when the day-specific value is missing
+    // (e.g. no telemetry on the selected date).
     document.getElementById('r-last-seen').textContent =
-      DateFmt.formatDateTime(agent.last_seen);
+      DateFmt.formatDateTime(agent.last_seen_today || agent.last_seen);
   }
 
   function renderScreenTime(st) {

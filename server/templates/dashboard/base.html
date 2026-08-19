@@ -7,8 +7,8 @@
     <title>{% block title %}SentinelEdge Dashboard{% endblock %}</title>
 
     <!-- External CSS Files -->
-    <link rel="stylesheet" href="/static/css/theme.css?v=20260619">
-    <link rel="stylesheet" href="/static/css/dashboard.css?v=20260619">
+    <link rel="stylesheet" href="/static/css/theme.css?v=20260818">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=20260818">
 
     <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
     <style nonce="{{ csp_nonce() }}">
@@ -284,7 +284,7 @@
                     {% if session.role == 'admin' %}
                     <select id="global-agent-select"
                         class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
-                        <option value="">Fleet Overview</option>
+                        <option value="">Team Overview</option>
                         <option disabled>Loading Agents...</option>
                     </select>
 
@@ -517,7 +517,7 @@
                 const data = await fetchJSON('/dashboard/api/agents');
                 if (data && data.data) {
                     // Clear loading option
-                    agentSelect.innerHTML = '<option value="">Fleet Overview</option>';
+                    agentSelect.innerHTML = '<option value="">Team Overview</option>';
 
                     // Add agents
                     data.data.forEach(agent => {

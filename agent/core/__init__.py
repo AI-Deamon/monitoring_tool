@@ -3,5 +3,5 @@ SentinelEdge Core Package
 SYSTEM-level telemetry aggregation and upload
 """
 
-__version__ = '4.2.2'
+__version__ = '4.2.5'
 __author__ = 'SentinelEdge Team'

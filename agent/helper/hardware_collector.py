@@ -63,11 +63,21 @@ class GPUInfo:
 
 @dataclass
 class BatteryInfo:
-    """Battery health and charge information (laptops only)."""
+    """Battery health and charge information (laptops only).
+
+    health_percent = full_capacity_mwh / design_capacity_mwh * 100.
+
+    health_percent and charge_percent are Optional and stay None when the
+    underlying capacities are unreadable. 0.0 would be indistinguishable from
+    a genuinely dead battery on the dashboard, so "unknown" must not collapse
+    into "0%".
+    """
     name: str = ""
-    health_percent: float = 0.0
-    charge_percent: float = 0.0
+    health_percent: Optional[float] = None
+    charge_percent: Optional[float] = None
     cycle_count: int = 0
+    design_capacity_mwh: int = 0
+    full_capacity_mwh: int = 0
 
 
 @dataclass
@@ -463,37 +473,85 @@ class HardwareCollector:
         # Motherboard - use Get-CimInstance
         $mb = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product
 
-        # Battery - MSBatteryClass in root\\WMI carries design/full capacity and
-        # cycle count (Win32_Battery only exposes the current charge %). Only
-        # present on systems with a battery, so $battery stays $null on desktops.
+        # Battery health.
+        #
+        #   health % = FullChargeCapacity / DesignCapacity * 100
+        #
+        # Primary source is `powercfg /batteryreport /xml`. It is the only
+        # source that reliably yields DESIGN capacity WITHOUT elevation, and
+        # this helper runs as the logged-in user: root\\WMI BatteryStaticData
+        # (which carries DesignedCapacity) returns zero instances unelevated,
+        # so a WMI-only implementation can never compute health here.
+        #
+        # The previous implementation queried MSBatteryClassStaticData and
+        # MSBatteryClassStatus. Neither class exists -- root\\WMI exposes
+        # BatteryStaticData, BatteryFullChargedCapacity, BatteryCycleCount and
+        # BatteryStatus. Combined with -ErrorAction SilentlyContinue the lookup
+        # failed silently on EVERY machine, so battery data was never collected
+        # anywhere and the dashboard panel was permanently blank.
+        #
+        # HealthPercent is deliberately $null (not 0) when design capacity is
+        # unavailable: 0 would render as a dead battery, which is worse than
+        # showing nothing.
         $battery = $null
         try {
-            $batteryStatic = @(Get-CimInstance -Namespace root\\WMI -ClassName MSBatteryClassStaticData -ErrorAction SilentlyContinue)
-            if ($batteryStatic.Count -gt 0) {
-                $bs = $batteryStatic[0]
-                $batteryStatus = @(Get-CimInstance -Namespace root\\WMI -ClassName MSBatteryClassStatus -ErrorAction SilentlyContinue) |
-                    Where-Object { $_.InstanceName -eq $bs.InstanceName } |
-                    Select-Object -First 1
+            $design = 0; $full = 0; $cycles = 0; $bname = ''
 
-                $design = [double]$bs.DesignedCapacity
-                $full = [double]$bs.FullChargedCapacity
-                $remaining = 0
-                if ($null -ne $batteryStatus -and $null -ne $batteryStatus.RemainingCapacity) {
-                    $remaining = [double]$batteryStatus.RemainingCapacity
+            $reportPath = Join-Path $env:TEMP ("sebat_" + [guid]::NewGuid().ToString() + ".xml")
+            try {
+                powercfg /batteryreport /xml /output $reportPath 2>$null | Out-Null
+                if (Test-Path $reportPath) {
+                    [xml]$rep = Get-Content $reportPath -ErrorAction Stop
+                    $b = @($rep.BatteryReport.Batteries.Battery)[0]
+                    if ($null -ne $b) {
+                        $design = [double]$b.DesignCapacity
+                        $full   = [double]$b.FullChargeCapacity
+                        $cycles = [int]$b.CycleCount
+                        $bname  = [string]$b.Id
+                    }
                 }
+            }
+            catch { }
+            finally { Remove-Item $reportPath -Force -ErrorAction SilentlyContinue }
 
-                # Health = full charge capacity vs. design capacity. Charge = remaining
-                # vs. full charge capacity (reported capacity degrades over time).
-                $health = 0
-                $charge = 0
-                if ($design -gt 0) { $health = [math]::Round($full / $design * 100, 1) }
-                if ($full -gt 0)  { $charge = [math]::Round($remaining / $full * 100, 1) }
+            # WMI fallback, with the CORRECT class names. Populated when
+            # running elevated, or on systems where powercfg is unavailable.
+            if ($design -le 0) {
+                $sd = @(Get-CimInstance -Namespace root\\WMI -ClassName BatteryStaticData -ErrorAction SilentlyContinue)
+                if ($sd.Count -gt 0) { $design = [double]$sd[0].DesignedCapacity }
+            }
+            if ($full -le 0) {
+                $fc = @(Get-CimInstance -Namespace root\\WMI -ClassName BatteryFullChargedCapacity -ErrorAction SilentlyContinue)
+                if ($fc.Count -gt 0) { $full = [double]$fc[0].FullChargedCapacity }
+            }
+            if ($cycles -le 0) {
+                $cc = @(Get-CimInstance -Namespace root\\WMI -ClassName BatteryCycleCount -ErrorAction SilentlyContinue)
+                if ($cc.Count -gt 0) { $cycles = [int]$cc[0].CycleCount }
+            }
 
+            # Win32_Battery: live charge %, and the authority on whether a
+            # battery exists at all (a desktop returns nothing here).
+            $w32 = @(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue)
+            $charge = $null
+            if ($w32.Count -gt 0) {
+                if ($null -ne $w32[0].EstimatedChargeRemaining) {
+                    $charge = [double]$w32[0].EstimatedChargeRemaining
+                }
+                if ([string]::IsNullOrWhiteSpace($bname)) { $bname = [string]$w32[0].Name }
+            }
+
+            if ($w32.Count -gt 0 -or $full -gt 0) {
+                $health = $null
+                if ($design -gt 0 -and $full -gt 0) {
+                    $health = [math]::Round($full / $design * 100, 1)
+                }
                 $battery = @{
-                    Name           = [string]$bs.DeviceName
+                    Name           = $bname
                     HealthPercent  = $health
-                    ChargePercent  = $charge
-                    CycleCount     = [int]$bs.CycleCount
+                    ChargePercent  = $(if ($null -ne $charge) { [math]::Round($charge, 1) } else { $null })
+                    CycleCount     = $cycles
+                    DesignCapacity = [int]$design
+                    FullCapacity   = [int]$full
                 }
             }
         }
@@ -564,14 +622,32 @@ class HardwareCollector:
 
                 hardware.motherboard = (data.get('Motherboard', '') or '').strip()
 
-                # Parse battery health (laptops only; None on desktops)
+                # Parse battery health (laptops only; None on desktops).
+                # `or 0` would turn an unknown percentage into 0 -- i.e. a dead
+                # battery -- so None is preserved deliberately here.
                 battery_data = data.get('Battery')
                 if battery_data:
+                    def _opt_float(value):
+                        try:
+                            return float(value) if value is not None else None
+                        except (TypeError, ValueError):
+                            return None
+
                     hardware.battery = BatteryInfo(
-                        name=battery_data.get('Name', '') or '',
-                        health_percent=float(battery_data.get('HealthPercent', 0) or 0),
-                        charge_percent=float(battery_data.get('ChargePercent', 0) or 0),
+                        name=(battery_data.get('Name') or '').strip(),
+                        health_percent=_opt_float(battery_data.get('HealthPercent')),
+                        charge_percent=_opt_float(battery_data.get('ChargePercent')),
                         cycle_count=int(battery_data.get('CycleCount', 0) or 0),
+                        design_capacity_mwh=int(battery_data.get('DesignCapacity', 0) or 0),
+                        full_capacity_mwh=int(battery_data.get('FullCapacity', 0) or 0),
+                    )
+                    logger.info(
+                        f"[HARDWARE] Battery: {hardware.battery.name} "
+                        f"health={hardware.battery.health_percent}% "
+                        f"charge={hardware.battery.charge_percent}% "
+                        f"cycles={hardware.battery.cycle_count} "
+                        f"({hardware.battery.full_capacity_mwh}/"
+                        f"{hardware.battery.design_capacity_mwh} mWh)"
                     )
 
                 # Parse disks
@@ -957,6 +1033,13 @@ class HardwareCollector:
         """
         network = self._collect_network()
 
+        # D24 / FR-035: see collect_network_partial(). An empty reading means the
+        # adapters are mid-transition, not that the network changed — reporting
+        # it as a change only schedules a collection that will be discarded.
+        if not network.all_ips and not network.all_macs and not network.primary_ip:
+            logger.debug("[HARDWARE] Network collection empty — not a change")
+            return False
+
         # Create hash from network data only (sorted lists for order-independence)
         network_hash_data = {
             'all_macs': sorted(network.all_macs),
@@ -996,6 +1079,27 @@ class HardwareCollector:
             Dict with network data, or None if no changes
         """
         network = self._collect_network()
+
+        # D24 / FR-035: an empty reading is a transient, not a state change.
+        #
+        # Adapter transitions leave nothing IPEnabled for a moment — a USB NIC
+        # renegotiating its link, sleep/resume, DHCP renewal — so
+        # _collect_network() legitimately returns nothing. Uploading that made
+        # the server overwrite a good record with a blank one: all_ips was wiped
+        # while primary_ip survived via its `or existing` fallback, leaving a row
+        # that claimed an address and simultaneously listed none, with a freshly
+        # stamped collected_at making the stale address look verified.
+        #
+        # Returning before the hash is computed is deliberate. Saving an empty
+        # reading's hash as the new baseline would anchor change detection on a
+        # state the machine was never really in, so the recovery back to the real
+        # addresses would then be indistinguishable from a genuine change.
+        if not network.all_ips and not network.all_macs and not network.primary_ip:
+            logger.debug(
+                "[HARDWARE] Network collection returned no adapters — "
+                "treating as adapter transition, not a change"
+            )
+            return None
 
         # Create hash from network data only (sorted lists for order-independence)
         network_hash_data = {

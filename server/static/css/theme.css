@@ -856,14 +856,9 @@ input[type="date"] {
     }
 }
 
-.refresh-indicator {
-    opacity: 0;
-    transition: opacity var(--transition-fast);
-}
-
-.refresh-indicator.active {
-    opacity: 1;
-}
+/* .refresh-indicator lives in dashboard.css, which loads after this file and
+   also needs the flex layout props — a duplicate rule here would only ever
+   be shadowed by the cascade, so it's defined once, there. */
 
 /* ==================== UTILITY CLASSES ==================== */
 
