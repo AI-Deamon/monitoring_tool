@@ -430,6 +430,10 @@ class TestFreshDatabaseMigration:
         # plain DATABASE_URL env var is silently clobbered. Shadow .env with the
         # temp URL so the subprocess actually migrates the throwaway DB.
         env_file = Path(__file__).parent.parent / 'server' / '.env'
+        if not env_file.exists():
+            # CI sets DATABASE_URL directly and never checks out a .env file
+            # (it's gitignored); this test only applies where one exists.
+            pytest.skip("server/.env not present (expected in CI)")
         original_env = env_file.read_text(encoding='utf-8')
         tmp_url = f"postgresql://{user}:{pwd}@{host}:{port}/{tmp_db}"
         _out, _found = [], False

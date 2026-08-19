@@ -16,7 +16,7 @@ leaves Method 1 as the only thing under test, which is the point.
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'monitoring_tool', 'agent'))
 
@@ -24,6 +24,13 @@ from helper.state_detector import StateDetector
 
 
 class TestStateDetectorSessionLockProbe(unittest.TestCase):
+    def setUp(self):
+        # windll is None where pywin32/ctypes.windll isn't available (e.g.
+        # Linux CI). These tests only care about _is_session_locked()'s
+        # branching, so give windll a patchable stand-in regardless of the
+        # machine actually running them.
+        self.enterContext(patch("helper.state_detector.windll", MagicMock()))
+
     def test_is_session_locked_does_not_bypass_probe_for_remote_metric(self):
         detector = StateDetector.__new__(StateDetector)
 

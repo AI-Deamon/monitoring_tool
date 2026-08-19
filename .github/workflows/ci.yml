@@ -100,6 +100,10 @@ jobs:
         run: |
           pip install -r server/server_requirements.txt
           pip install pytest
+          # agent/core/secure_store.py's documented fallback when Windows DPAPI
+          # is unavailable (this runner is Linux) — without it, any test that
+          # constructs CoreConfig hits SEC-004's intentional hard-fail.
+          pip install cryptography
 
       - name: Prepare database schema
         working-directory: server

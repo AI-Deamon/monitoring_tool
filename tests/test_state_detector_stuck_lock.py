@@ -31,6 +31,13 @@ from helper.state_detector import (
 
 class TestStateDetectorStuckLock(unittest.TestCase):
     def setUp(self):
+        # These tests assert real-WTS-event lock/unlock semantics, which only
+        # apply when pywin32 is actually available. Without it, _update_state()
+        # intentionally treats any not-locked poll as an OS unlock (its only
+        # way to ever detect an unlock at all) — pin HAS_WIN32 so the tests
+        # exercise the WTS-event path they're named after regardless of
+        # whether pywin32 is installed on the machine running them (e.g. CI).
+        self.enterContext(patch("helper.state_detector.HAS_WIN32", True))
         self.detector = StateDetector.__new__(StateDetector)
         self.detector.authority = StateAuthority()
         self.detector._transition_lock = threading.RLock()

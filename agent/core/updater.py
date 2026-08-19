@@ -961,14 +961,14 @@ class AgentUpdater:
                 logger.info("[UPDATER] Requesting service restart via NSSM...")
                 subprocess.Popen(
                     [str(nssm_path), 'restart', 'WinDiagSvc'],
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
                 )
             else:
                 # Fallback: use net stop/start
                 logger.info("[UPDATER] Requesting service restart via net...")
                 subprocess.Popen(
                     ['net', 'stop', 'WinDiagSvc'],
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
                 )
                 # NSSM auto-restart will handle the start
         except Exception as e:
@@ -1101,8 +1101,8 @@ class AgentUpdater:
                     subprocess.Popen(
                         [python_exe, str(swapper_script), str(manifest_path)],
                         creationflags=(
-                            subprocess.CREATE_NO_WINDOW |
-                            subprocess.DETACHED_PROCESS
+                            getattr(subprocess, 'CREATE_NO_WINDOW', 0) |
+                            getattr(subprocess, 'DETACHED_PROCESS', 0)
                         )
                     )
                     logger.info(
@@ -1125,8 +1125,8 @@ class AgentUpdater:
             subprocess.Popen(
                 [str(swapper_path), str(manifest_path)],
                 creationflags=(
-                    subprocess.CREATE_NO_WINDOW |
-                    subprocess.DETACHED_PROCESS
+                    getattr(subprocess, 'CREATE_NO_WINDOW', 0) |
+                    getattr(subprocess, 'DETACHED_PROCESS', 0)
                 )
             )
             logger.info(f"[UPDATER] EXE swapper launched: {swapper_path}")
