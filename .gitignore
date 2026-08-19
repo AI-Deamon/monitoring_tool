@@ -84,4 +84,15 @@ htmlcov/
 graphify-out/cache
 server/graphify-out/cache
 server/graphify-out
+graphify-out/
 .gstack/
+
+# Generated report output (not source - rendered from weekly_cron/templates/)
+weekly_cron/reports/
+
+# One-off security scan dumps (not code; risk of exposing vuln detail)
+weekly_cron/Burp dast reprot.html
+weekly_cron/BURP_DAST_REMEDIATION.md
+
+# Manual/ad-hoc smoke-test script - not in tests/, not run by CI
+test_update_flow.py
