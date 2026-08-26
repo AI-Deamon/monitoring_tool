@@ -91,8 +91,8 @@ echo ""
 # ============================================================================
 echo -e "${YELLOW}[3/8] Installing Python dependencies...${NC}"
 
-pip install --upgrade pip > /dev/null 2>&1
-pip install -r server_requirements.txt > /dev/null 2>&1
+pip install --upgrade pip > /dev/null
+pip install -r server_requirements.txt > /dev/null
 echo -e "${GREEN}✓ All Python dependencies installed${NC}"
 echo ""
 
@@ -117,9 +117,9 @@ fi
 if [ "$DROP_AND_RECREATE" = "y" ]; then
     # Kick existing connections first — DROP DATABASE fails while any
     # session (e.g. a running gunicorn worker) still holds it open.
-    sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" > /dev/null 2>&1 || true
-    sudo -u postgres psql -c "DROP DATABASE IF EXISTS ${DB_NAME};" > /dev/null 2>&1
-    sudo -u postgres psql -c "DROP USER IF EXISTS ${DB_USER};" > /dev/null 2>&1
+    sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" > /dev/null || true
+    sudo -u postgres psql -c "DROP DATABASE IF EXISTS ${DB_NAME};" > /dev/null
+    sudo -u postgres psql -c "DROP USER IF EXISTS ${DB_USER};" > /dev/null
     echo -e "${GREEN}✓ Old database dropped${NC}"
 elif sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw "${DB_NAME}"; then
     echo -e "${YELLOW}Keeping existing database${NC}"
@@ -127,25 +127,25 @@ fi
 
 # Create user if not exists
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
-    sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';" > /dev/null 2>&1
+    sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';" > /dev/null
     echo -e "${GREEN}✓ Database user '${DB_USER}' created${NC}"
 else
     # User already existed (kept from a previous run) — align its password
     # with the freshly generated one so it matches the .env we're about to write.
-    sudo -u postgres psql -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';" > /dev/null 2>&1
+    sudo -u postgres psql -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';" > /dev/null
     echo -e "${GREEN}✓ Database user '${DB_USER}' already exists (password refreshed)${NC}"
 fi
 
 # Create database if not exists
 if ! sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw "${DB_NAME}"; then
-    sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" > /dev/null 2>&1
+    sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" > /dev/null
     echo -e "${GREEN}✓ Database '${DB_NAME}' created${NC}"
 fi
 
 # Grant all privileges
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" > /dev/null 2>&1
-sudo -u postgres psql -d ${DB_NAME} -c "GRANT ALL ON SCHEMA public TO ${DB_USER};" > /dev/null 2>&1
-sudo -u postgres psql -d ${DB_NAME} -c "ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};" > /dev/null 2>&1
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" > /dev/null
+sudo -u postgres psql -d ${DB_NAME} -c "GRANT ALL ON SCHEMA public TO ${DB_USER};" > /dev/null
+sudo -u postgres psql -d ${DB_NAME} -c "ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};" > /dev/null
 echo -e "${GREEN}✓ Database permissions configured${NC}"
 echo ""
 
