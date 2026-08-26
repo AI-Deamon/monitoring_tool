@@ -6,9 +6,19 @@ import os
 import multiprocessing
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
-# Server socket
-bind = os.getenv("GUNICORN_BIND", "0.0.0.0:5050")
+# gunicorn reads this config file directly, before importing the app module —
+# server_config.py's load_dotenv() (which the app relies on) hasn't run yet
+# at that point. Without this, GUNICORN_BIND/USE_TLS below would only ever
+# see .env's values if something had already exported them into the shell/
+# systemd environment, silently ignoring .env otherwise.
+load_dotenv()
+
+# Server socket — defaults to the app's own PORT so changing .env's PORT
+# doesn't leave gunicorn still bound to the old one. GUNICORN_BIND is an
+# explicit override for binding to a different host/port than PORT.
+bind = os.getenv("GUNICORN_BIND") or f"0.0.0.0:{os.getenv('PORT', '5050')}"
 backlog = 2048
 
 # NEW: Ensure logs directory exists
@@ -50,12 +60,20 @@ limit_request_field_size = 8192  # Max header size
 # Graceful timeout (seconds to wait for requests to finish)
 graceful_timeout = 30
 
-# SSL/TLS (mTLS enabled)
-certfile = os.getenv("SSL_CERT_PATH", "certs/server.crt")
-keyfile = os.getenv("SSL_KEY_PATH", "certs/server.key")
-ca_certs = os.getenv("SSL_CA_PATH", "certs/ca.crt")
-cert_reqs = 2  # ssl.CERT_REQUIRED
-ssl_version = 'TLSv1_2'
+# SSL/TLS — off by default, matching the app's own USE_TLS flag
+# (server_config.py / server_app.py). Agents authenticate with X-API-Key,
+# not client certificates, so mTLS (cert_reqs=CERT_REQUIRED) was never
+# actually satisfiable by anything in this codebase — it just made gunicorn
+# refuse to start unless someone manually dropped cert files in place.
+# Set USE_TLS=true and provide SSL_CERT_PATH/SSL_KEY_PATH to terminate TLS
+# here directly; otherwise leave a reverse proxy (nginx, etc.) to handle it,
+# or run plain HTTP behind a trusted network boundary.
+if os.getenv("USE_TLS", "false").lower() == "true":
+    certfile = os.getenv("SSL_CERT_PATH", "certs/server.crt")
+    keyfile = os.getenv("SSL_KEY_PATH", "certs/server.key")
+    ca_certs = os.getenv("SSL_CA_PATH") or None
+    cert_reqs = 2 if ca_certs else 0  # CERT_REQUIRED only if a CA is actually configured (mTLS); else server-only TLS
+    ssl_version = 'TLSv1_2'
 
 # Pre-fork callback - runs before workers are created
 def on_starting(server):

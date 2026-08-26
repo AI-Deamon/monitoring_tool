@@ -1,0 +1,31 @@
+[Unit]
+Description=SentinelEdge Server (gunicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+# Adjust these two paths for the target machine before enabling.
+WorkingDirectory=/opt/sentineledge/server
+ExecStart=/opt/sentineledge/server/venv/bin/gunicorn -c gunicorn_config.py server_main:application
+
+# Restart=always + no StartLimitInterval cap means systemd will keep
+# retrying forever after a crash (e.g. transient DB unreachability at boot)
+# instead of giving up after N failures in a window.
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+# Keep worker count modest and explicit rather than relying on
+# cpu_count()*2+1, which produced 17 workers in testing on an 8-core
+# box — overkill for a ~50-agent fleet and needlessly hammers Postgres
+# with simultaneous connection-pool setup on every (re)start. Tune to
+# taste for the actual target hardware.
+Environment=GUNICORN_WORKERS=4
+
+# Hardening (safe defaults; loosen only if the app needs broader access)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

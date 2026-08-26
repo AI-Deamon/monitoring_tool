@@ -334,8 +334,11 @@ def create_app():
             # Note: Schema now managed exclusively via Alembic migrations.
             # db.create_all() removed.
             if create_default_admin():
-                logger.info("[AUTH] Default admin user created: admin / changeme123")
-                logger.warning("[AUTH] ⚠️  CHANGE THE DEFAULT PASSWORD IMMEDIATELY!")
+                # create_default_admin() already logs the actual username/password
+                # used (DEFAULT_ADMIN_PASSWORD from .env, or 'changeme123' if unset)
+                # — don't repeat a hardcoded 'changeme123' here, it was wrong
+                # whenever DEFAULT_ADMIN_PASSWORD was actually set.
+                logger.warning("[AUTH] ⚠️  If using the changeme123 default, change it immediately!")
         except Exception as e:
             logger.error(f"[AUTH] Failed to initialize auth (tables may be missing): {e}")
 

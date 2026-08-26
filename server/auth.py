@@ -1785,14 +1785,20 @@ def create_default_admin():
     admin = DashboardUser(
         username="admin", role="admin", org_id=default_org.id, is_active=True
     )
-    admin.set_password("changeme123")
+    admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme123")
+    admin.set_password(admin_password)
 
     db.session.add(admin)
     db.session.commit()
 
-    logger.info(
-        "[AUTH] Default admin user created: admin / changeme123 (linked to Default Org)"
-    )
+    if admin_password == "changeme123":
+        logger.info(
+            "[AUTH] Default admin user created: admin / changeme123 (linked to Default Org)"
+        )
+    else:
+        logger.info(
+            "[AUTH] Default admin user created: admin / <DEFAULT_ADMIN_PASSWORD from .env> (linked to Default Org)"
+        )
     return True
 
 

@@ -591,11 +591,15 @@ def create_default_admin(app):
             admin = DashboardUser.query.filter_by(username='admin').first()
             if not admin:
                 admin = DashboardUser(username='admin', role='admin')
-                admin.set_password('changeme123')
+                admin_password = os.getenv('DEFAULT_ADMIN_PASSWORD', 'changeme123')
+                admin.set_password(admin_password)
                 db.session.add(admin)
                 db.session.commit()
-                logger.info("  ✅ Default admin created (admin/changeme123)")
-                logger.warning("  ⚠️  CHANGE PASSWORD IMMEDIATELY!")
+                if admin_password == 'changeme123':
+                    logger.info("  ✅ Default admin created (admin/changeme123)")
+                    logger.warning("  ⚠️  CHANGE PASSWORD IMMEDIATELY!")
+                else:
+                    logger.info("  ✅ Default admin created (admin / <DEFAULT_ADMIN_PASSWORD from .env>)")
             else:
                 logger.info("  ✅ Admin user exists")
             return True

@@ -312,11 +312,18 @@ def render_report_html(report_type, scope, context):
     template_map = {
         ('weekly', 'team'):       'team_weekly_report.html',
         ('monthly', 'team'):      'team_monthly_report.html',
+        ('daily', 'team'):        'team_weekly_report.html',        # reuse weekly layout
         ('weekly', 'individual'): 'individual_weekly_report.html',
         ('monthly', 'individual'):'individual_monthly_report.html',
         ('daily', 'individual'):  'individual_weekly_report.html',  # reuse weekly layout
     }
-    tpl_name = template_map.get((report_type, scope), 'individual_weekly_report.html')
+    tpl_name = template_map.get((report_type, scope))
+    if tpl_name is None:
+        # Previously defaulted to the individual template here, which silently
+        # rendered team-shaped context (no 'agent_info' key) through a template
+        # that requires it — crashed as UndefinedError instead of a clear
+        # "unsupported combination" failure. Fail loudly instead.
+        raise ValueError(f"{REASON_UNKNOWN_SCOPE} (report_type={report_type!r}, scope={scope!r})")
     return env.get_template(tpl_name).render(**context)
 
 
