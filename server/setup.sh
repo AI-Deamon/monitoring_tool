@@ -22,6 +22,14 @@ DB_NAME="${DB_NAME:-sentineledge}"
 DB_USER="${DB_USER:-sentinel_user}"
 SERVER_PORT="${SERVER_PORT:-5050}"
 
+# Postgres folds unquoted identifiers to lowercase (CREATE DATABASE Foo really
+# creates "foo"), but `psql -d`'s dbname is a literal connection parameter
+# with no folding — a mixed-case DB_NAME/DB_USER override created the DB fine
+# but then failed to connect to it later ("database Foo does not exist").
+# Lowercase both up front so every reference in this script stays consistent.
+DB_NAME="$(echo "$DB_NAME" | tr '[:upper:]' '[:lower:]')"
+DB_USER="$(echo "$DB_USER" | tr '[:upper:]' '[:lower:]')"
+
 if [ ! -f "server_requirements.txt" ]; then
     echo -e "${RED}✗ server_requirements.txt not found in the current directory.${NC}"
     echo "Run this script from inside the server/ directory."
@@ -246,9 +254,18 @@ SERVICE_INSTALLED="n"
 if ! command -v systemctl >/dev/null 2>&1 || [ "$(ps -p 1 -o comm= 2>/dev/null)" != "systemd" ]; then
     echo -e "${YELLOW}systemd not detected — skipping. Start manually (see Next Steps below).${NC}"
 elif [ -f "$SERVICE_FILE" ]; then
-    echo -e "${YELLOW}${SERVICE_FILE} already exists — leaving it as-is.${NC}"
-    echo "If this run changed .env or the code, restart it yourself:"
-    echo "  sudo systemctl restart ${SERVICE_NAME}"
+    echo -e "${YELLOW}${SERVICE_FILE} already exists — restarting it to pick up this run's changes.${NC}"
+    sudo systemctl daemon-reload
+    sudo systemctl restart "${SERVICE_NAME}.service"
+    sleep 3
+
+    if sudo systemctl is-active --quiet "${SERVICE_NAME}.service"; then
+        echo -e "${GREEN}✓ ${SERVICE_NAME}.service restarted and running${NC}"
+        SERVICE_INSTALLED="y"
+    else
+        echo -e "${RED}✗ Service exists but failed to (re)start.${NC}"
+        echo "  Check: sudo journalctl -u ${SERVICE_NAME}.service --no-pager -n 40"
+    fi
 else
     INSTALL_DIR="$(pwd)"
     RUN_USER="$(whoami)"
@@ -263,7 +280,7 @@ Wants=postgresql.service
 Type=simple
 User=${RUN_USER}
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${INSTALL_DIR}/venv/bin/gunicorn -c gunicorn_config.py server_main:application
+ExecStart="${INSTALL_DIR}/venv/bin/gunicorn" -c gunicorn_config.py server_main:application
 Restart=always
 RestartSec=5
 StartLimitIntervalSec=0

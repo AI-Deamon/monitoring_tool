@@ -5,9 +5,13 @@ Wants=postgresql.service
 
 [Service]
 Type=simple
-# Adjust these two paths for the target machine before enabling.
+# Adjust these two paths for the target machine before enabling. Keep the
+# quotes around the ExecStart binary path even if your path has no spaces —
+# systemd splits ExecStart on whitespace like a shell would, so an
+# unquoted path containing spaces silently truncates and fails to exec
+# (systemd reports this as status=203/EXEC).
 WorkingDirectory=/opt/sentineledge/server
-ExecStart=/opt/sentineledge/server/venv/bin/gunicorn -c gunicorn_config.py server_main:application
+ExecStart="/opt/sentineledge/server/venv/bin/gunicorn" -c gunicorn_config.py server_main:application
 
 # Restart=always + no StartLimitInterval cap means systemd will keep
 # retrying forever after a crash (e.g. transient DB unreachability at boot)
