@@ -365,11 +365,27 @@ class DomainSession:
         self.raw_window_title = raw_window_title  # Store original window title
         self.start_time = datetime.now(timezone.utc)
         self.end_time: Optional[datetime] = None
+        self.active_seconds: float = 0.0
+        self.last_touch_time: datetime = self.start_time
     
+    def touch(self, max_gap: float = 15.0):
+        """Touch session on active heartbeat sample and accumulate active duration."""
+        now = datetime.now(timezone.utc)
+        gap = (now - self.last_touch_time).total_seconds()
+        if 0 < gap <= max_gap:
+            self.active_seconds += gap
+        self.last_touch_time = now
+
     def end(self) -> Dict:
         """End the session and return the session data"""
         self.end_time = datetime.now(timezone.utc)
-        duration = (self.end_time - self.start_time).total_seconds()
+        self.touch()
+        
+        # Use accumulated active_seconds if available, fallback to total_seconds
+        if self.active_seconds > 0:
+            duration = self.active_seconds
+        else:
+            duration = (self.end_time - self.start_time).total_seconds()
         
         # H-05 FIX: Cap maximum domain session duration to 24 hours (catches stuck sessions)
         # Return capped duration WITHOUT mutating self.end_time (avoid side effects)
@@ -404,6 +420,8 @@ class DomainSession:
             'url': self.url,
             'title': self.title,
             'start': self.start_time.isoformat(),
+            'active_seconds': self.active_seconds,
+            'last_touch_time': self.last_touch_time.isoformat(),
         }
     
     @classmethod
@@ -424,6 +442,17 @@ class DomainSession:
                 session.start_time = datetime.now(timezone.utc)
         else:
             session.start_time = datetime.now(timezone.utc)
+
+        session.active_seconds = float(data.get('active_seconds', 0.0))
+        last_touch_str = data.get('last_touch_time', '')
+        if last_touch_str:
+            try:
+                session.last_touch_time = datetime.fromisoformat(last_touch_str.replace('Z', '+00:00'))
+            except (ValueError, AttributeError):
+                session.last_touch_time = session.start_time
+        else:
+            session.last_touch_time = session.start_time
+
         return session
 
 
@@ -897,7 +926,8 @@ class ActiveDomainTracker:
                                raw_window_title=window_title)
             return ended_session
         
-        # Same domain - continue session
+        # Same domain - continue session and accumulate active seconds
+        self._current_session.touch()
         return None
     
     def end_session_for_shutdown(self) -> Optional[Dict]:
@@ -1028,7 +1058,15 @@ class ActiveDomainTracker:
         return None, None, tab_title
     
     def _extract_tab_title(self, window_title: str, browser_key: str) -> Optional[str]:
-        """Extract just the tab title from full window title"""
+        """Extract just the tab title from full window title.
+
+        Edge/Chrome show multi-tab window titles like:
+            "Focused Tab Title and 3 more pages - Work - Microsoft Edge"
+        We strip the browser suffix first, then strip the " and N more pages"
+        suffix so that only the ACTUALLY FOCUSED tab title is used for domain
+        matching.  Without this, a background Claude tab can inflate the
+        claude.ai duration even when the user is on a completely different site.
+        """
         if not window_title:
             return None
         
@@ -1039,14 +1077,14 @@ class ActiveDomainTracker:
         # Try exact suffix match
         if browser_suffix and window_title.endswith(browser_suffix):
             tab_title = window_title[:-len(browser_suffix)].strip()
-            return tab_title if tab_title else None
+            return self._strip_more_pages_suffix(tab_title) or None
         
         # NEW: Try alternate suffixes (for Firefox, Arc, etc.)
         alt_suffixes = config.get('alt_title_suffixes', [])
         for suffix in alt_suffixes:
             if window_title.endswith(suffix):
                 tab_title = window_title[:-len(suffix)].strip()
-                return tab_title if tab_title else None
+                return self._strip_more_pages_suffix(tab_title) or None
         
         # All known suffix variations
         all_suffixes = [
@@ -1059,7 +1097,8 @@ class ActiveDomainTracker:
         
         for suffix in all_suffixes:
             if window_title.endswith(suffix):
-                return window_title[:-len(suffix)].strip()
+                tab_title = window_title[:-len(suffix)].strip()
+                return self._strip_more_pages_suffix(tab_title) or None
         
         # Browser-specific handling for empty titles
         if browser_key == 'brave' and window_title in ['Brave', 'New Tab']:
@@ -1071,9 +1110,42 @@ class ActiveDomainTracker:
         
         # If no suffix found, use whole title (some browsers omit suffix)
         if browser_key in ['brave', 'arc']:
-            return window_title.strip()
+            return self._strip_more_pages_suffix(window_title.strip()) or None
         
-        return window_title
+        return self._strip_more_pages_suffix(window_title)
+
+    @staticmethod
+    def _strip_more_pages_suffix(title: str) -> Optional[str]:
+        """Strip Edge/Chrome multi-tab suffixes like " and 3 more pages".
+
+        Edge window titles look like:
+            "Focused Tab - Claude and 5 more pages - Work"
+        The " and N more pages" part tells us there are OTHER background tabs.
+        Only the text BEFORE that suffix is the actually focused tab's name.
+
+        Also strips " - Work", " - Personal" profile suffixes that appear
+        after the page count in Edge.
+
+        Examples:
+            "Vedic astrology - Claude and 6 more pages - Work" -> "Vedic astrology"
+            "Oracle Data Pump and 8 more pages - Work"         -> "Oracle Data Pump"
+            "ChatGPT - Work"                                    -> "ChatGPT - Work" (unchanged)
+        """
+        if not title:
+            return title
+
+        # Pattern: "<focused title> [- <background tab>] and <N> more page(s) [- <profile>]"
+        # We match from the LAST occurrence so that titles with "and" inside
+        # them (e.g. "Lock and Dam - Oracle") are handled correctly.
+        more_pages_re = re.compile(
+            r'(?:\s+-\s+[^-]+)?\s+and\s+\d+\s+more\s+pages?(?:\s+-\s+\S.*)?$',
+            re.IGNORECASE
+        )
+        cleaned = more_pages_re.sub('', title).strip()
+        if cleaned:
+            logger.debug(f"[DOMAIN] Stripped multi-tab suffix: '{title}' -> '{cleaned}'")
+            return cleaned
+        return title
     
     def _lookup_url_from_title(self, browser_key: str, 
                                tab_title: str) -> Tuple[Optional[str], Optional[str]]:
@@ -1105,7 +1177,7 @@ class ActiveDomainTracker:
             if not temp_db:
                 return None, None
             
-            conn = sqlite3.connect(f'file:{temp_db}?mode=ro', uri=True)
+            conn = sqlite3.connect(f'file:{temp_db}?mode=ro', uri=True, timeout=3.0)
             cursor = conn.cursor()
             
             # IMPROVED: Try multiple search strategies
@@ -1167,15 +1239,25 @@ class ActiveDomainTracker:
             conn.close()
             return None, None
             
+        except sqlite3.OperationalError as e:
+            logger.debug(f"[DOMAIN] SQLite operational error in history lookup: {e}")
+            return None, None
         except Exception as e:
             logger.debug(f"[DOMAIN] History lookup error: {e}")
             return None, None
         finally:
-            if temp_db and os.path.exists(temp_db):
+            if temp_db:
                 try:
-                    os.remove(temp_db)
-                except:
+                    os.unlink(temp_db)
+                except FileNotFoundError:
                     pass
+                except PermissionError:
+                    logger.warning(
+                        "Could not remove temporary browser history DB: %s",
+                        temp_db,
+                    )
+                except Exception as e:
+                    logger.debug(f"[DOMAIN] Error cleaning up temp DB {temp_db}: {e}")
     
     def _safe_copy_db(self, db_path: Path) -> Optional[str]:
         """Safely copy a database file to temp location"""
@@ -1229,7 +1311,6 @@ class ActiveDomainTracker:
         known_sites = {
             # Google services
             'gmail': 'mail.google.com',
-            'inbox': 'mail.google.com',
             'youtube': 'youtube.com',
             'google drive': 'drive.google.com',
             'google docs': 'docs.google.com',
@@ -1345,10 +1426,24 @@ class ActiveDomainTracker:
 
         title_lower = title.lower()
 
-        # Strategy 1: Check known sites first (most reliable)
+        # Strategy 1: Check known sites first (most reliable).
+        # IMPORTANT: Use whole-word matching (\b boundaries) for SHORT keywords
+        # (len <= 8) to prevent false positives.  For example, the window title
+        # "Vedic astrology - Claude and 3 more pages" contains the word "Claude"
+        # only because Claude is a BACKGROUND tab.  Without word-boundary checks
+        # a simple `in` test would incorrectly assign the entire session to
+        # claude.ai even when the user is focused on a different site.
+        # Longer / more specific phrases (e.g. "google drive") are kept as
+        # substring matches because they are distinctive enough on their own.
         for keyword, domain in known_sites.items():
-            if keyword in title_lower:
-                return domain  # Returns None for explicitly marked non-domains
+            if len(keyword) <= 8:
+                # Word-boundary match for short, ambiguous keywords
+                if re.search(r'\b' + re.escape(keyword) + r'\b', title_lower):
+                    return domain
+            else:
+                # Substring match is fine for long, specific phrases
+                if keyword in title_lower:
+                    return domain  # Returns None for explicitly marked non-domains
 
         # Strategy 2: Look for actual domain-like patterns with strict validation
         # FIXED: More conservative regex with better validation
@@ -1612,11 +1707,14 @@ class BrowserHistoryTracker:
         """Extract new history entries from browser"""
         temp_db = None
         try:
-            # Copy to temp file
-            temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db').name
+            # Copy to temp file - explicitly close handle on Windows before copying/opening
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+            temp_db = temp_file.name
+            temp_file.close()
+
             shutil.copy2(history_path, temp_db)
             
-            conn = sqlite3.connect(f'file:{temp_db}?mode=ro', uri=True)
+            conn = sqlite3.connect(f'file:{temp_db}?mode=ro', uri=True, timeout=3.0)
             cursor = conn.cursor()
             
             last_visit = self._last_visit_times.get(browser_key, 0)
@@ -1660,15 +1758,25 @@ class BrowserHistoryTracker:
             
             return visits
             
+        except sqlite3.OperationalError as e:
+            logger.debug(f"[HISTORY] SQLite operational error reading {browser_key}: {e}")
+            return []
         except Exception as e:
             logger.debug(f"[HISTORY] Extract error: {e}")
             return []
         finally:
-            if temp_db and os.path.exists(temp_db):
+            if temp_db:
                 try:
-                    os.remove(temp_db)
-                except:
+                    os.unlink(temp_db)
+                except FileNotFoundError:
                     pass
+                except PermissionError:
+                    logger.warning(
+                        "Could not remove temporary browser history DB: %s",
+                        temp_db,
+                    )
+                except Exception as e:
+                    logger.debug(f"[HISTORY] Error cleaning up temp DB {temp_db}: {e}")
     
     def _extract_domain(self, url: str) -> Optional[str]:
         """

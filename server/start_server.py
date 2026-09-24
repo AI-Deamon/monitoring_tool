@@ -126,6 +126,7 @@ def install_stored_procedures(app):
             cursor.execute("DROP FUNCTION IF EXISTS process_screentime_event(VARCHAR, TIMESTAMP, INTEGER, INTEGER, INTEGER, INTEGER, VARCHAR) CASCADE;")
             cursor.execute("DROP FUNCTION IF EXISTS process_screentime_event(VARCHAR, DATE, VARCHAR, INTEGER, INTEGER, INTEGER, INTEGER) CASCADE;")
             cursor.execute("DROP FUNCTION IF EXISTS process_app_switch_event(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP, TIMESTAMP, INTEGER, VARCHAR) CASCADE;")
+            cursor.execute("DROP FUNCTION IF EXISTS process_app_switch_event(VARCHAR, TIMESTAMP, VARCHAR, VARCHAR, VARCHAR, VARCHAR, TIMESTAMP, TIMESTAMP, FLOAT, DATE) CASCADE;")
             cursor.execute("DROP FUNCTION IF EXISTS process_domain_switch_event(VARCHAR, VARCHAR, VARCHAR, TEXT, TEXT, VARCHAR, TIMESTAMP, TIMESTAMP, INTEGER, VARCHAR) CASCADE;")
             
             # 2. Process screentime event (7 params — includes away_seconds)
@@ -213,18 +214,26 @@ def install_stored_procedures(app):
                 $$ LANGUAGE plpgsql;
             """)
             
-            # 3. Process app switch event  
+            # 3. Process app switch event
+            # Signature MUST match the named-param call in server_telemetry.py:
+            #   process_app_switch_event(agent_id, timestamp, app, friendly_name,
+            #       category, window_title, session_start, session_end,
+            #       total_seconds, date)
             logger.info("  - Creating process_app_switch_event...")
             cursor.execute("""
                 CREATE OR REPLACE FUNCTION process_app_switch_event(
-                    p_agent_id VARCHAR, p_username VARCHAR, p_app VARCHAR,
-                    p_friendly_name VARCHAR, p_category VARCHAR, p_window_title VARCHAR,
-                    p_session_start TIMESTAMP, p_session_end TIMESTAMP,
-                    p_total_seconds INTEGER, p_idempotency_key VARCHAR
+                    p_agent_id   VARCHAR,
+                    p_timestamp  TIMESTAMP,
+                    p_app        VARCHAR,
+                    p_friendly_name VARCHAR,
+                    p_category   VARCHAR,
+                    p_window_title VARCHAR,
+                    p_session_start TIMESTAMP,
+                    p_session_end   TIMESTAMP,
+                    p_total_seconds FLOAT,
+                    p_date          DATE
                 ) RETURNS TABLE(status text, message text) AS $$
-                DECLARE v_date DATE;
                 BEGIN
-                    v_date := p_session_start::DATE;
                     IF p_app IS NULL OR p_app = '' THEN
                         RETURN QUERY SELECT 'skipped'::TEXT, 'NULL app'::TEXT;
                         RETURN;
@@ -234,18 +243,29 @@ def install_stored_procedures(app):
                         RETURN;
                     END IF;
                     BEGIN
-                        INSERT INTO app_sessions (agent_id, app, window_title, start_time, end_time, duration_seconds, created_at)
-                        VALUES (p_agent_id::UUID, p_app, p_window_title, p_session_start, p_session_end, p_total_seconds, (NOW() AT TIME ZONE 'Asia/Kolkata'));
+                        INSERT INTO app_sessions (
+                            agent_id, app, window_title,
+                            start_time, end_time, duration_seconds, created_at
+                        ) VALUES (
+                            p_agent_id::UUID, p_app, p_window_title,
+                            p_session_start, p_session_end,
+                            p_total_seconds,
+                            NOW()
+                        );
                     EXCEPTION WHEN unique_violation THEN
                         RETURN QUERY SELECT 'skipped'::text, 'Duplicate'::text;
                         RETURN;
                     END;
-                    INSERT INTO app_usage (agent_id, date, app, duration_seconds, session_count, last_updated)
-                    VALUES (p_agent_id::UUID, v_date, p_app, p_total_seconds, 1, (NOW() AT TIME ZONE 'Asia/Kolkata'))
+                    INSERT INTO app_usage (
+                        agent_id, date, app, duration_seconds, session_count, last_updated
+                    ) VALUES (
+                        p_agent_id::UUID, p_date, p_app,
+                        p_total_seconds::INTEGER, 1, NOW()
+                    )
                     ON CONFLICT (agent_id, date, app) DO UPDATE SET
                         duration_seconds = app_usage.duration_seconds + EXCLUDED.duration_seconds,
-                        session_count = app_usage.session_count + 1,
-                        last_updated = (NOW() AT TIME ZONE 'Asia/Kolkata');
+                        session_count    = app_usage.session_count + 1,
+                        last_updated     = NOW();
                     RETURN QUERY SELECT 'success'::text, 'Processed'::text;
                 EXCEPTION WHEN OTHERS THEN
                     RETURN QUERY SELECT 'error'::text, SQLERRM::text;
@@ -707,6 +727,10 @@ def main():
         start_server(app)
     else:
         logger.info("\n✅ Setup complete! (Skipping server start as requested)\n")
+        # Close pooled connections so a forking parent (gunicorn master)
+        # doesn't leak open Postgres sockets into its workers.
+        with app.app_context():
+            db.engine.dispose()
 
 if __name__ == "__main__":
     try:

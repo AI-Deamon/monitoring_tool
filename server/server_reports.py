@@ -12,7 +12,7 @@ import json
 import logging
 from threading import Thread
 from datetime import timedelta, date, datetime, timezone
-from flask import Blueprint, request, jsonify, Response, session, g
+from flask import Blueprint, request, jsonify, Response, session, g, current_app
 from extensions import db
 from sqlalchemy import text
 from auth import login_required, admin_required
@@ -104,7 +104,11 @@ def _run_schedule(schedule_id):
 
         html = render_report_html(s['report_type'], s['scope'], ctx)
         subject = f"SentinelEdge {s['report_type'].title()} {s['scope'].title()} Report — {start_date} to {end_date}"
-        ok, err = send_report_email(html, recipients, subject)
+        ok, err = send_report_email(
+            html, recipients, subject,
+            report_type=s['report_type'], scope=s['scope'],
+            start_date=start_date, end_date=end_date
+        )
 
         next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9))
         db.session.execute(text("""
@@ -499,12 +503,44 @@ def create_unified_schedule():
     return jsonify({'success': True, 'next_run': next_run.isoformat()})
 
 
+def _async_send_job_email(app, job_id, recipients, subject):
+    with app.app_context():
+        from engines.report_engine import get_job, send_report_email
+        job = get_job(db, job_id)
+        if not job or not job.get('result_html'):
+            logger.error(f"[REPORTS] Background email dispatch failed: job {job_id} not found or missing HTML")
+            return
+
+        start_str = job.get('start_date') or ''
+        end_str = job.get('end_date') or ''
+        report_type = job.get('report_type') or 'weekly'
+        scope = job.get('scope') or 'team'
+
+        if not subject or subject == 'SentinelEdge Report':
+            subject = f"Weekly Team Activity Report - {start_str} to {end_str}" if (start_str and end_str) else f"SentinelEdge {report_type.title()} {scope.title()} Report"
+
+        ok, err = send_report_email(
+            html_content=job['result_html'],
+            recipients=recipients,
+            subject=subject,
+            report_type=report_type,
+            scope=scope,
+            start_date=start_str,
+            end_date=end_str,
+            pdf_path=job.get('result_pdf_path')
+        )
+        if not ok:
+            logger.error(f"[REPORTS] Background email send for job {job_id} failed: {err}")
+
+
 @reports_bp.route('/dashboard/reports/unified/jobs/<job_id>/email', methods=['POST'])
 @login_required
 @admin_required
 def email_job_result(job_id):
-    """Send already-generated report HTML from a completed job (BUG-010)."""
-    from engines.report_engine import get_job, send_report_email
+    """Send report HTML and PDF as attachments with plain text and HTML body from a completed job in background thread."""
+    from engines.report_engine import get_job
+    import threading
+
     data = request.get_json(force=True)
     recipients = data.get('recipients', [])
     if not recipients:
@@ -512,8 +548,14 @@ def email_job_result(job_id):
     job = get_job(db, job_id)
     if not job or not job.get('result_html'):
         return jsonify({'error': 'Job not found or report not ready'}), 404
-    subject = data.get('subject', 'SentinelEdge Report')
-    ok, err = send_report_email(job['result_html'], recipients, subject)
-    if ok:
-        return jsonify({'success': True})
-    return jsonify({'success': False, 'error': err}), 500
+
+    subject = data.get('subject')
+    app = current_app._get_current_object()
+    thread = threading.Thread(
+        target=_async_send_job_email,
+        args=(app, job_id, recipients, subject),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({'success': True, 'message': 'Email dispatch started in background'})

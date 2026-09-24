@@ -22,7 +22,7 @@ from flask import (
     session,
     send_file,
 )
-from sqlalchemy import func, desc, case, text
+from sqlalchemy import func, desc, case, text, or_, and_
 from extensions import db
 import server_models
 
@@ -109,9 +109,16 @@ def _compute_core_hours_utilization(
     away_s = float(away_s or 0)
 
     productive_pct = min(100, int(round(active_s / SHIFT_TARGET_S * 100)))
-    away_pct = int(round(away_s / SHIFT_TARGET_S * 100))
-    locked_pct = int(round(locked_s / SHIFT_TARGET_S * 100))
-    idle_pct = int(round(idle_s / SHIFT_TARGET_S * 100))
+
+    total_inactive_s = away_s + locked_s + idle_s
+    if total_inactive_s > 0:
+        away_pct = int(round(away_s / total_inactive_s * 100))
+        locked_pct = int(round(locked_s / total_inactive_s * 100))
+        idle_pct = int(round(idle_s / total_inactive_s * 100))
+    else:
+        away_pct = 0
+        locked_pct = 0
+        idle_pct = 0
 
     return {
         # Raw integers
@@ -2543,12 +2550,15 @@ def api_agent_full_report(agent_id):
             if st_rec and st_rec.username:
                 username = st_rec.username
 
-        # Find first activity today (earliest app session start)
+        # Find first activity today (earliest app session active during today's window)
         first_session_today = (
             server_models.AppSession.query.filter(
                 server_models.AppSession.agent_id == resolved_agent_id,
-                server_models.AppSession.start_time >= start_dt,
                 server_models.AppSession.start_time <= end_dt,
+                or_(
+                    server_models.AppSession.end_time >= start_dt,
+                    server_models.AppSession.end_time.is_(None),
+                ),
             )
             .order_by(server_models.AppSession.start_time.asc())
             .first()
@@ -2558,12 +2568,15 @@ def api_agent_full_report(agent_id):
             utc_to_ist(first_session_today.start_time) if first_session_today else None
         )
 
-        # Find last activity today (latest app session)
+        # Find last activity today (latest app session active during today's window)
         last_session_today = (
             server_models.AppSession.query.filter(
                 server_models.AppSession.agent_id == resolved_agent_id,
-                server_models.AppSession.start_time >= start_dt,
                 server_models.AppSession.start_time <= end_dt,
+                or_(
+                    server_models.AppSession.end_time >= start_dt,
+                    server_models.AppSession.end_time.is_(None),
+                ),
             )
             .order_by(server_models.AppSession.start_time.desc())
             .first()
@@ -2741,8 +2754,11 @@ def api_agent_full_report(agent_id):
         app_sessions = (
             server_models.AppSession.query.filter(
                 server_models.AppSession.agent_id == resolved_agent_id,
-                server_models.AppSession.start_time >= start_dt,
                 server_models.AppSession.start_time <= end_dt,
+                or_(
+                    server_models.AppSession.end_time >= start_dt,
+                    server_models.AppSession.end_time.is_(None),
+                ),
             )
             .order_by(desc(server_models.AppSession.start_time))
             .limit(200)

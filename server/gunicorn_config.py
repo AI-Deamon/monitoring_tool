@@ -94,8 +94,14 @@ def on_starting(server):
         # Mock sys.argv to pass --no-start
         old_argv = sys.argv
         sys.argv = ['start_server.py', '--no-start']
-        run_setup()
-        sys.argv = old_argv
+        # The master must not run the scheduler or hold DB connections:
+        # workers fork from it and would inherit both.
+        os.environ['SENTINELEDGE_NO_SCHEDULER'] = '1'
+        try:
+            run_setup()
+        finally:
+            os.environ.pop('SENTINELEDGE_NO_SCHEDULER', None)
+            sys.argv = old_argv
         print("[INIT] Database setup complete.")
     except Exception as e:
         print(f"[ERROR] Database setup failed: {e}")
@@ -120,8 +126,14 @@ def pre_fork(server, worker):
 
 def post_fork(server, worker):
     """Called just after a worker has been forked."""
-    # Each worker gets its own database connection pool
-    pass
+    # Each worker gets its own database connection pool. Drop any leader
+    # election state (advisory-lock connection) inherited from the master so
+    # workers never share a Postgres socket.
+    try:
+        import leader_election
+        leader_election._leader = None
+    except Exception:
+        pass
 
 def worker_int(worker):
     """Called when a worker receives INT or QUIT signal."""

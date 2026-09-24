@@ -9,7 +9,8 @@ import time
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Thread, Event
+import threading
+from threading import Thread, Event, Lock
 
 # Add agent directory to path so 'from helper.xxx' imports work correctly
 # Path(__file__).parent = agent/helper/
@@ -63,6 +64,15 @@ class SentinelHelper:
         # Connection state
         self.core_connected = False
         self.connection_retry_count = 0
+
+        # Async tasks management (prevents main loop from blocking on heavy collection calls)
+        self._async_task_lock = threading.Lock()
+        self._active_async_tasks = set()
+
+        # Initial collections coordination & heavy collection mutual exclusion
+        self._initial_collections_in_progress = False
+        self._initial_collections_lock = threading.Lock()
+        self._heavy_collection_lock = threading.Lock()
 
         # State detector for reliable lock/unlock detection
         self.state_detector = StateDetector(
@@ -239,6 +249,11 @@ class SentinelHelper:
                     self.logger.critical(
                         f"[WATCHDOG] Core connected: {self.core_connected}"
                     )
+                    with self._async_task_lock:
+                        active_tasks = list(self._active_async_tasks)
+                    self.logger.critical(
+                        f"[WATCHDOG] Active async tasks: {active_tasks}"
+                    )
 
                     # Try to get stack traces of all threads
                     try:
@@ -278,6 +293,30 @@ class SentinelHelper:
 
             except Exception as e:
                 self.logger.error(f"[WATCHDOG] Error: {e}")
+
+    def _run_async_check(self, task_name: str, check_fn):
+        """
+        Run heavy periodic collection checks in a background daemon thread
+        so the main monitoring loop is never blocked by system/WMI queries.
+        Uses a thread lock to ensure only one instance of task_name runs at a time.
+        """
+        with self._async_task_lock:
+            if task_name in self._active_async_tasks:
+                self.logger.debug(f"[ASYNC] {task_name} already in progress, skipping duplicate run")
+                return
+            self._active_async_tasks.add(task_name)
+
+        def runner():
+            try:
+                check_fn()
+            except Exception as e:
+                self.logger.error(f"[ASYNC] Error running background task {task_name}: {e}")
+            finally:
+                with self._async_task_lock:
+                    self._active_async_tasks.discard(task_name)
+
+        t = Thread(target=runner, daemon=True, name=f"Async-{task_name}")
+        t.start()
 
     def _setup_logging(self):
         """Configure structured JSON logging with rotation"""
@@ -549,44 +588,51 @@ class SentinelHelper:
                 if self.core_connected:
                     self._send_state_spans()
 
-                # Domain collection (every heartbeat for active tracking)
+                # Domain collection (asynchronous to keep main monitoring loop responsive)
                 if now - last_domain_check >= self.config.heartbeat_interval:
                     if self.core_connected:
-                        # NEW: Send domain sessions (active tracking)
-                        self._send_domain_sessions()
-                        # LEGACY: Send domain history visits (throttled internally)
-                        self._send_domains()
+                        self._run_async_check(
+                            "domain_sessions",
+                            self._send_domain_sessions,
+                        )
+                        self._run_async_check(
+                            "domain_history",
+                            self._send_domains,
+                        )
                     last_domain_check = now
 
                 # Inventory check (every 5 minutes)
                 if now - last_inventory_check >= 120:
                     if self.core_connected:
-                        self._check_inventory()
+                        self._run_async_check('inventory', self._check_inventory)
                     last_inventory_check = now
 
                 # Hardware check (every 24 hours)
                 if now - last_hardware_check >= 86400:  # 24h
                     if self.core_connected:
-                        self._check_hardware()
+                        self._run_async_check('hardware', self._check_hardware)
                     last_hardware_check = now
 
                 # EOL data check (every 24 hours)
                 if now - last_eol_check >= 86400:  # 24h
                     if self.core_connected:
-                        self._check_eol_data()
+                        self._run_async_check('eol_data', self._check_eol_data)
                     last_eol_check = now
 
                 # Extended inventory check (every 6 hours)
                 if now - last_ext_inventory_check >= 21600:  # 6h
                     if self.core_connected:
-                        self._check_extended_inventory()
+                        if self._initial_collections_in_progress:
+                            self.logger.debug("[ASYNC] ext_inventory skipped - initial collection in progress")
+                        else:
+                            self._run_async_check('ext_inventory', self._check_extended_inventory)
                     last_ext_inventory_check = now
 
                 # Network change check (every 5 minutes)
                 network_check_interval = 1800  # 30 min fallback (NetworkChangeWatcher handles real-time detection)
                 if now - last_network_change_check >= network_check_interval:
                     if self.core_connected:
-                        self._check_network_change()
+                        self._run_async_check('network_change', self._check_network_change)
                     last_network_change_check = now
                 
                 # Security indicators check (configurable, default every 6 hours)
@@ -595,7 +641,10 @@ class SentinelHelper:
                 )
                 if now - last_security_check >= security_interval:
                     if self.core_connected and self.config.enable_security_collection:
-                        self._check_security_indicators()
+                        if self._initial_collections_in_progress:
+                            self.logger.debug("[ASYNC] security skipped - initial collection in progress")
+                        else:
+                            self._run_async_check('security', self._check_security_indicators)
                     last_security_check = now
 
                 # Raw system visibility check (configurable, default every 6 hours)
@@ -607,7 +656,10 @@ class SentinelHelper:
                         self.core_connected
                         and self.config.enable_system_visibility_collection
                     ):
-                        self._check_system_visibility()
+                        if self._initial_collections_in_progress:
+                            self.logger.debug("[ASYNC] visibility skipped - initial collection in progress")
+                        else:
+                            self._run_async_check('visibility', self._check_system_visibility)
                     last_system_visibility_check = now
 
                 # Log health status every 30 iterations
@@ -673,42 +725,51 @@ class SentinelHelper:
         immediately, preventing the Core HelperMonitor from killing us
         during the 3-10 min initial collection window.
         """
+        with self._initial_collections_lock:
+            if self._initial_collections_in_progress:
+                return
+            self._initial_collections_in_progress = True
+
         try:
-            self._send_initial_inventory()
-            self._send_initial_hardware()
-            self._send_initial_extended_inventory()
-            if self.config.enable_security_collection:
-                self._send_initial_security_indicators()
-            else:
-                self.logger.info("[SECURITY] Initial collection disabled by config")
-            if self.config.enable_system_visibility_collection:
-                self._send_initial_system_visibility()
-            else:
-                self.logger.info("[VISIBILITY] Initial collection disabled by config")
-
-            # Send startup state event
-            try:
-                current_state = self.state_detector.get_state()
-                startup_payload = {
-                    "previous_state": "startup",
-                    "current_state": current_state.value,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "duration_seconds": 0,
-                }
-                self.logger.info(
-                    f"[STATE] Sending startup state: startup -> {current_state.value}"
-                )
-                success = self.communicator.send_state_change(startup_payload)
-                if success:
-                    self.logger.info("[STATE] Startup state event sent successfully")
+            with self._heavy_collection_lock:
+                self._send_initial_inventory()
+                self._send_initial_hardware()
+                self._send_initial_extended_inventory()
+                if self.config.enable_security_collection:
+                    self._send_initial_security_indicators()
                 else:
-                    self.logger.warning("[STATE] Failed to send startup state event")
-            except Exception as e:
-                self.logger.error(f"[STATE] Error sending startup state: {e}")
+                    self.logger.info("[SECURITY] Initial collection disabled by config")
+                if self.config.enable_system_visibility_collection:
+                    self._send_initial_system_visibility()
+                else:
+                    self.logger.info("[VISIBILITY] Initial collection disabled by config")
 
-            self.logger.info("[INIT] All initial collections completed")
+                # Send startup state event
+                try:
+                    current_state = self.state_detector.get_state()
+                    startup_payload = {
+                        "previous_state": "startup",
+                        "current_state": current_state.value,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "duration_seconds": 0,
+                    }
+                    self.logger.info(
+                        f"[STATE] Sending startup state: startup -> {current_state.value}"
+                    )
+                    success = self.communicator.send_state_change(startup_payload)
+                    if success:
+                        self.logger.info("[STATE] Startup state event sent successfully")
+                    else:
+                        self.logger.warning("[STATE] Failed to send startup state event")
+                except Exception as e:
+                    self.logger.error(f"[STATE] Error sending startup state: {e}")
+
+                self.logger.info("[INIT] All initial collections completed")
         except Exception as e:
             self.logger.error(f"[INIT] Initial collection error: {e}", exc_info=True)
+        finally:
+            with self._initial_collections_lock:
+                self._initial_collections_in_progress = False
 
     def _send_initial_inventory(self):
         """Send initial inventory on startup"""
@@ -925,16 +986,17 @@ class SentinelHelper:
 
     def _check_extended_inventory(self):
         """Check and send extended inventory if due"""
-        try:
-            data = self.collector.collect_extended_inventory()
-            if data:
-                if self.communicator.send_extended_inventory(data):
-                    counts = {k: len(v) for k, v in data.items() if isinstance(v, list)}
-                    self.logger.info(f"[OK] Extended inventory update sent: {counts}")
-                else:
-                    self.logger.warning("Failed to send extended inventory update")
-        except Exception as e:
-            self.logger.error(f"Extended inventory check error: {e}")
+        with self._heavy_collection_lock:
+            try:
+                data = self.collector.collect_extended_inventory()
+                if data:
+                    if self.communicator.send_extended_inventory(data):
+                        counts = {k: len(v) for k, v in data.items() if isinstance(v, list)}
+                        self.logger.info(f"[OK] Extended inventory update sent: {counts}")
+                    else:
+                        self.logger.warning("Failed to send extended inventory update")
+            except Exception as e:
+                self.logger.error(f"Extended inventory check error: {e}")
 
     def _send_initial_security_indicators(self):
         """Send initial security analysis on startup"""
@@ -976,26 +1038,27 @@ class SentinelHelper:
         if not self.config.enable_security_collection:
             return
 
-        try:
-            # Pass cached ext inventory if available
-            ext_data = None
-            if hasattr(self.collector, "_ext_collector"):
-                try:
-                    ext_data = self.collector._ext_collector.collect_all()
-                except Exception:
-                    pass
+        with self._heavy_collection_lock:
+            try:
+                # Pass cached ext inventory if available
+                ext_data = None
+                if hasattr(self.collector, "_ext_collector"):
+                    try:
+                        ext_data = self.collector._ext_collector.collect_all()
+                    except Exception:
+                        pass
 
-            data = self.collector.collect_security_indicators(ext_data=ext_data)
-            if data:
-                total = len(data.get("indicators", []))
-                if self.communicator.send_security_indicators(data):
-                    self.logger.info(
-                        f"[OK] Security indicators update sent: {total} indicators"
-                    )
-                else:
-                    self.logger.warning("Failed to send security indicators update")
-        except Exception as e:
-            self.logger.error(f"Security indicators check error: {e}")
+                data = self.collector.collect_security_indicators(ext_data=ext_data)
+                if data:
+                    total = len(data.get("indicators", []))
+                    if self.communicator.send_security_indicators(data):
+                        self.logger.info(
+                            f"[OK] Security indicators update sent: {total} indicators"
+                        )
+                    else:
+                        self.logger.warning("Failed to send security indicators update")
+            except Exception as e:
+                self.logger.error(f"Security indicators check error: {e}")
 
     def _send_initial_system_visibility(self):
         """Send initial raw system visibility snapshot on startup."""
@@ -1026,16 +1089,17 @@ class SentinelHelper:
         if not self.config.enable_system_visibility_collection:
             return
 
-        try:
-            data = self.collector.collect_system_visibility()
-            if data:
-                counts = data.get("counts", {})
-                if self.communicator.send_system_visibility(data):
-                    self.logger.info(f"[OK] System visibility update sent: {counts}")
-                else:
-                    self.logger.warning("Failed to send system visibility update")
-        except Exception as e:
-            self.logger.error(f"System visibility check error: {e}")
+        with self._heavy_collection_lock:
+            try:
+                data = self.collector.collect_system_visibility()
+                if data:
+                    counts = data.get("counts", {})
+                    if self.communicator.send_system_visibility(data):
+                        self.logger.info(f"[OK] System visibility update sent: {counts}")
+                    else:
+                        self.logger.warning("Failed to send system visibility update")
+            except Exception as e:
+                self.logger.error(f"System visibility check error: {e}")
 
     def _check_eol_data(self):
         """Check and send EOL data"""

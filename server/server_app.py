@@ -355,9 +355,16 @@ def create_app():
         # Compatibility route to the canonical OpenAPI spec.
         return openapi_spec()
 
-    # Start background scheduler (only in main process, not in testing)
-    if not app.config.get('TESTING'):
+    # Start background scheduler (only in main process, not in testing).
+    # gunicorn's on_starting hook builds an app in the *master* just to run DB
+    # setup; a scheduler thread + advisory-lock connection there would be
+    # inherited by every forked worker, so it opts out via this env var.
+    if not app.config.get('TESTING') and not os.environ.get('SENTINELEDGE_NO_SCHEDULER'):
         try:
+            # Import report_engine on this thread before any background thread
+            # exists. Lazy first-imports from the scheduler/sync threads can
+            # leave the module half-initialised in sys.modules.
+            import engines.report_engine  # noqa: F401
             from background_tasks import start_background_tasks
             app.background_scheduler = start_background_tasks(app)
         except Exception as e:

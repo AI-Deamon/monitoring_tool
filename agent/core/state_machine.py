@@ -484,7 +484,43 @@ class ScreenTimeEngine:
                 }
 
             else:
-                # Unknown/Normal → ignore gap (reliability > accuracy)
+                # If workstation was LOCKED before the gap, treat extended lock according to lock/away rule
+                pre_gap_state = last_state_str.upper()
+                if pre_gap_state == "LOCKED":
+                    pending_before = max(
+                        self.pending_locked_seconds,
+                        float(persisted_state.get("pending_locked_seconds", 0)),
+                    )
+                    total_lock_time = pending_before + gap
+                    AWAY_THRESHOLD = 7200
+                    if total_lock_time >= AWAY_THRESHOLD:
+                        self.away_seconds += total_lock_time
+                        self.pending_locked_seconds = 0.0
+                        logger.info(
+                            f"[STATE_MACHINE] Unknown/Normal gap while LOCKED: {gap:.1f}s + pending {pending_before:.1f}s "
+                            f"= {total_lock_time:.1f}s ({total_lock_time / 3600:.1f}h) "
+                            f"counted as AWAY (was LOCKED, >= 2h threshold)"
+                        )
+                        return {
+                            "action": "counted_as_away",
+                            "gap_seconds": gap,
+                            "gap_hours": gap / 3600,
+                        }
+                    else:
+                        self.locked_seconds += total_lock_time
+                        self.pending_locked_seconds = 0.0
+                        logger.info(
+                            f"[STATE_MACHINE] Unknown/Normal gap while LOCKED: {gap:.1f}s + pending {pending_before:.1f}s "
+                            f"= {total_lock_time:.1f}s ({total_lock_time / 3600:.1f}h) "
+                            f"counted as LOCKED (was LOCKED, < 2h threshold)"
+                        )
+                        return {
+                            "action": "counted_as_locked",
+                            "gap_seconds": gap,
+                            "gap_hours": gap / 3600,
+                        }
+
+                # Otherwise (was ACTIVE or IDLE) → ignore unknown gap (reliability > accuracy)
                 logger.warning(
                     f"[STATE_MACHINE] Unknown gap: {gap:.1f}s ({gap / 3600:.1f}h) "
                     f"IGNORED (reliability > accuracy)"

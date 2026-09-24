@@ -245,25 +245,27 @@ class StateDetector:
             logger.warning(
                 "[STATE] pywin32 not available - using fallback (always ACTIVE)"
             )
-            return
-
-        # FIX #1: Detect initial lock state on startup
-        if self._is_session_locked():
-            self.authority.set_state(SystemState.LOCKED, source="desktop")
-            logger.info("[STATE] Started in LOCKED state")
-            self.current_state = "locked"
         else:
-            logger.info("[STATE] Started in ACTIVE state")
-            self.current_state = "active"
+            # FIX #1: Detect initial lock state on startup
+            if self._is_session_locked():
+                self.authority.set_state(SystemState.LOCKED, source="desktop")
+                logger.info("[STATE] Started in LOCKED state")
+                self.current_state = "locked"
+            else:
+                logger.info("[STATE] Started in ACTIVE state")
+                self.current_state = "active"
 
-        # PHASE 2: Load persisted state and handle startup gap
+        # PHASE 2: Load persisted state and handle startup gap — ALWAYS run this,
+        # regardless of pywin32 availability. This is what recovers the counters
+        # AND the interrupted span; it has nothing to do with pywin32.
         persisted = self.screen_time_engine.load_persisted_state()
+        gap_info = None
         if persisted:
             gap_info = self.screen_time_engine.handle_startup(persisted)
             logger.info(f"[STATE] Startup gap handling: {gap_info}")
 
         # Recover crash-safe helper state (pending final-day payload + interrupted span).
-        self._load_persisted_state(persisted)
+        self._load_persisted_state(persisted, gap_info=gap_info)
 
     def _is_session_locked(self) -> bool:
         """Check if workstation is locked OR fast user switched (no lock event).
@@ -295,7 +297,12 @@ class StateDetector:
         # but lockapp.exe/logonui.exe will already be foreground.
         try:
             hwnd = windll.user32.GetForegroundWindow()
-            if hwnd:
+            if not hwnd:
+                # If foreground window is NULL / 0 while already LOCKED,
+                # display is sleeping/standby or desktop switching - preserve LOCKED!
+                if hasattr(self, "authority") and self.authority.state == SystemState.LOCKED:
+                    return True
+            else:
                 pid = wintypes.DWORD()
                 windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
                 if pid.value:
@@ -826,20 +833,35 @@ class StateDetector:
                     self.authority.state == SystemState.LOCKED
                     and self.authority.lock_source in ("desktop", "process")
                 ):
+                    # Check if genuine user activity is present before considering self-correction.
+                    # If user is idle (no recent keyboard/mouse input), preserve LOCKED!
+                    idle_for = self._get_idle_seconds()
+                    idle_threshold = getattr(self, "idle_threshold", 120)
+                    is_user_idle = (idle_for >= idle_threshold) or (
+                        self.idle_detector and self.idle_detector.is_idle()
+                    )
+                    if is_user_idle:
+                        # User is idle / display asleep — preserve LOCKED, do not self-correct to ACTIVE!
+                        self._heuristic_unlock_streak = 0
+                        logger.debug(
+                            f"[STATE] Heuristic unlock ignored: user is idle ({idle_for:.1f}s), preserving LOCKED"
+                        )
+                        return
+
                     self._heuristic_unlock_streak += 1
                     if self._heuristic_unlock_streak >= HEURISTIC_UNLOCK_CONFIRM_TICKS:
                         logger.info(
                             f"[STATE] Heuristic-sourced LOCKED (source="
                             f"{self.authority.lock_source}) self-corrected to ACTIVE "
                             f"after {self._heuristic_unlock_streak} consecutive "
-                            f"not-locked polls with no OS lock/unlock event"
+                            f"not-locked polls with genuine user input ({idle_for:.1f}s idle)"
                         )
                         self._transition("active", source="heuristic_confirmed")
                         return
                     logger.debug(
                         f"[STATE] Heuristic-sourced LOCKED looks unlocked "
                         f"({self._heuristic_unlock_streak}/{HEURISTIC_UNLOCK_CONFIRM_TICKS} "
-                        f"confirmation polls)"
+                        f"confirmation polls with user input)"
                     )
                     return
             else:
@@ -856,9 +878,20 @@ class StateDetector:
                     # self._transition("active", source="remote", remote_session_active=True)
                     pass
                 elif not HAS_WIN32:
-                    # Fallback mode: no WTS unlock events available, use polling unlock.
+                    # Fallback mode: pywin32 unavailable.
+                    # Fail closed! Preserve LOCKED unless genuine user input is detected.
+                    idle_for = self._get_idle_seconds()
+                    idle_threshold = getattr(self, "idle_threshold", 120)
+                    is_user_idle = (idle_for >= idle_threshold) or (
+                        self.idle_detector and self.idle_detector.is_idle()
+                    )
+                    if is_user_idle:
+                        logger.debug(
+                            f"[STATE] Fallback staying LOCKED - user is idle ({idle_for:.1f}s)"
+                        )
+                        return
                     logger.info(
-                        "[STATE] Fallback unlock via polling (pywin32 unavailable)"
+                        f"[STATE] Fallback unlock via polling with genuine user input ({idle_for:.1f}s)"
                     )
                     self._transition("active", source="os")
                 else:
@@ -1142,7 +1175,9 @@ class StateDetector:
     # CRASH RECOVERY
     # ========================================================================
 
-    def _load_persisted_state(self, state_machine_state: Optional[dict] = None):
+    def _load_persisted_state(
+        self, state_machine_state: Optional[dict] = None, gap_info: Optional[dict] = None
+    ):
         """Recover in-progress session on startup."""
         try:
             import json
@@ -1164,10 +1199,12 @@ class StateDetector:
             pending_day = data.get("final_totals_day_for_upload")
             if isinstance(pending_final, dict) and pending_day:
                 # Validate totals before restoring to prevent stale overflow data
-                total = (pending_final.get('active_seconds', 0) +
-                         pending_final.get('idle_seconds', 0) +
-                         pending_final.get('locked_seconds', 0) +
-                         pending_final.get('away_seconds', 0))
+                total = (
+                    pending_final.get("active_seconds", 0)
+                    + pending_final.get("idle_seconds", 0)
+                    + pending_final.get("locked_seconds", 0)
+                    + pending_final.get("away_seconds", 0)
+                )
                 if total > 86400:
                     logger.warning(
                         f"[RECOVERY] Discarding stale final-day totals (total={total}s > 86400s) "
@@ -1201,31 +1238,6 @@ class StateDetector:
 
                 duration = now - session_start
 
-                last_event = (
-                    str((state_machine_state or {}).get("last_event") or "")
-                    .strip()
-                    .lower()
-                )
-                if last_event in {
-                    LastEvent.SHUTDOWN.value,
-                    LastEvent.CRASH.value,
-                    LastEvent.SLEEP.value,
-                }:
-                    logger.info(
-                        f"[RECOVERY] Skipping interrupted {prev_state} span after "
-                        f"{last_event}; gap is handled by ScreenTimeEngine"
-                    )
-                    break
-
-                saved_day = str(data.get("date") or "")
-                today = datetime.now().date().isoformat()
-                if saved_day and saved_day != today:
-                    logger.info(
-                        f"[RECOVERY] Skipping interrupted {prev_state} span from "
-                        f"previous day {saved_day}; today is {today}"
-                    )
-                    break
-
                 if prev_state not in ("active", "idle", "locked"):
                     logger.info(
                         f"[RECOVERY] Skipping unsupported interrupted state: {prev_state}"
@@ -1239,20 +1251,67 @@ class StateDetector:
                     )
                     break
 
-                # Long gaps are ambiguous after restart. Do not rewrite them to
-                # "now - 8h"; that fabricates overnight activity after shutdown.
-                MAX_RECOVERY_DURATION = 8 * 3600  # 8 hours
+                last_event = (
+                    str((state_machine_state or {}).get("last_event") or "")
+                    .strip()
+                    .lower()
+                )
 
-                if duration > MAX_RECOVERY_DURATION:
-                    logger.warning(
-                        f"[RECOVERY] Interrupted session too long ({duration:.1f}s), "
-                        f"skipping recovery"
-                    )
-                    break
+                # Requirement 2 & 3: Make gap_info authoritative & deterministic unknown-gap policy.
+                # Unknown gaps or shutdown/crash/sleep gaps MUST NOT be synthesized as ACTIVE time.
+                if prev_state == "active":
+                    gap_action = (gap_info or {}).get("action")
+                    if gap_action == "ignored_unknown_gap" or (
+                        gap_action and str(gap_action).startswith("ignored_")
+                    ):
+                        logger.info(
+                            f"[RECOVERY] Skipping interrupted active span after "
+                            f"{gap_action}; unknown/ignored gap is not synthesized as active"
+                        )
+                        break
+
+                    if last_event in {
+                        LastEvent.SHUTDOWN.value,
+                        LastEvent.CRASH.value,
+                        LastEvent.SLEEP.value,
+                    }:
+                        logger.info(
+                            f"[RECOVERY] Skipping interrupted active span after "
+                            f"{last_event}; gap handled by ScreenTimeEngine"
+                        )
+                        break
+
+                    # Deterministic Unknown-Gap Policy: gaps >= 600s are never synthesized as ACTIVE
+                    if duration >= 600:
+                        logger.info(
+                            f"[RECOVERY] Skipping interrupted active span with long gap "
+                            f"({duration:.1f}s >= 600s); unknown gaps are never synthesized as active"
+                        )
+                        break
+
+                    saved_day = str(data.get("date") or "")
+                    today = datetime.now().date().isoformat()
+                    if saved_day and saved_day != today:
+                        logger.info(
+                            f"[RECOVERY] Skipping interrupted active span from "
+                            f"previous day {saved_day}; today is {today}"
+                        )
+                        break
+
+                # Requirement 4: Overnight LOCKED Recovery.
+                # When prev_state == 'locked', use the persisted lock boundary (session_start -> now).
+                if prev_state == "locked":
+                    # Hard cap to prevent runaway corruption beyond 24 hours
+                    if duration > 86400:
+                        logger.warning(
+                            f"[RECOVERY] Interrupted locked session too long ({duration:.1f}s > 86400s), skipping"
+                        )
+                        break
 
                 if duration > 60:  # Only if > 1 minute
-                    # Create span(s) for the interrupted session (FR-012: one
-                    # span per UTC day when the session crosses midnight).
+                    # Create span(s) for the interrupted session.
+                    # If prev_state == "locked" and duration >= 7200, _create_span_segments
+                    # automatically resolves the state to "away" (FR-005/FR-012).
                     spans = self._create_span_segments(
                         state=prev_state,
                         start_time=session_start,
@@ -1266,8 +1325,9 @@ class StateDetector:
                         with self._transition_lock:
                             self.pending_spans.append(span)
                     if spans:
+                        recovered_state = spans[0].get("state", prev_state)
                         logger.info(
-                            f"[RECOVERY] Recovered {prev_state} session: "
+                            f"[RECOVERY] Recovered {recovered_state} session: "
                             f"{duration:.1f}s ({len(spans)} span(s))"
                         )
                 break  # end of while True — always exit after one pass

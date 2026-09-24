@@ -839,7 +839,7 @@ $results | ConvertTo-Json -Compress -Depth 4
         """Fallback: collect tasks via schtasks.exe (works without admin)"""
         try:
             result = subprocess.run(
-                ["schtasks", "/query", "/fo", "CSV", "/v", "/tn", "\\*"],
+                ["schtasks", "/query", "/fo", "CSV", "/v"],
                 capture_output=True,
                 text=True,
                 timeout=30,

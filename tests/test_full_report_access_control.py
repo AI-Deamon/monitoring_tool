@@ -4,7 +4,7 @@ Tests for api_agent_full_report access control (FR-006).
 import sys, os, pytest
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'monitoring_tool', 'server'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 os.environ.setdefault('DATABASE_URL', 'sqlite:///:memory:')
 os.environ.setdefault('SECRET_KEY', 'test-secret')
 

@@ -164,7 +164,7 @@ class ExtendedInventoryCollector:
             return Path(self.config.state_dir)
         return Path.home() / ".sentineledge"
     
-    def _run_powershell(self, script: str, timeout: int = 120) -> Optional[str]:
+    def _run_powershell(self, script: str, timeout: int = 45) -> Optional[str]:
         """Run PowerShell command and return output"""
         try:
             # Force UTF-8 output to prevent JSON corruption from down-converted smart quotes
@@ -339,7 +339,7 @@ class ExtendedInventoryCollector:
         $tools | Group-Object { $_.Name.ToLower() } | ForEach-Object { $_.Group[0] } | ConvertTo-Json -Depth 3
         '''
         
-        output = self._run_powershell(script, timeout=180)
+        output = self._run_powershell(script, timeout=60)
         if output:
             try:
                 data = json.loads(output)
@@ -422,7 +422,7 @@ class ExtendedInventoryCollector:
         $drivers | Group-Object { if ($_.DeviceID) { $_.DeviceID } else { $_.Name } } | ForEach-Object { $_.Group[0] } | ConvertTo-Json -Depth 3
         '''
         
-        output = self._run_powershell(script, timeout=120)
+        output = self._run_powershell(script, timeout=60)
         if output:
             try:
                 data = json.loads(output)
@@ -834,7 +834,7 @@ class ExtendedInventoryCollector:
         $extensions | Group-Object { "$($_.Browser)-$($_.ExtensionID)-$($_.Profile)" } | ForEach-Object { $_.Group[0] } | ConvertTo-Json -Depth 3
         '''
         
-        output = self._run_powershell(script, timeout=180)
+        output = self._run_powershell(script, timeout=60)
         if output:
             try:
                 data = json.loads(output)
@@ -1063,7 +1063,7 @@ class ExtendedInventoryCollector:
         $finalPlugins | ConvertTo-Json -Depth 3
         '''
         
-        output = self._run_powershell(script, timeout=120)
+        output = self._run_powershell(script, timeout=60)
         if output:
             try:
                 data = json.loads(output)
@@ -1119,7 +1119,7 @@ class ExtendedInventoryCollector:
         )
         
         # Exclude directories
-        $excludeDirs = @('Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', '$Recycle.Bin')
+        $excludeDirs = @('Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', '$Recycle.Bin', 'AppData', 'node_modules', '.git', 'venv', '.venv')
         
         foreach ($basePath in $scanPaths) {
             if (Test-Path $basePath) {
@@ -1149,7 +1149,7 @@ class ExtendedInventoryCollector:
         $apps | Group-Object ExecutablePath | ForEach-Object { $_.Group[0] } | ConvertTo-Json -Depth 3
         '''
         
-        output = self._run_powershell(script, timeout=180)
+        output = self._run_powershell(script, timeout=60)
         if output:
             try:
                 data = json.loads(output)
@@ -1330,7 +1330,7 @@ class ExtendedInventoryCollector:
         $results | ConvertTo-Json -Depth 3
         '''
         
-        output = self._run_powershell(script, timeout=300)
+        output = self._run_powershell(script, timeout=60)
         if output:
             try:
                 return json.loads(output)

@@ -1094,9 +1094,10 @@ function renderFlipCards(st, stateEvents) {
     // ── New shift-goal card (ea-*) ────────────────────────────────────────────
     const productivePct = st.productive_pct ?? utilPct;
     const productiveTimeStr = st.productive_time_str ?? formatTime(activeSec);
-    const awayPctNew = st.away_pct ?? (coreWindowSec > 0 ? Math.round(awayCh / coreWindowSec * 100) : 0);
-    const lockedPctNew = st.locked_pct ?? (coreWindowSec > 0 ? Math.round(lockedCh / coreWindowSec * 100) : 0);
-    const idlePct = st.idle_pct ?? 0;
+    const totalInactiveSec = awayCh + lockedCh + idleSec;
+    const awayPctNew = st.away_pct ?? (totalInactiveSec > 0 ? Math.round(awayCh / totalInactiveSec * 100) : 0);
+    const lockedPctNew = st.locked_pct ?? (totalInactiveSec > 0 ? Math.round(lockedCh / totalInactiveSec * 100) : 0);
+    const idlePct = st.idle_pct ?? (totalInactiveSec > 0 ? Math.round(idleSec / totalInactiveSec * 100) : 0);
     const awayTimeStr = st.away_time_str ?? formatTime(awayCh);
     const lockedTimeStr = st.locked_time_str ?? formatTime(lockedCh);
     const idleTimeStr = st.idle_time_str ?? formatTime(idleSec);
