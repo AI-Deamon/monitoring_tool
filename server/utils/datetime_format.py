@@ -6,6 +6,9 @@ Feature 037, US4/US5. Contract:
 
     dates      DD-MM-YYYY        07-08-2026
     date-times DD-MM-YYYY HH:mm  07-08-2026 14:30   (24-hour, zero-padded)
+    timestamps DD-MM-YYYY HH:mm:ss 07-08-2026 14:30:00
+               (only where second precision is needed, e.g. "Generated on"
+               report footers)
 
 Six reported defects (D02, D08, D10, D11, D14, D19) were one missing
 abstraction rather than six bugs: there was no shared formatter anywhere, so 92
@@ -42,6 +45,9 @@ logger = logging.getLogger(__name__)
 # The single canonical format. Day first, numeric month, 24-hour clock.
 DATE_FORMAT = "%d-%m-%Y"
 DATETIME_FORMAT = "%d-%m-%Y %H:%M"
+# Seconds variant: only for values where second precision is required
+# (report "Generated on" footers). Not for general display.
+DATETIME_SECONDS_FORMAT = "%d-%m-%Y %H:%M:%S"
 
 # Shown when a value is absent. Explicitly unknown beats a misleading default
 # (FR-017).
@@ -160,6 +166,22 @@ def format_datetime_labelled(value, tz=None) -> str:
     if converted is None:
         return EMPTY_DISPLAY
     return f"{converted.strftime(DATETIME_FORMAT)} ({timezone_label(tz)})"
+
+
+def format_datetime_seconds(value, tz=None) -> str:
+    """Render a timestamp as DD-MM-YYYY HH:mm:ss. Missing values render as EMPTY_DISPLAY."""
+    converted = to_display_tz(value, tz)
+    if converted is None:
+        return EMPTY_DISPLAY
+    return converted.strftime(DATETIME_SECONDS_FORMAT)
+
+
+def format_datetime_seconds_labelled(value, tz=None) -> str:
+    """As format_datetime_seconds, with the timezone appended (FR-008)."""
+    converted = to_display_tz(value, tz)
+    if converted is None:
+        return EMPTY_DISPLAY
+    return f"{converted.strftime(DATETIME_SECONDS_FORMAT)} ({timezone_label(tz)})"
 
 
 def day_range_utc(target_date, tz=None):

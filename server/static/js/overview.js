@@ -95,7 +95,10 @@
                         labels: ['Online', 'Offline'],
                         datasets: [{
                             data: [data.active_agents, data.offline_agents],
-                            backgroundColor: ['#10b981', '#ef4444']
+                            backgroundColor: [
+                                typeof getChartColors === 'function' ? getChartColors().success : '#10b981',
+                                typeof getChartColors === 'function' ? getChartColors().danger : '#ef4444'
+                            ]
                         }]
                     },
                     options: {
@@ -147,7 +150,12 @@
                         labels: ['Active', 'Idle', 'Locked', 'Away'],
                         datasets: [{
                             data: [data.screen_time.active, data.screen_time.idle, data.screen_time.locked, awayTime],
-                            backgroundColor: ['#38bdf8', '#fbbf24', '#e6005c', '#334155']
+                            backgroundColor: [
+                                getComputedStyle(document.documentElement).getPropertyValue('--state-active').trim() || '#38bdf8',
+                                getComputedStyle(document.documentElement).getPropertyValue('--state-idle').trim() || '#fbbf24',
+                                getComputedStyle(document.documentElement).getPropertyValue('--state-locked').trim() || '#64748b',
+                                getComputedStyle(document.documentElement).getPropertyValue('--state-away').trim() || '#334155'
+                            ]
                         }]
                     },
                     options: {
@@ -320,3 +328,22 @@
     setInterval(() => {
         loadOverview();
     }, 30000);
+
+    // Update charts when theme changes
+    window.addEventListener('themechange', () => {
+        if (window.statusChart) {
+            const c = typeof getChartColors === 'function' ? getChartColors() : {};
+            window.statusChart.data.datasets[0].backgroundColor = [c.success || '#10b981', c.danger || '#ef4444'];
+            window.statusChart.update('none');
+        }
+        if (window.screenChart) {
+            const rootStyle = getComputedStyle(document.documentElement);
+            window.screenChart.data.datasets[0].backgroundColor = [
+                rootStyle.getPropertyValue('--state-active').trim() || '#38bdf8',
+                rootStyle.getPropertyValue('--state-idle').trim() || '#fbbf24',
+                rootStyle.getPropertyValue('--state-locked').trim() || '#64748b',
+                rootStyle.getPropertyValue('--state-away').trim() || '#334155'
+            ];
+            window.screenChart.update('none');
+        }
+    });

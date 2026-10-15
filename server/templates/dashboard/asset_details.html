@@ -1,4 +1,5 @@
 {% extends "dashboard/base.html" %}
+{% from "components/icons.html" import icon %}
 
 {% block title %}Asset Details - {{ agent_id }} - SentinelEdge{% endblock %}
 
@@ -41,7 +42,7 @@
     <nav class="flex mb-6 text-sm text-gray-500" aria-label="Breadcrumb">
         <ol class="inline-flex items-center space-x-1 md:space-x-3">
             <li class="inline-flex items-center">
-                <a href="{{ url_for('dashboard.assets_dashboard') }}" class="hover:text-primary-600 flex items-center">
+                <a href="{{ url_for('dashboard.assets_list') }}" class="hover:text-primary-600 flex items-center">
                     <i class="fas fa-layer-group mr-2"></i> Assets
                 </a>
             </li>
@@ -256,19 +257,27 @@
                     <h3 class="text-white font-bold mb-4 flex items-center gap-2">
                         <i class="fas fa-hdd text-blue-400"></i> Logical Disks
                     </h3>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm">
-                            <thead class="text-slate-500 uppercase text-[10px] font-bold border-b border-slate-700">
+                    <div class="se-table-container-compact max-h-72">
+                        <table class="se-table se-table-compact">
+                            <colgroup>
+                                <col class="col-hwdisk-drive">
+                                <col class="col-hwdisk-label">
+                                <col class="col-hwdisk-type">
+                                <col class="col-hwdisk-cap">
+                                <col class="col-hwdisk-free">
+                                <col class="col-hwdisk-usage">
+                            </colgroup>
+                            <thead>
                                 <tr>
-                                    <th class="pb-3">Drive</th>
-                                    <th class="pb-3">Label</th>
-                                    <th class="pb-3">Type</th>
-                                    <th class="pb-3">Capacity</th>
-                                    <th class="pb-3">Free Space</th>
-                                    <th class="pb-3">Usage</th>
+                                    <th class="se-align-left">Drive</th>
+                                    <th class="se-align-left">Label</th>
+                                    <th class="se-align-left">Type</th>
+                                    <th class="se-align-right">Capacity</th>
+                                    <th class="se-align-right">Free Space</th>
+                                    <th class="se-align-left">Usage</th>
                                 </tr>
                             </thead>
-                            <tbody id="hw-disks-body" class="divide-y divide-slate-700/50">
+                            <tbody id="hw-disks-body">
                                 <!-- Populated by JS -->
                             </tbody>
                         </table>
@@ -335,18 +344,25 @@
                 <div id="lifecycle-loading" class="text-center py-8">
                     <i class="fas fa-spinner fa-spin text-slate-500 text-xl"></i>
                 </div>
-                <div id="lifecycle-table-container" class="hidden overflow-x-auto">
-                    <table class="w-full text-left text-sm">
-                        <thead class="text-slate-500 uppercase text-[10px] font-bold border-b border-slate-700">
+                <div id="lifecycle-table-container" class="hidden se-table-container-compact max-h-80">
+                    <table class="se-table se-table-compact">
+                        <colgroup>
+                            <col class="col-life-product">
+                            <col class="col-life-version">
+                            <col class="col-life-status">
+                            <col class="col-life-eol">
+                            <col class="col-life-risk">
+                        </colgroup>
+                        <thead>
                             <tr>
-                                <th class="pb-3 px-2">Product</th>
-                                <th class="pb-3 px-2">Installed Version</th>
-                                <th class="pb-3 px-2">Status</th>
-                                <th class="pb-3 px-2">EOL Date</th>
-                                <th class="pb-3 px-2">Risk</th>
+                                <th class="se-align-left">Product</th>
+                                <th class="se-align-left">Installed Version</th>
+                                <th class="se-align-center">Status</th>
+                                <th class="se-align-center">EOL Date</th>
+                                <th class="se-align-center">Risk</th>
                             </tr>
                         </thead>
-                        <tbody id="lifecycle-tbody" class="divide-y divide-slate-700/50">
+                        <tbody id="lifecycle-tbody">
                         </tbody>
                     </table>
                 </div>
@@ -375,23 +391,36 @@
                     <h3 class="text-white font-bold flex items-center gap-2">
                         <i class="fas fa-list text-primary-400"></i> Installed Software
                     </h3>
-                    <input type="text" id="software-search" placeholder="Filter inventory..."
-                        class="bg-slate-900 border-slate-700 text-white rounded-lg px-4 py-1.5 text-xs w-48">
+                    <div class="se-search-wrapper se-search-wrapper--compact w-48 sm:w-56">
+                        <span class="se-search-icon" aria-hidden="true">
+                            {{ icon('search', class='w-3.5 h-3.5') }}
+                        </span>
+                        <input type="text" id="software-search" placeholder="Filter inventory..."
+                            class="se-search-input se-search-input--compact w-full"
+                            autocomplete="off"
+                            spellcheck="false"
+                            role="searchbox"
+                            aria-label="Filter installed software inventory">
+                    </div>
                 </div>
                 <div class="min-h-[300px] text-center py-12" id="inventory-loading">
                     <i class="fas fa-spinner fa-spin text-2xl text-slate-500"></i>
                 </div>
-                <div id="inventory-table-container" class="hidden overflow-x-auto max-h-[600px]">
-                    <table class="w-full text-left text-sm">
-                        <thead
-                            class="text-slate-500 uppercase text-[10px] font-bold sticky top-0 bg-slate-800 z-10 border-b border-slate-700">
+                <div id="inventory-table-container" class="hidden se-table-container max-h-[600px]">
+                    <table class="se-table">
+                        <colgroup>
+                            <col class="col-invdet-name">
+                            <col class="col-invdet-version">
+                            <col class="col-invdet-pub">
+                        </colgroup>
+                        <thead>
                             <tr>
-                                <th class="pb-3 px-2">Software Name</th>
-                                <th class="pb-3 px-2">Version</th>
-                                <th class="pb-3 px-2">Publisher</th>
+                                <th class="se-align-left">Software Name</th>
+                                <th class="se-align-left">Version</th>
+                                <th class="se-align-left">Publisher</th>
                             </tr>
                         </thead>
-                        <tbody id="inventory-tbody" class="divide-y divide-slate-700/50">
+                        <tbody id="inventory-tbody">
                             <!-- Populated by JS -->
                         </tbody>
                     </table>
@@ -431,7 +460,7 @@
                     </div>
                     <h2 class="text-2xl font-bold text-white mb-4">Failed to load asset details</h2>
                     <p class="text-slate-400 mb-8">${error.message}. The device may not have reported hardware telemetry yet.</p>
-                    <a href="/dashboard/assets" class="px-6 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors">Back to Assets</a>
+                    <a href="/dashboard/assets" class="btn btn-secondary">Back to Assets</a>
                 </div>
             `;
         }
@@ -491,12 +520,12 @@
         document.getElementById('hw-cpu-speed').textContent = `${(data.hardware.cpu_speed_mhz / 1000).toFixed(2)} GHz`;
         document.getElementById('hw-ram-total').textContent = `${Math.round(data.hardware.ram_total_gb)} GB`;
         document.getElementById('hw-ram-slots').textContent = `${data.hardware.ram_slots_used} / ${data.hardware.ram_slots_total}`;
-        
+
         // GPU Card - Handle multiple GPUs
         const gpus = data.hardware.gpus || [];
         const hwGpuEl = document.getElementById('hw-gpu');
         const hwGpuMemEl = document.getElementById('hw-gpu-mem');
-        
+
         if (gpus.length > 0) {
             if (gpus.length === 1) {
                 // Single GPU
@@ -509,7 +538,7 @@
                 hwGpuEl.textContent = `${gpus.length} GPUs detected`;
                 hwGpuEl.title = gpuNames;
                 hwGpuMemEl.textContent = `Total VRAM: ${totalVRAM.toFixed(1)} GB`;
-                
+
                 // Make card clickable to show all GPUs
                 document.querySelector('[id="tab-hardware"] .bg-slate-800:nth-child(3)').style.cursor = 'pointer';
             }
@@ -535,17 +564,17 @@
 
             return `
                 <tr>
-                    <td class="py-4 font-bold text-white">${d.DeviceID}</td>
-                    <td class="py-4 text-slate-400">${d.VolumeName || 'Local Disk'}</td>
-                    <td class="py-4 text-slate-400 text-xs">${d.FileSystem || 'Unknown'}</td>
-                    <td class="py-4 text-slate-300 font-mono">${(d.Size / (1024 ** 3)).toFixed(1)} GB</td>
-                    <td class="py-4 text-slate-300 font-mono">${(d.FreeSpace / (1024 ** 3)).toFixed(1)} GB</td>
-                    <td class="py-4">
+                    <td class="col-hwdisk-drive se-align-left font-bold text-white">${d.DeviceID}</td>
+                    <td class="col-hwdisk-label se-align-left text-slate-400 se-cell-truncate" title="${d.VolumeName || 'Local Disk'}">${d.VolumeName || 'Local Disk'}</td>
+                    <td class="col-hwdisk-type se-align-left text-slate-400 text-xs">${d.FileSystem || 'Unknown'}</td>
+                    <td class="col-hwdisk-cap se-align-right text-slate-300 font-mono">${(d.Size / (1024 ** 3)).toFixed(1)} GB</td>
+                    <td class="col-hwdisk-free se-align-right text-slate-300 font-mono">${(d.FreeSpace / (1024 ** 3)).toFixed(1)} GB</td>
+                    <td class="col-hwdisk-usage se-align-left">
                         <div class="flex items-center gap-3">
                             <div class="flex-1 bg-slate-700 rounded-full h-1.5 w-24">
                                 <div class="${usageColor} h-1.5 rounded-full" style="width: ${usagePercent}%"></div>
                             </div>
-                            <span class="text-[10px] text-slate-500">${usagePercent}%</span>
+                            <span class="text-[10px] text-slate-400 font-mono">${usagePercent}%</span>
                         </div>
                     </td>
                 </tr>
@@ -625,10 +654,10 @@
                 tbody.innerHTML = '<tr><td colspan="3" class="py-12 text-center text-slate-500 italic">No software inventory found.</td></tr>';
             } else {
                 tbody.innerHTML = data.map(item => `
-                    <tr class="hover:bg-slate-700/30 transition-colors">
-                        <td class="py-3 px-2 text-white font-medium">${item.name}</td>
-                        <td class="py-3 px-2 font-mono text-xs text-slate-400">${item.version || '--'}</td>
-                        <td class="py-3 px-2 text-slate-500">${item.publisher || '--'}</td>
+                    <tr>
+                        <td class="col-invdet-name se-align-left text-white font-medium se-cell-truncate" title="${item.name || ''}">${item.name || '--'}</td>
+                        <td class="col-invdet-version se-align-left font-mono text-xs text-slate-400 se-cell-truncate" title="${item.version || '--'}">${item.version || '--'}</td>
+                        <td class="col-invdet-pub se-align-left text-slate-400 se-cell-truncate" title="${item.publisher || '--'}">${item.publisher || '--'}</td>
                     </tr>
                 `).join('');
             }
@@ -699,21 +728,21 @@
             tbody.innerHTML = data.map(item => {
                 const cfg = statusConfig[item.status] || statusConfig['unknown'];
                 return `
-                    <tr class="hover:bg-slate-700/30 transition-colors">
-                        <td class="py-3 px-2 text-white font-medium">${item.product_name}</td>
-                        <td class="py-3 px-2 font-mono text-xs text-slate-400">${item.installed_version || '--'}</td>
-                        <td class="py-3 px-2">
+                    <tr>
+                        <td class="col-life-product se-align-left text-white font-medium se-cell-truncate" title="${item.product_name || ''}">${item.product_name}</td>
+                        <td class="col-life-version se-align-left font-mono text-xs text-slate-400 se-cell-truncate" title="${item.installed_version || '--'}">${item.installed_version || '--'}</td>
+                        <td class="col-life-status se-align-center">
                             <span class="compliance-pill ${cfg.pill}">
                                 <i class="${cfg.icon} mr-1"></i> ${cfg.label}
                             </span>
                         </td>
-                        <td class="py-3 px-2 text-slate-400 text-xs">${item.eol_date || 'N/A'}</td>
-                        <td class="py-3 px-2">
-                            <div class="flex items-center gap-2">
+                        <td class="col-life-eol se-align-center text-slate-400 text-xs font-mono">${item.eol_date || 'N/A'}</td>
+                        <td class="col-life-risk se-align-center">
+                            <div class="flex items-center justify-center gap-2">
                                 <div class="w-16 bg-slate-700 h-1.5 rounded-full overflow-hidden">
                                     <div class="h-full ${item.risk_score > 30 ? 'bg-red-500' : item.risk_score > 10 ? 'bg-yellow-500' : 'bg-green-500'}" style="width: ${(item.risk_score / 50) * 100}%"></div>
                                 </div>
-                                <span class="text-[10px] font-bold text-slate-400">${item.risk_score}</span>
+                                <span class="text-[10px] font-bold text-slate-400 font-mono">${item.risk_score}</span>
                             </div>
                         </td>
                     </tr>

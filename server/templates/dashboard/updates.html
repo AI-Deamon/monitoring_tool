@@ -1,15 +1,133 @@
 {% extends "dashboard/base.html" %}
+{% from "components/icons.html" import icon %}
 
 {% block title %}Updates Dashboard - SentinelEdge{% endblock %}
 
 {% block extra_head %}
 <style nonce="{{ csp_nonce() }}">
+    /* Four-Card Compact Metrics Grid */
+    .update-metrics-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        align-items: stretch;
+        width: 100%;
+        margin-bottom: 1.5rem;
+    }
+
+    @media (min-width: 600px) {
+        .update-metrics-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+    }
+
+    @media (min-width: 1024px) {
+        .update-metrics-grid {
+            grid-template-columns: minmax(135px, 0.75fr) minmax(135px, 0.75fr) minmax(240px, 1.25fr) minmax(320px, 1.65fr);
+            gap: 1rem;
+        }
+    }
+
     .update-card {
-        transition: all 0.2s ease-in-out;
+        position: relative;
+        background: var(--surface, #ffffff);
+        border: 1px solid var(--border, #e2e8f0);
+        border-radius: var(--radius-lg, 16px);
+        box-shadow: var(--shadow-xs, 0 1px 2px rgba(0, 0, 0, 0.04));
+        transition: transform var(--transition-fast, 150ms ease), box-shadow var(--transition-fast, 150ms ease), border-color var(--transition-fast, 150ms ease);
+        padding: 1rem 1.125rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        min-width: 0;
+        box-sizing: border-box;
+        container-type: inline-size;
+        container-name: updatecard;
+        overflow: visible;
     }
 
     .update-card:hover {
         transform: translateY(-2px);
+        box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.06));
+        border-color: var(--border-strong, #cbd5e1);
+    }
+
+    .update-card:focus-within {
+        border-color: var(--primary, #6366f1);
+    }
+
+    .update-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.75rem;
+        min-height: 24px;
+    }
+
+    .update-pill-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.2rem 0.55rem;
+        border-radius: var(--radius-full, 9999px);
+        background: var(--bg-secondary, #f1f5f9);
+        border: 1px solid var(--border, #e2e8f0);
+        font-size: 0.6875rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary, #475569);
+        user-select: none;
+    }
+
+    html.dark .update-pill-badge,
+    [data-theme="dark"] .update-pill-badge {
+        background: rgba(30, 41, 59, 0.75);
+        border-color: rgba(51, 65, 85, 0.8);
+        color: #94a3b8;
+    }
+
+    .update-icon-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: var(--radius-md, 8px);
+        background: rgba(99, 102, 241, 0.1);
+        color: var(--primary, #6366f1);
+    }
+
+    html.dark .update-icon-pill,
+    [data-theme="dark"] .update-icon-pill {
+        background: rgba(99, 102, 241, 0.2);
+        color: #818cf8;
+    }
+
+    .update-card-body {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        min-height: 0;
+        min-width: 0;
+    }
+
+    .update-scroll-list {
+        max-height: 125px;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: var(--border-strong, #cbd5e1) transparent;
+    }
+
+    .update-scroll-list::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    .update-scroll-list::-webkit-scrollbar-thumb {
+        background: var(--border-strong, #cbd5e1);
+        border-radius: 4px;
     }
 
     .pulse-blue {
@@ -17,7 +135,6 @@
     }
 
     @keyframes pulse-blue {
-
         0%,
         100% {
             opacity: 1;
@@ -29,33 +146,34 @@
     }
 
     .tab-active {
-        border-bottom: 2px solid #3b82f6;
-        color: #3b82f6;
+        border-bottom: 2px solid var(--primary);
+        color: var(--primary);
         font-weight: 700;
     }
 
     .tab-inactive {
         border-bottom: 2px solid transparent;
-        color: #6b7280;
+        color: var(--text-secondary);
     }
 
     .tab-inactive:hover {
-        color: #374151;
+        color: var(--text-primary);
     }
 
     .stale-dot {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #ef4444;
+        background: var(--danger);
         display: inline-block;
         animation: pulse-blue 1.5s infinite;
     }
 
     .toggle-switch {
         position: relative;
-        width: 44px;
-        height: 24px;
+        width: 38px;
+        height: 20px;
+        flex-shrink: 0;
     }
 
     .toggle-switch input {
@@ -68,49 +186,228 @@
         position: absolute;
         cursor: pointer;
         inset: 0;
-        background: #d1d5db;
-        border-radius: 24px;
-        transition: 0.3s;
+        background: var(--border-strong, #cbd5e1);
+        border-radius: var(--radius-full, 9999px);
+        transition: var(--transition-base, 200ms ease);
     }
 
     .toggle-slider:before {
         content: "";
         position: absolute;
-        height: 18px;
-        width: 18px;
+        height: 14px;
+        width: 14px;
         left: 3px;
         bottom: 3px;
-        background: white;
-        border-radius: 50%;
-        transition: 0.3s;
+        background: var(--surface, #ffffff);
+        border-radius: var(--radius-full, 9999px);
+        transition: var(--transition-base, 200ms ease);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
     }
 
     input:checked+.toggle-slider {
-        background: #3b82f6;
+        background: var(--primary, #6366f1);
     }
 
     input:checked+.toggle-slider:before {
-        transform: translateX(20px);
+        transform: translateX(18px);
+    }
+
+    /* Auto-Update Policy Setting Rows */
+    .policy-toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 24px;
+    }
+
+    .policy-channel-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        min-height: 28px;
+        min-width: 0;
+    }
+
+    .policy-channel-row label {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+
+    .policy-channel-row select {
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 125px;
+        height: 28px;
+        box-sizing: border-box;
+    }
+
+    @container (max-width: 210px) {
+        .policy-channel-row {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.25rem;
+        }
+
+        .policy-channel-row select {
+            max-width: 100%;
+            width: 100%;
+        }
+    }
+
+    /* Window times row - responsive shrink and stacking */
+    .window-times-row {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+        padding-top: 0.25rem;
+        overflow: hidden;
+    }
+
+    .window-times-row.hidden,
+    #window-times.hidden {
+        display: none !important;
+    }
+
+    .window-time-input {
+        flex: 1 1 0;
+        min-width: 0;
+        width: 100%;
+        padding: 0.2rem 0.25rem;
+        border: 1px solid var(--border-strong, #cbd5e1);
+        background: var(--surface, #ffffff);
+        color: var(--text-primary, #0f172a);
+        border-radius: var(--radius-sm, 6px);
+        font-size: 0.75rem;
+        height: 28px;
+        box-sizing: border-box;
+    }
+
+    html.dark .window-time-input,
+    [data-theme="dark"] .window-time-input {
+        background: var(--bg-tertiary, #334155);
+        border-color: var(--border, #475569);
+        color: #f8fafc;
+    }
+
+    .window-time-separator {
+        flex: 0 0 auto;
+        font-size: 0.75rem;
+        color: var(--text-secondary, #64748b);
+        padding: 0 0.125rem;
+        user-select: none;
+    }
+
+    @container (max-width: 235px) {
+        .window-times-row {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.25rem;
+        }
+
+        .window-time-separator {
+            text-align: center;
+            font-size: 0.6875rem;
+            padding: 0;
+        }
+    }
+
+    /* Deploy Controls Layout: version select & Deploy All on one row */
+    .deploy-action-row {
+        display: flex;
+        gap: 0.625rem;
+        align-items: center;
+        min-width: 0;
+        width: 100%;
+    }
+
+    .deploy-action-row select {
+        flex: 1 1 auto;
+        min-width: 0;
+        box-sizing: border-box;
+        height: 32px;
+    }
+
+    .deploy-action-row .deploy-all-btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
+        height: 32px;
+        padding: 0 0.875rem;
+    }
+
+    @container (max-width: 250px) {
+        .deploy-action-row {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.375rem;
+        }
+
+        .deploy-action-row select,
+        .deploy-action-row .deploy-all-btn {
+            width: 100%;
+        }
+    }
+
+    /* Canary Slider Constraints */
+    .canary-range-wrapper {
+        width: 100%;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        padding: 4px 2px;
     }
 
     .canary-range {
         -webkit-appearance: none;
         appearance: none;
         width: 100%;
+        max-width: 100%;
         height: 6px;
-        border-radius: 5px;
-        background: #e5e7eb;
+        border-radius: var(--radius-sm, 6px);
+        background: var(--bg-tertiary, #e2e8f0);
         outline: none;
+        box-sizing: border-box;
+        display: block;
+        margin: 0;
+        cursor: pointer;
     }
 
     .canary-range::-webkit-slider-thumb {
         -webkit-appearance: none;
         appearance: none;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background: #3b82f6;
+        width: 16px;
+        height: 16px;
+        border-radius: var(--radius-full, 9999px);
+        background: var(--primary, #6366f1);
         cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        transition: transform 0.1s ease;
+    }
+
+    .canary-range::-webkit-slider-thumb:hover {
+        transform: scale(1.15);
+    }
+
+    .canary-range::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        border-radius: var(--radius-full, 9999px);
+        background: var(--primary, #6366f1);
+        cursor: pointer;
+        border: none;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    /* Table min-widths for container scroll */
+    #updates-table {
+        min-width: 820px;
+    }
+
+    #history-table {
+        min-width: 760px;
     }
 </style>
 {% endblock %}
@@ -128,11 +425,7 @@
     <div id="stale-alert"
         class="hidden mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl">
         <div class="flex items-center gap-3">
-            <svg class="w-5 h-5 text-amber-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fill-rule="evenodd"
-                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                    clip-rule="evenodd" />
-            </svg>
+            {{ icon('warning', class='w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0') }}
             <div>
                 <span class="font-bold text-amber-800 dark:text-amber-300 text-sm">Stale Updates Detected</span>
                 <span id="stale-alert-text" class="text-amber-700 dark:text-amber-400 text-sm ml-1"></span>
@@ -144,13 +437,6 @@
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-                <span class="p-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                        </path>
-                    </svg>
-                </span>
                 Agent Update Management
             </h1>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Monitor deployment progress and control fleet-wide
@@ -158,120 +444,119 @@
         </div>
         <div class="flex items-center gap-3">
             <button id="refresh-btn" onclick="initUpdates()"
-                class="p-2 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 transition-colors bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                    </path>
-                </svg>
+                class="btn btn-icon btn-secondary"
+                title="Refresh Updates">
+                {{ icon('refresh', class='w-5 h-5') }}
             </button>
         </div>
     </div>
 
     <!-- Metrics Grid (4 cards) -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <!-- Fleet Versioning -->
-        <div
-            class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm update-card">
-            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">Fleet
-                Version Distribution</h3>
-            <div id="version-dist" class="space-y-3">
-                <div class="animate-pulse flex items-center justify-between">
-                    <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
-                    <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-8"></div>
+    <div class="update-metrics-grid mb-6">
+        <!-- Fleet Version Distribution -->
+        <div class="update-card" id="card-version-dist">
+            <div class="update-card-header">
+                <span class="update-pill-badge">
+                    Fleet Versions
+                </span>
+            </div>
+            <div id="version-dist" class="update-card-body update-scroll-list space-y-1.5">
+                <div class="animate-pulse flex items-center justify-between py-1 px-1.5">
+                    <div class="h-3.5 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+                    <div class="h-3.5 bg-gray-200 dark:bg-gray-700 rounded w-6"></div>
                 </div>
             </div>
         </div>
 
-        <!-- Update Status -->
-        <div
-            class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm update-card">
-            <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">Current
-                Update Status</h3>
-            <div id="status-dist" class="space-y-3">
-                <div class="animate-pulse flex items-center justify-between">
-                    <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
-                    <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-8"></div>
+        <!-- Current Update Status -->
+        <div class="update-card" id="card-status-dist">
+            <div class="update-card-header">
+                <span class="update-pill-badge">
+                    Update Status
+                </span>
+            </div>
+            <div id="status-dist" class="update-card-body update-scroll-list space-y-1.5">
+                <div class="animate-pulse flex items-center justify-between py-1 px-1.5">
+                    <div class="h-3.5 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+                    <div class="h-3.5 bg-gray-200 dark:bg-gray-700 rounded w-6"></div>
                 </div>
             </div>
         </div>
 
-        <!-- Global Policy -->
-        <div
-            class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm update-card">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Auto-Update
-                    Policy</h3>
+        <!-- Auto-Update Policy -->
+        <div class="update-card" id="card-auto-update-policy">
+            <div class="update-card-header">
+                <span class="update-pill-badge">
+                    Auto-Update Policy
+                </span>
             </div>
-            <div id="policy-card" class="space-y-3">
-                <div class="flex items-center justify-between">
-                    <span class="text-xs text-gray-600 dark:text-gray-300">Enabled</span>
+            <div id="policy-card" class="update-card-body space-y-2">
+                <div class="policy-toggle-row">
+                    <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Enabled</span>
                     <label class="toggle-switch">
                         <input type="checkbox" id="policy-enabled" onchange="savePolicy()">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
-                <div class="flex items-center justify-between">
-                    <span class="text-xs text-gray-600 dark:text-gray-300">Channel</span>
+                <div class="policy-channel-row">
+                    <label for="policy-channel" class="text-xs text-gray-700 dark:text-gray-300 font-medium">Channel</label>
                     <select id="policy-channel" onchange="savePolicy()"
-                        class="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-gray-700 dark:text-gray-300">
+                        class="text-xs px-2.5 py-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 font-medium cursor-pointer">
                         <option value="stable">Stable</option>
                         <option value="beta">Beta</option>
                         <option value="edge">Edge</option>
                     </select>
                 </div>
-                <div class="flex items-center justify-between">
-                    <span class="text-xs text-gray-600 dark:text-gray-300">Window</span>
+                <div class="policy-toggle-row">
+                    <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Window</span>
                     <label class="toggle-switch">
                         <input type="checkbox" id="policy-window" onchange="savePolicy()">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
-                <div id="window-times" class="hidden flex items-center gap-2 text-xs">
+                <div id="window-times" class="hidden window-times-row">
                     <input type="time" id="policy-window-start" value="02:00"
-                        class="px-1 py-0.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-xs">
-                    <span class="text-gray-400">to</span>
+                        class="window-time-input" aria-label="Window start time">
+                    <span class="window-time-separator">to</span>
                     <input type="time" id="policy-window-end" value="06:00"
-                        class="px-1 py-0.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-xs">
+                        class="window-time-input" aria-label="Window end time">
                 </div>
             </div>
         </div>
 
         <!-- Deploy Controls -->
-        <div
-            class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm update-card">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Deploy
-                    Controls</h3>
-                <span class="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded">
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd"
-                            d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z"
-                            clip-rule="evenodd"></path>
-                    </svg>
+        <div class="update-card" id="card-deploy-controls">
+            <div class="update-card-header">
+                <span class="update-pill-badge">
+                    Deploy Controls
+                </span>
+                <span class="update-icon-pill">
+                    {{ icon('bolt', class='w-3.5 h-3.5', variant='solid') }}
                 </span>
             </div>
-            <div class="flex flex-col gap-3">
-                <div class="flex gap-2">
+            <div class="update-card-body flex flex-col flex-1">
+                <div class="deploy-action-row">
                     <select id="target-version-select"
-                        class="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500">
+                        class="px-2.5 py-1.5 text-xs font-medium border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 cursor-pointer">
                         <option value="">Select version...</option>
                     </select>
                     <button onclick="setTargetAll()"
-                        class="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-500/20">
+                        class="btn btn-primary deploy-all-btn text-xs py-1.5 px-3 whitespace-nowrap">
                         Deploy All
                     </button>
                 </div>
                 <!-- Canary rollout -->
-                <div class="border-t border-gray-100 dark:border-gray-700 pt-3">
+                <div class="border-t border-gray-100 dark:border-gray-700/60 pt-3.5 mt-3 flex flex-col justify-between flex-1">
                     <div class="flex items-center justify-between mb-2">
-                        <span class="text-xs text-gray-500 dark:text-gray-400">Canary Rollout</span>
-                        <span id="canary-pct-label" class="text-xs font-bold text-blue-600">10%</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 font-medium">Canary Rollout</span>
+                        <span id="canary-pct-label" class="text-xs font-bold text-blue-600 dark:text-blue-400 font-mono px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 border border-blue-200/50 dark:border-blue-800/40">10%</span>
                     </div>
-                    <input type="range" id="canary-range" class="canary-range" min="1" max="100" value="10"
-                        oninput="document.getElementById('canary-pct-label').textContent = this.value + '%'">
+                    <div class="canary-range-wrapper my-auto py-1">
+                        <input type="range" id="canary-range" class="canary-range" min="1" max="100" value="10"
+                            oninput="document.getElementById('canary-pct-label').textContent = this.value + '%'">
+                    </div>
                     <button onclick="canaryDeploy()"
-                        class="mt-2 w-full px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-all">
+                        class="btn btn-warning w-full text-xs py-2 px-3 mt-3">
                         Canary Deploy
                     </button>
                 </div>
@@ -293,41 +578,45 @@
             class="p-4 border-b border-gray-200 dark:border-gray-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <h3 class="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider px-2">Deployment Status
                 List</h3>
-            <div class="relative">
-                <input type="text" id="update-search" placeholder="Search agent name or ID..." oninput="filterAgents()"
-                    class="pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-sm focus:ring-2 focus:ring-blue-500 w-full md:w-64 transition-all">
-                <span class="absolute left-3 top-2.5 text-gray-400">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                    </svg>
+            <div class="se-search-wrapper w-full md:w-64">
+                <span class="se-search-icon" aria-hidden="true">
+                    {{ icon('search', class='w-4 h-4') }}
                 </span>
+                <input type="text" id="update-search" placeholder="Search agent name or ID..." oninput="filterAgents()"
+                    class="se-search-input w-full"
+                    autocomplete="off"
+                    spellcheck="false"
+                    role="searchbox"
+                    aria-label="Search agent name or ID">
             </div>
         </div>
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
+        <div class="se-table-container min-h-[400px]">
+            <table class="se-table" id="updates-table">
+                <colgroup>
+                    <col class="col-upd-agent">
+                    <col class="col-upd-curver">
+                    <col class="col-upd-tgtver">
+                    <col class="col-upd-status">
+                    <col class="col-upd-attempts">
+                    <col class="col-upd-sync">
+                    <col class="col-upd-actions">
+                </colgroup>
                 <thead>
-                    <tr
-                        class="bg-gray-50 dark:bg-gray-900/20 text-gray-500 dark:text-gray-400 text-[10px] font-bold uppercase tracking-widest border-b border-gray-200 dark:border-gray-700">
-                        <th class="px-6 py-4">Agent Name & User</th>
-                        <th class="px-6 py-4">Current Version</th>
-                        <th class="px-6 py-4">Target Version</th>
-                        <th class="px-6 py-4">Update Status</th>
-                        <th class="px-6 py-4 text-center">Attempts</th>
-                        <th class="px-6 py-4">Last Sync / Error</th>
-                        <th class="px-6 py-4 text-right">Actions</th>
+                    <tr>
+                        <th class="se-align-left">Agent Name & User</th>
+                        <th class="se-align-center">Current Version</th>
+                        <th class="se-align-center">Target Version</th>
+                        <th class="se-align-center">Update Status</th>
+                        <th class="se-align-center">Attempts</th>
+                        <th class="se-align-left">Last Sync / Error</th>
+                        <th class="se-align-right">Actions</th>
                     </tr>
                 </thead>
-                <tbody id="updates-list-body" class="divide-y divide-gray-100 dark:divide-gray-700"></tbody>
+                <tbody id="updates-list-body"></tbody>
             </table>
         </div>
         <div id="no-update-results" class="hidden py-16 text-center text-gray-500 dark:text-gray-400">
-            <svg class="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor"
-                viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
-                </path>
-            </svg>
+            {{ icon('warning', class='w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600') }}
             <p class="text-lg font-medium">No agents match your filters</p>
         </div>
     </div>
@@ -335,27 +624,64 @@
     <!-- Tab: History Panel (hidden by default) -->
     <div id="panel-history"
         class="hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden min-h-[400px]">
-        <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-            <h3 class="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider px-2">Update Audit
+        <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700/60">
+            <h3 class="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">Update Audit
                 History</h3>
         </div>
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
+        <div class="se-table-container min-h-[400px]">
+            <table class="se-table" id="history-table">
+                <colgroup>
+                    <col class="col-hist-time">
+                    <col class="col-hist-agent">
+                    <col class="col-hist-ver">
+                    <col class="col-hist-status">
+                    <col class="col-hist-error">
+                </colgroup>
                 <thead>
-                    <tr
-                        class="bg-gray-50 dark:bg-gray-900/20 text-gray-500 dark:text-gray-400 text-[10px] font-bold uppercase tracking-widest border-b border-gray-200 dark:border-gray-700">
-                        <th class="px-6 py-4">Time</th>
-                        <th class="px-6 py-4">Agent</th>
-                        <th class="px-6 py-4">From → To</th>
-                        <th class="px-6 py-4">Status</th>
-                        <th class="px-6 py-4">Error</th>
+                    <tr>
+                        <th class="col-hist-time se-align-left">TIME</th>
+                        <th class="col-hist-agent se-align-left">AGENT</th>
+                        <th class="col-hist-ver se-align-left">FROM → TO</th>
+                        <th class="col-hist-status se-align-left">STATUS</th>
+                        <th class="col-hist-error se-align-left">ERROR</th>
                     </tr>
                 </thead>
-                <tbody id="history-list-body" class="divide-y divide-gray-100 dark:divide-gray-700"></tbody>
+                <tbody id="history-list-body"></tbody>
             </table>
         </div>
         <div id="no-history" class="hidden py-16 text-center text-gray-500 dark:text-gray-400">
             <p class="text-lg font-medium">No update history yet</p>
+        </div>
+    </div>
+
+    <!-- Error Detail Modal -->
+    <div id="error-detail-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity" role="dialog" aria-modal="true" aria-labelledby="error-modal-title" onclick="if(event.target===this)closeErrorModal()">
+        <div class="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-2xl overflow-hidden p-6" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-700">
+                <h3 id="error-modal-title" class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span class="p-1.5 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-lg">
+                        {{ icon('warning', class='w-5 h-5') }}
+                    </span>
+                    Update Audit Error Details
+                </h3>
+                <button onclick="closeErrorModal()" class="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 p-1 rounded-lg" aria-label="Close modal">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="mt-4">
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">Error Message:</div>
+                <pre id="error-modal-content" class="bg-gray-900 text-rose-300 p-4 rounded-lg font-mono text-xs overflow-x-auto whitespace-pre-wrap break-words max-h-80 select-all"></pre>
+            </div>
+            <div class="mt-6 flex justify-end gap-3">
+                <button id="error-modal-copy-btn" onclick="copyErrorContent()" class="btn btn-secondary text-xs">
+                    Copy to Clipboard
+                </button>
+                <button onclick="closeErrorModal()" class="btn btn-primary text-xs">
+                    Close
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -363,6 +689,10 @@
 
 {% block extra_js %}
 <script nonce="{{ csp_nonce() }}">
+    const HEROICON_ACTION_RETRY = `{{ icon('refresh', class='w-4 h-4') | safe }}`;
+    const HEROICON_ACTION_TARGET = `{{ icon('edit', class='w-4 h-4') | safe }}`;
+    const HEROICON_ACTION_CHECK = `{{ icon('bolt', class='w-4 h-4') | safe }}`;
+
     let allAgents = [];
 
     async function initUpdates() {
@@ -391,32 +721,43 @@
     function updateSummaryMetrics(data) {
         const vDiv = document.getElementById('version-dist');
         const vs = data.version_distribution || {};
-        vDiv.innerHTML = Object.entries(vs)
-            .sort((a, b) => b[0].localeCompare(a[0]))
-            .map(([v, n]) => `
-                <div class="flex items-center justify-between text-sm py-1 border-b border-gray-50 dark:border-gray-700/50 last:border-0">
-                    <span class="font-mono text-gray-600 dark:text-gray-300">v${v}</span>
-                    <span class="font-bold text-gray-900 dark:text-white px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">${n}</span>
-                </div>
-            `).join('') || '<div class="text-xs text-gray-400 italic">No version data</div>';
+        const vEntries = Object.entries(vs).sort((a, b) => b[0].localeCompare(a[0]));
+
+        vDiv.innerHTML = vEntries.map(([v, n]) => `
+            <div class="flex items-center justify-between text-xs py-1.5 px-2 border-b border-gray-100/60 dark:border-gray-700/40 last:border-0 hover:bg-gray-50/60 dark:hover:bg-gray-750/30 transition-colors">
+                <span class="font-mono font-medium text-gray-700 dark:text-gray-300">v${v}</span>
+                <span class="font-bold text-gray-900 dark:text-white px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono shrink-0">${n}</span>
+            </div>
+        `).join('') || '<div class="text-xs text-gray-400 dark:text-gray-500 italic py-2">No version data</div>';
 
         const sDiv = document.getElementById('status-dist');
         const ss = data.status_breakdown || {};
         const colors = {
-            'up_to_date': 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20',
-            'pending': 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20',
-            'downloading': 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20',
-            'installing': 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20',
-            'failed': 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20',
-            'rolled_back': 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20'
+            'up_to_date': 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/25 border-emerald-200/50 dark:border-emerald-800/40',
+            'pending': 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/25 border-amber-200/50 dark:border-amber-800/40',
+            'downloading': 'text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/25 border-blue-200/50 dark:border-blue-800/40',
+            'installing': 'text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/25 border-indigo-200/50 dark:border-indigo-800/40',
+            'failed': 'text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/25 border-rose-200/50 dark:border-rose-800/40',
+            'rolled_back': 'text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/25 border-rose-200/50 dark:border-rose-800/40'
+        };
+        const dotColors = {
+            'up_to_date': 'bg-emerald-500',
+            'pending': 'bg-amber-500',
+            'downloading': 'bg-blue-500 pulse-blue',
+            'installing': 'bg-indigo-500 pulse-blue',
+            'failed': 'bg-rose-500',
+            'rolled_back': 'bg-rose-500'
         };
 
         sDiv.innerHTML = Object.entries(ss).map(([s, n]) => `
-            <div class="flex items-center justify-between py-1 px-2 mb-1 rounded h-8">
-                <span class="text-xs font-semibold capitalize ${colors[s]?.split(' ')[0] || 'text-gray-500'}">${s.replace('_', ' ')}</span>
-                <span class="font-bold ${colors[s] || 'bg-gray-100'} px-2 py-0.5 rounded text-[10px]">${n}</span>
+            <div class="flex items-center justify-between py-1 px-1.5 rounded-lg border-b border-gray-100/60 dark:border-gray-700/40 last:border-0 hover:bg-gray-50/60 dark:hover:bg-gray-750/30 transition-colors">
+                <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="w-2 h-2 rounded-full ${dotColors[s] || 'bg-gray-400'} shrink-0"></span>
+                    <span class="text-xs font-semibold capitalize ${colors[s]?.split(' ')[0] || 'text-gray-600 dark:text-gray-300'} truncate">${s.replace(/_/g, ' ')}</span>
+                </div>
+                <span class="font-bold ${colors[s] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'} px-2 py-0.5 rounded text-[11px] font-mono shrink-0">${n}</span>
             </div>
-        `).join('') || '<div class="text-xs text-gray-400 italic">No status data</div>';
+        `).join('') || '<div class="text-xs text-gray-400 dark:text-gray-500 italic py-2">No status data</div>';
     }
 
     function populateVersionDropdown(versions) {
@@ -496,56 +837,50 @@
             const staleMarker = a.is_stale_update ? '<span class="stale-dot ml-1" title="Stuck >30 min"></span>' : '';
 
             return `
-                <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
-                    <td class="px-6 py-4">
-                        <div class="font-bold text-gray-900 dark:text-white mb-0.5">${a.hostname}</div>
-                        <div class="flex items-center gap-1.5 text-[10px] text-gray-500 uppercase tracking-tighter">
+                <tr>
+                    <td class="col-upd-agent se-align-left">
+                        <div class="font-bold text-gray-900 dark:text-white mb-0.5 se-cell-truncate" title="${a.hostname}">${a.hostname}</div>
+                        <div class="flex items-center gap-1.5 text-[10px] text-gray-500 uppercase tracking-tighter se-cell-truncate" title="${a.username || '—'}">
                             <span class="w-1.5 h-1.5 rounded-full ${a.is_online ? 'bg-emerald-500' : 'bg-gray-300'}"></span>
                             ${a.username || '—'}
                         </div>
                     </td>
-                    <td class="px-6 py-4">
+                    <td class="col-upd-curver se-align-center">
                         <span class="text-xs font-mono font-bold px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-gray-700 dark:text-gray-300">
                             v${a.version || '0.0.0'}
                         </span>
                     </td>
-                    <td class="px-6 py-4">
+                    <td class="col-upd-tgtver se-align-center">
                         <span class="text-xs font-mono px-2 py-1 border border-dashed border-blue-300 dark:border-blue-700/50 text-blue-600 dark:text-blue-400 rounded">
                             ${a.target_version ? 'v' + a.target_version : '---'}
                         </span>
                     </td>
-                    <td class="px-6 py-4">
+                    <td class="col-upd-status se-align-center">
                         ${getStatusBadge(status)}${staleMarker}
                     </td>
-                    <td class="px-6 py-4 text-center">
-                        <span class="text-xs font-medium ${a.update_attempts > 2 ? 'text-rose-500 font-bold' : 'text-gray-500'}">
+                    <td class="col-upd-attempts se-align-center">
+                        <span class="text-xs font-mono font-medium ${a.update_attempts > 2 ? 'text-rose-500 font-bold' : 'text-gray-500'}">
                             ${a.update_attempts || 0}
                         </span>
                     </td>
-                    <td class="px-6 py-4 max-w-xs">
-                        <div class="text-[10px] font-semibold text-gray-700 dark:text-gray-400 uppercase mb-0.5">
+                    <td class="col-upd-sync se-align-left">
+                        <div class="text-[10px] font-semibold text-gray-700 dark:text-gray-400 uppercase mb-0.5 font-mono">
                             ${formatRelativeTime(a.last_update_check)}
                         </div>
-                        ${a.last_update_error ? `<div class="text-[10px] text-rose-500 truncate" title="${a.last_update_error}">${a.last_update_error}</div>` : '<div class="text-[10px] text-emerald-500">Normal Operation</div>'}
+                        ${a.last_update_error ? `<div class="text-[10px] text-rose-500 se-cell-truncate" title="${a.last_update_error}">${a.last_update_error}</div>` : '<div class="text-[10px] text-emerald-500">Normal Operation</div>'}
                     </td>
-                    <td class="px-6 py-4 text-right">
+                    <td class="col-upd-actions se-align-right">
                         <div class="flex items-center justify-end gap-2">
                             ${(status === 'failed' || status === 'rolled_back' || status === 'installing' || status === 'downloading' || status === 'pending') ? `
                                 <button onclick="retryUpdate('${a.agent_id}')" class="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded transition-colors" title="${(status === 'installing' || status === 'downloading' || status === 'pending') ? 'Reset Stuck Update' : 'Retry Update'}">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                    </svg>
+                                    ${HEROICON_ACTION_RETRY}
                                 </button>
                             ` : ''}
                             <button onclick="setTargetAgent('${a.agent_id}')" class="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors" title="Set Specific Target">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-                                </svg>
+                                ${HEROICON_ACTION_TARGET}
                             </button>
                             <button onclick="triggerCheck('${a.agent_id}')" class="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded transition-colors" title="Trigger Immediate Check">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                                </svg>
+                                ${HEROICON_ACTION_CHECK}
                             </button>
                         </div>
                     </td>
@@ -555,16 +890,20 @@
     }
 
     function getStatusBadge(status) {
-        const s = status.toLowerCase();
+        const s = (status || '').toLowerCase();
         const cfg = {
             'up_to_date': { css: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', lbl: 'Current' },
+            'current': { css: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', lbl: 'Current' },
             'pending': { css: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', lbl: 'Queued' },
+            'queued': { css: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', lbl: 'Queued' },
             'downloading': { css: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 pulse-blue', lbl: 'Downloading' },
             'installing': { css: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 pulse-blue', lbl: 'Installing' },
             'failed': { css: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400', lbl: 'Error' },
-            'rolled_back': { css: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400', lbl: 'Rolled Back' }
+            'error': { css: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400', lbl: 'Error' },
+            'rolled_back': { css: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400', lbl: 'Rolled Back' },
+            'success': { css: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', lbl: 'Success' }
         };
-        const c = cfg[s] || { css: 'bg-gray-100 text-gray-700', lbl: s };
+        const c = cfg[s] || { css: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300', lbl: s || '—' };
         return `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${c.css}">${c.lbl}</span>`;
     }
 
@@ -576,6 +915,52 @@
         document.getElementById('tab-history').className = 'pb-3 text-sm ' + (tab === 'history' ? 'tab-active' : 'tab-inactive');
         if (tab === 'history') loadHistory();
     }
+
+    function escapeHtml(text) {
+        if (text === null || text === undefined) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function openErrorModal(errorText) {
+        if (!errorText) return;
+        const modal = document.getElementById('error-detail-modal');
+        const pre = document.getElementById('error-modal-content');
+        if (!modal || !pre) return;
+        pre.textContent = errorText;
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeErrorModal() {
+        const modal = document.getElementById('error-detail-modal');
+        if (!modal) return;
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+
+    function copyErrorContent() {
+        const pre = document.getElementById('error-modal-content');
+        const btn = document.getElementById('error-modal-copy-btn');
+        if (!pre || !btn) return;
+        navigator.clipboard.writeText(pre.textContent).then(() => {
+            const originalText = btn.textContent;
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = originalText; }, 2000);
+        }).catch(() => {
+            alert('Failed to copy to clipboard');
+        });
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeErrorModal();
+        }
+    });
 
     async function loadHistory() {
         try {
@@ -590,23 +975,53 @@
                 return;
             }
             empty.classList.add('hidden');
-            body.innerHTML = history.map(h => `
-                <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/20 transition-colors">
-                    <td class="px-6 py-3 text-xs text-gray-500">${formatRelativeTime(h.created_at)}</td>
-                    {# D21 / FR-026: this showed only the first 8 characters of the
-                       agent UUID and no name at all, so a row could not be tied to
-                       a machine. Now the human-readable name leads, with the full
-                       identifier beneath it and both retrievable in full. #}
-                    <td class="px-6 py-3 text-xs text-gray-700 dark:text-gray-300 max-w-[220px]">${AgentFmt.nameWithIdHtml(h)}</td>
-                    <td class="px-6 py-3 text-xs font-mono">
-                        <span class="text-gray-500">${h.from_version || '?'}</span>
-                        <span class="text-gray-400 mx-1">→</span>
-                        <span class="text-blue-600 dark:text-blue-400 font-bold">${h.to_version}</span>
+            body.innerHTML = history.map(h => {
+                const timeText = h.created_at ? formatRelativeTime(h.created_at) : '—';
+                const timeTitle = h.created_at ? (typeof DateFmt !== 'undefined' ? DateFmt.formatDateTime(h.created_at) : h.created_at) : '';
+                const fromVer = h.from_version ? escapeHtml(h.from_version) : '—';
+                const toVer = h.to_version ? escapeHtml(h.to_version) : '—';
+                const rawError = h.error_message || '';
+                const errorEscaped = escapeHtml(rawError);
+
+                return `
+                <tr>
+                    <td class="col-hist-time se-align-left text-xs text-gray-500 dark:text-gray-400 font-mono">
+                        <span class="truncate block" title="${escapeHtml(timeTitle)}">${escapeHtml(timeText)}</span>
                     </td>
-                    <td class="px-6 py-3">${getStatusBadge(h.status)}</td>
-                    <td class="px-6 py-3 text-xs text-rose-500 truncate max-w-xs" title="${h.error_message || ''}">${h.error_message || '—'}</td>
+                    <td class="col-hist-agent se-align-left">
+                        <div class="flex flex-col justify-center min-w-0">
+                            ${AgentFmt.nameWithIdHtml(h, 'font-medium text-gray-900 dark:text-white text-xs')}
+                        </div>
+                    </td>
+                    <td class="col-hist-ver se-align-left text-xs font-mono">
+                        <div class="inline-flex items-center">
+                            <span class="text-gray-500 dark:text-gray-400">${fromVer}</span>
+                            <span class="text-gray-400 dark:text-gray-500 mx-1.5 select-none">→</span>
+                            <span class="text-blue-600 dark:text-blue-400 font-bold">${toVer}</span>
+                        </div>
+                    </td>
+                    <td class="col-hist-status se-align-left">
+                        ${getStatusBadge(h.status)}
+                    </td>
+                    <td class="col-hist-error se-align-left">
+                        ${rawError ? `
+                            <div class="col-hist-error-container min-w-0 max-w-full">
+                                <span class="col-hist-error-text text-xs font-mono text-rose-500 dark:text-rose-400"
+                                      title="${errorEscaped}"
+                                      tabindex="0"
+                                      role="button"
+                                      aria-label="View error details"
+                                      onclick="openErrorModal(this.getAttribute('data-error'))"
+                                      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openErrorModal(this.getAttribute('data-error'));}"
+                                      data-error="${errorEscaped}">
+                                    ${errorEscaped}
+                                </span>
+                            </div>
+                        ` : `<span class="text-gray-400 dark:text-gray-500 text-xs font-mono">—</span>`}
+                    </td>
                 </tr>
-            `).join('');
+                `;
+            }).join('');
         } catch (e) {
             console.error('History load error:', e);
         }
@@ -626,9 +1041,27 @@
     async function setTargetAll() {
         const sel = document.getElementById('target-version-select');
         const v = sel.value;
-        if (!v) { alert('Please select a version'); return; }
+        if (!v) {
+            await SentinelConfirm.show({
+                title: 'Select Target Version',
+                message: 'Please select an agent version from the dropdown before deploying.',
+                confirmText: 'Understood',
+                cancelText: '',
+                variant: 'warning',
+                icon: 'warning'
+            });
+            return;
+        }
 
-        if (!confirm(`Deploy version v${v} to ALL agents?`)) return;
+        const confirmed = await SentinelConfirm.show({
+            title: 'Fleet-Wide Deployment',
+            message: `Deploy version v${v} to ALL agents across the fleet?`,
+            confirmText: 'Deploy All',
+            cancelText: 'Cancel',
+            variant: 'primary',
+            icon: 'refresh'
+        });
+        if (!confirmed) return;
 
         const { ok, status, data } = await apiSend(
             '/dashboard/api/updates/set-target', 'POST', { target_version: v });
@@ -644,10 +1077,28 @@
     async function canaryDeploy() {
         const sel = document.getElementById('target-version-select');
         const v = sel.value;
-        if (!v) { alert('Please select a version'); return; }
+        if (!v) {
+            await SentinelConfirm.show({
+                title: 'Select Target Version',
+                message: 'Please select an agent version from the dropdown before deploying.',
+                confirmText: 'Understood',
+                cancelText: '',
+                variant: 'warning',
+                icon: 'warning'
+            });
+            return;
+        }
 
         const pct = parseInt(document.getElementById('canary-range').value);
-        if (!confirm(`Deploy v${v} to ${pct}% of eligible agents?`)) return;
+        const confirmed = await SentinelConfirm.show({
+            title: 'Canary Deployment',
+            message: `Deploy version v${v} to ${pct}% of eligible agents?`,
+            confirmText: 'Deploy Canary',
+            cancelText: 'Cancel',
+            variant: 'primary',
+            icon: 'bolt'
+        });
+        if (!confirmed) return;
 
         const { ok, status, data } = await apiSend(
             '/dashboard/api/updates/canary-deploy', 'POST',
@@ -677,7 +1128,15 @@
     }
 
     async function retryUpdate(agentId) {
-        if (!confirm('Reset this agent\'s update status? This will clear the stuck state and target version.')) return;
+        const confirmed = await SentinelConfirm.show({
+            title: 'Reset Update Status',
+            message: "Reset this agent's update status? This will clear the stuck state and target version.",
+            confirmText: 'Reset Status',
+            cancelText: 'Cancel',
+            variant: 'warning',
+            icon: 'warning'
+        });
+        if (!confirmed) return;
         const { ok, status, data } = await apiSend(
             '/dashboard/api/updates/retry', 'POST', { agent_id: agentId });
         if (handleAuthFailure(status, data)) return;
@@ -763,8 +1222,10 @@
         try {
             resp = await fetch(url, options);
         } catch (e) {
-            return { ok: false, status: 0,
-                     data: { error: 'Network failure - is the server reachable?' } };
+            return {
+                ok: false, status: 0,
+                data: { error: 'Network failure - is the server reachable?' }
+            };
         }
 
         let data = null;
@@ -773,8 +1234,10 @@
         }
         if (data === null) {
             // HTML login page, error page, or empty body. Surface it.
-            data = { error: resp.ok ? 'Unexpected non-JSON response from server'
-                                    : `HTTP ${resp.status}` };
+            data = {
+                error: resp.ok ? 'Unexpected non-JSON response from server'
+                    : `HTTP ${resp.status}`
+            };
         }
         return { ok: resp.ok, status: resp.status, data };
     }

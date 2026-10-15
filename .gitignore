@@ -96,3 +96,18 @@ weekly_cron/BURP_DAST_REMEDIATION.md
 
 # Manual/ad-hoc smoke-test script - not in tests/, not run by CI
 test_update_flow.py
+
+node_modules/
+
+# Manual/ad-hoc smoke-test script - not in tests/, not run by CI
+test_update_flow.py
+
+# Documentation / Markdown files (ignore all markdown files except README.md)
+*.md
+!README.md
+
+.git-local/
+
+# Kilo agent tooling
+.kilo/
+.kilocode/

@@ -5,6 +5,9 @@
  *
  *     dates      DD-MM-YYYY        07-08-2026
  *     date-times DD-MM-YYYY HH:mm  07-08-2026 14:30   (24-hour, zero-padded)
+ *     timestamps DD-MM-YYYY HH:mm:ss 07-08-2026 14:30:00
+ *                (only where second precision is needed, e.g. "Generated
+ *                on" report footers)
  *
  * Mirrors server/utils/datetime_format.py. The two must stay in step — a value
  * rendered server-side and the same value rendered client-side have to look
@@ -74,7 +77,7 @@
     function partsIn(dateObj, tz) {
         var options = {
             year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
             hour12: false,
         };
         if (tz) options.timeZone = tz;
@@ -126,6 +129,22 @@
         return text + ' (' + timezoneLabel(tz) + ')';
     }
 
+    /** DD-MM-YYYY HH:mm:ss, 24-hour — only where seconds are needed */
+    function formatDateTimeSeconds(value, tz) {
+        var d = parseStored(value);
+        if (!d) return EMPTY_DISPLAY;
+        var p = partsIn(d, tz || viewerTimeZone());
+        return pad(p.day) + '-' + pad(p.month) + '-' + p.year +
+               ' ' + pad(p.hour) + ':' + pad(p.minute) + ':' + pad(p.second);
+    }
+
+    /** DD-MM-YYYY HH:mm:ss (Zone) */
+    function formatDateTimeSecondsLabelled(value, tz) {
+        var text = formatDateTimeSeconds(value, tz);
+        if (text === EMPTY_DISPLAY) return text;
+        return text + ' (' + timezoneLabel(tz) + ')';
+    }
+
     /** Today's calendar date in the viewer's zone, as YYYY-MM-DD for date inputs. */
     function todayISO(tz) {
         var p = partsIn(new Date(), tz || viewerTimeZone());
@@ -163,6 +182,8 @@
         formatDate: formatDate,
         formatDateTime: formatDateTime,
         formatDateTimeLabelled: formatDateTimeLabelled,
+        formatDateTimeSeconds: formatDateTimeSeconds,
+        formatDateTimeSecondsLabelled: formatDateTimeSecondsLabelled,
         timezoneLabel: timezoneLabel,
         todayISO: todayISO,
     };

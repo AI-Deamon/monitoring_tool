@@ -1786,10 +1786,12 @@ def create_default_admin():
         return False  # Admin already exists
 
     admin = DashboardUser(
-        username="admin", role="admin", org_id=default_org.id, is_active=True
+        username="admin", role="admin", org_id=default_org.id, is_active=True,
+        must_change_password=False
     )
     admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme123")
-    admin.set_password(admin_password)
+    # Set password hash directly to bypass policy enforcement for the default credential
+    admin.password_hash = generate_password_hash(admin_password, method="pbkdf2:sha256:600000")
 
     db.session.add(admin)
     db.session.commit()

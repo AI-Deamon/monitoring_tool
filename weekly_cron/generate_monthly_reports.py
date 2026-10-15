@@ -8,11 +8,25 @@ import os
 import sys
 import argparse
 import logging
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from pathlib import Path
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+# FR-007: the single canonical date presentation, shared with the Flask
+# app so cron-rendered reports match server-rendered ones.
+try:
+    from utils.datetime_format import format_date as _fmt_date
+    from utils.datetime_format import format_datetime as _fmt_datetime
+    from utils.datetime_format import format_datetime_labelled as _fmt_datetime_tz
+    from utils.datetime_format import format_datetime_seconds_labelled as _fmt_datetime_seconds_tz
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'server'))
+    from utils.datetime_format import format_date as _fmt_date
+    from utils.datetime_format import format_datetime as _fmt_datetime
+    from utils.datetime_format import format_datetime_labelled as _fmt_datetime_tz
+    from utils.datetime_format import format_datetime_seconds_labelled as _fmt_datetime_seconds_tz
 
 logging.basicConfig(
     level=logging.INFO,
@@ -199,11 +213,6 @@ def format_hours(seconds):
     return round(seconds / 3600, 1)
 
 
-def format_month_name(date_obj):
-    """Format date to month name."""
-    return date_obj.strftime('%B %Y')
-
-
 class MonthlyReportGenerator:
     def __init__(self, db_url=None):
         self.db_url = db_url or os.environ.get('DATABASE_URL')
@@ -223,7 +232,10 @@ class MonthlyReportGenerator:
         self.jinja_env.filters['format_hours'] = format_hours
         self.jinja_env.filters['get_category'] = get_category
         self.jinja_env.filters['get_friendly_name'] = get_friendly_name
-        self.jinja_env.filters['format_month_name'] = format_month_name
+        self.jinja_env.filters['fmt_date'] = _fmt_date
+        self.jinja_env.filters['fmt_datetime'] = _fmt_datetime
+        self.jinja_env.filters['fmt_datetime_tz'] = _fmt_datetime_tz
+        self.jinja_env.filters['fmt_datetime_seconds_tz'] = _fmt_datetime_seconds_tz
 
     def get_agent_ids_by_username(self, username):
         """Get agent IDs for a specific username."""
@@ -438,7 +450,7 @@ class MonthlyReportGenerator:
             'username': username,
             'start_date': start_date,
             'end_date': end_date,
-            'generated_at': datetime.now(),
+            'generated_at': datetime.now(timezone.utc),
             'screen_time': screen_agg,
             'weekly_breakdown': weekly_breakdown,
             'apps': processed_apps,
@@ -463,30 +475,50 @@ class MonthlyReportGenerator:
         return counts
 
     def save_report(self, report_data, report_type='individual'):
-        """Save report to HTML file."""
+        """Save report to HTML file with collision-safe filenames."""
         if not report_data:
             return None
-        
+
+        try:
+            from engines.report_naming import build_report_filename
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'server'))
+            from engines.report_naming import build_report_filename
+
         start_str = report_data['start_date'].strftime('%Y-%m-%d')
         end_str = report_data['end_date'].strftime('%Y-%m-%d')
-        
+
         date_range_dir = self.output_dir / f"monthly_{start_str}_to_{end_str}"
         date_range_dir.mkdir(parents=True, exist_ok=True)
-        
+
         if report_type == 'individual':
             template = self.jinja_env.get_template('individual_monthly_report.html')
-            filename = f"{report_data['username']}_monthly_{start_str}_to_{end_str}.html"
+            filename = build_report_filename(
+                report_type='monthly',
+                scope='individual',
+                identity=report_data.get('username'),
+                start_date=report_data['start_date'],
+                end_date=report_data['end_date'],
+                ext='html'
+            )
         else:
             template = self.jinja_env.get_template('team_monthly_report.html')
-            filename = f"team_monthly_{start_str}_to_{end_str}.html"
-        
+            filename = build_report_filename(
+                report_type='monthly',
+                scope='team',
+                identity='team',
+                start_date=report_data['start_date'],
+                end_date=report_data['end_date'],
+                ext='html'
+            )
+
         filepath = date_range_dir / filename
-        
+
         html_content = template.render(**report_data)
-        
+
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(html_content)
-        
+
         logger.info(f"Report saved: {filepath}")
         return filepath
 
@@ -515,7 +547,7 @@ class MonthlyReportGenerator:
         team_data = {
             'start_date': start_date,
             'end_date': end_date,
-            'generated_at': datetime.now(),
+            'generated_at': datetime.now(timezone.utc),
             'team_members': []
         }
         
