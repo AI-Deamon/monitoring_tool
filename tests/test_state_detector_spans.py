@@ -26,7 +26,8 @@ from helper.state_detector import StateDetector
 
 
 def _ts(year, month, day, hour=0, minute=0, second=0):
-    return datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc).timestamp()
+    from core.agent_time import get_timezone
+    return datetime(year, month, day, hour, minute, second, tzinfo=get_timezone()).timestamp()
 
 
 class TestSpanReclassification(unittest.TestCase):
@@ -68,8 +69,13 @@ class TestSpanReclassification(unittest.TestCase):
         self.assertEqual(span["state"], "active")
 
 
+def _local_date_str(iso_str):
+    from core.agent_time import to_local
+    return to_local(datetime.fromisoformat(iso_str)).strftime("%Y-%m-%d")
+
+
 class TestUtcMidnightSplitting(unittest.TestCase):
-    """FR-012: one span per UTC day, total duration preserved."""
+    """FR-012: one span per agent-local day, total duration preserved."""
 
     def setUp(self):
         self.detector = StateDetector.__new__(StateDetector)
@@ -87,17 +93,18 @@ class TestUtcMidnightSplitting(unittest.TestCase):
         spans = self._segments("locked", start, end)
 
         self.assertEqual(len(spans), 4)
-        # One span per UTC day it touches: Fri, Sat, Sun, Mon.
-        self.assertEqual([s["start_time"][:10] for s in spans], [
+        # One span per local day it touches: Fri, Sat, Sun, Mon.
+        self.assertEqual([_local_date_str(s["start_time"]) for s in spans], [
             "2026-07-17", "2026-07-18", "2026-07-19", "2026-07-20",
         ])
         # Every span fits inside its bucket day: [start, end) may end at the
-        # next UTC midnight (half-open day boundary) but never beyond it.
+        # next local midnight (half-open day boundary) but never beyond it.
         for s in spans:
-            s_day = datetime.fromisoformat(s["start_time"]).date()
-            e_day = datetime.fromisoformat(s["end_time"]).date()
+            from core.agent_time import to_local
+            s_day = to_local(datetime.fromisoformat(s["start_time"])).date()
+            e_day = to_local(datetime.fromisoformat(s["end_time"])).date()
             self.assertLessEqual(
-                e_day, s_day + timedelta(days=1), f"span crosses a UTC day: {s}"
+                e_day, s_day + timedelta(days=1), f"span crosses a local day: {s}"
             )
         # Total duration preserved: 6h + 24h + 24h + 9h = 63h.
         self.assertEqual(sum(s["duration_seconds"] for s in spans), 63 * 3600)
@@ -112,13 +119,13 @@ class TestUtcMidnightSplitting(unittest.TestCase):
         self.assertEqual(spans[0]["duration_seconds"], 1800)
 
     def test_boundary_2350_to_0010_yields_two_spans(self):
-        # 23:50 -> 00:10 UTC splits at midnight into 10min + 10min.
+        # 23:50 -> 00:10 local splits at midnight into 10min + 10min.
         start = _ts(2026, 7, 17, 23, 50, 0)
         end = _ts(2026, 7, 18, 0, 10, 0)
         spans = self._segments("active", start, end)
 
         self.assertEqual(len(spans), 2)
-        self.assertEqual([s["start_time"][:10] for s in spans], [
+        self.assertEqual([_local_date_str(s["start_time"]) for s in spans], [
             "2026-07-17", "2026-07-18",
         ])
         self.assertEqual([s["duration_seconds"] for s in spans], [600, 600])
@@ -131,10 +138,10 @@ class TestUtcMidnightSplitting(unittest.TestCase):
 
         self.assertEqual(len(spans), 1)
         self.assertEqual(spans[0]["duration_seconds"], 86400)
-        self.assertEqual(spans[0]["start_time"][:10], "2026-07-17")
+        self.assertEqual(_local_date_str(spans[0]["start_time"]), "2026-07-17")
 
     def test_25h_lock_crossing_midnight_yields_two_away_segments(self):
-        # 23:00 -> 01:30 UTC: original duration 2.5h (>= 2h) decides away
+        # 23:00 -> 01:30 local: original duration 2.5h (>= 2h) decides away
         # ONCE; BOTH segments carry state 'away' (FR-005 on original duration).
         start = _ts(2026, 7, 17, 23, 0, 0)
         end = _ts(2026, 7, 18, 1, 30, 0)
@@ -143,7 +150,7 @@ class TestUtcMidnightSplitting(unittest.TestCase):
         self.assertEqual(len(spans), 2)
         self.assertEqual([s["duration_seconds"] for s in spans], [3600, 5400])
         self.assertTrue(all(s["state"] == "away" for s in spans))
-        self.assertEqual([s["start_time"][:10] for s in spans], [
+        self.assertEqual([_local_date_str(s["start_time"]) for s in spans], [
             "2026-07-17", "2026-07-18",
         ])
 

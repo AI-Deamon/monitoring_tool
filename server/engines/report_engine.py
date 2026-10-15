@@ -90,7 +90,7 @@ def _get_agent_info(db, agent_id):
 
 
 def _get_screen_time(db, agent_id, start, end):
-    return _query(db, """
+    rows = _query(db, """
         SELECT date,
                COALESCE(active_seconds,0) as active_seconds,
                COALESCE(idle_seconds,0) as idle_seconds,
@@ -100,6 +100,11 @@ def _get_screen_time(db, agent_id, start, end):
         WHERE agent_id = :aid AND date BETWEEN :s AND :e
         ORDER BY date
     """, {'aid': agent_id, 's': start, 'e': end})
+    #added for idel time disable functionality
+    for r in rows:
+        r['active_seconds'] = (r.get('active_seconds') or 0) + (r.get('idle_seconds') or 0)
+        r['idle_seconds'] = 0
+    return rows
 
 
 def _get_app_usage(db, agent_id, start, end):

@@ -6,6 +6,8 @@ Handles sleep/wake cycles and restarts gracefully
 
 import sys
 import time
+import signal
+import atexit
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +53,8 @@ class SentinelHelper:
         # Runtime state
         self.running = False
         self.shutdown_event = Event()
+        self._stop_called = False  # Guard against double-stop
+        self._stop_lock = threading.Lock()
         self.heartbeat_counter = 0
         self.domain_counter = 0
         self.startup_time = datetime.now(timezone.utc)
@@ -811,6 +815,13 @@ class SentinelHelper:
                     f"system_state={current_state.value}, "
                     f"app={heartbeat['app']['current']}"
                 )
+                # Periodically refresh session timestamp for crash recovery
+                if hasattr(self, "state_detector") and self.state_detector:
+                    try:
+                        self.state_detector._persist_current_state()
+                    except Exception:
+                        pass
+
                 return True
             else:
                 self.logger.warning("Failed to send heartbeat")
@@ -821,7 +832,7 @@ class SentinelHelper:
             return False
 
     def _send_state_spans(self):
-        """Collect and send completed state spans to core"""
+        """Collect and send completed state spans to core, including buffered offline spans"""
         try:
             spans = self.collector.collect_state_spans()
             if spans:
@@ -831,6 +842,17 @@ class SentinelHelper:
                     self.logger.warning(
                         f"[FAIL] Failed to send {len(spans)} state spans to core"
                     )
+
+            # Drain unuploaded spans stored in buffer.db (e.g. from shutdown/crash)
+            if hasattr(self, "buffer") and self.buffer:
+                buffered = self.buffer.get_unuploaded_state_spans(limit=100)
+                if buffered:
+                    if self.communicator.send_state_spans(buffered):
+                        ids = [s["id"] for s in buffered if "id" in s]
+                        self.buffer.mark_state_spans_uploaded(ids)
+                        self.logger.info(
+                            f"[OK] Drained and uploaded {len(buffered)} buffered offline state spans"
+                        )
         except Exception as e:
             self.logger.error(f"Error sending state spans: {e}")
 
@@ -1180,6 +1202,11 @@ class SentinelHelper:
     
     def stop(self, crashed: bool = False):
         """Stop helper gracefully"""
+        # Guard against double-stop (atexit + signal can both fire)
+        with self._stop_lock:
+            if self._stop_called:
+                return
+            self._stop_called = True
         self.logger.info("Stopping helper...")
         self.running = False
         self.shutdown_event.set()
@@ -1191,8 +1218,14 @@ class SentinelHelper:
         except Exception as e:
             self.logger.error(f"Error stopping network watcher: {e}")
 
-        # Mark stop reason in state machine BEFORE stopping state detector.
+        # Cleanly finalize the active session and send pending spans BEFORE shutdown
         try:
+            if hasattr(self, "state_detector") and self.state_detector:
+                self.state_detector.finalize_current_session(reason="stop")
+
+            if self.core_connected:
+                self._send_state_spans()
+
             if crashed:
                 self.state_detector.screen_time_engine.mark_crash()
                 self.logger.info("[STATE] Marked CRASH in state machine")
@@ -1200,7 +1233,7 @@ class SentinelHelper:
                 self.state_detector.screen_time_engine.mark_shutdown()
                 self.logger.info("[STATE] Marked SHUTDOWN in state machine")
         except Exception as e:
-            self.logger.error(f"Error marking stop reason: {e}")
+            self.logger.error(f"Error finalizing state or marking stop reason: {e}")
 
         # Stop state detector
         try:
@@ -1290,15 +1323,94 @@ def write_crash_dump(exc_type, exc_value, exc_traceback):
         return None
 
 
+def _register_shutdown_handlers(helper: SentinelHelper):
+    """
+    Register multiple independent shutdown handlers so mark_shutdown()
+    is persisted even when pywin32 is absent (no WM_ENDSESSION).
+
+    Three layers (belt-and-suspenders):
+    1. atexit         – fires on normal Python exit
+    2. signal.SIGTERM – fires when the OS sends SIGTERM (rare on Windows,
+                        but covers taskkill /PID)
+    3. SetConsoleCtrlHandler (ctypes) – fires on CTRL_CLOSE_EVENT (console
+       window close), CTRL_LOGOFF_EVENT (user logoff), and
+       CTRL_SHUTDOWN_EVENT (system shutdown/restart).
+       This is the primary mechanism for Windows shutdown detection
+       without pywin32.
+    """
+    import logging
+    _shutdown_logger = logging.getLogger("SentinelHelper.ShutdownHandler")
+
+    # ── 1. atexit handler ────────────────────────────────────────────────
+    def _atexit_handler():
+        _shutdown_logger.info("[SHUTDOWN] atexit handler invoked")
+        try:
+            helper.stop()
+        except Exception as e:
+            _shutdown_logger.error(f"[SHUTDOWN] atexit stop error: {e}")
+
+    atexit.register(_atexit_handler)
+
+    # ── 2. SIGTERM handler ───────────────────────────────────────────────
+    def _signal_handler(signum, frame):
+        sig_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
+        _shutdown_logger.info(f"[SHUTDOWN] Signal {sig_name} received")
+        try:
+            helper.stop()
+        except Exception as e:
+            _shutdown_logger.error(f"[SHUTDOWN] signal stop error: {e}")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+
+    # ── 3. Windows Console Control Handler (ctypes, no pywin32) ──────────
+    try:
+        import ctypes
+        CTRL_C_EVENT = 0
+        CTRL_BREAK_EVENT = 1
+        CTRL_CLOSE_EVENT = 2
+        CTRL_LOGOFF_EVENT = 5
+        CTRL_SHUTDOWN_EVENT = 6
+
+        @ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
+        def _console_ctrl_handler(ctrl_type):
+            if ctrl_type in (CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT):
+                ctrl_names = {
+                    CTRL_CLOSE_EVENT: "CTRL_CLOSE",
+                    CTRL_LOGOFF_EVENT: "CTRL_LOGOFF",
+                    CTRL_SHUTDOWN_EVENT: "CTRL_SHUTDOWN",
+                }
+                name = ctrl_names.get(ctrl_type, f"CTRL_{ctrl_type}")
+                _shutdown_logger.info(f"[SHUTDOWN] Windows {name} event received")
+                try:
+                    helper.stop()
+                except Exception as e:
+                    _shutdown_logger.error(f"[SHUTDOWN] console ctrl stop error: {e}")
+                return 1  # Signal handled
+            return 0  # Let default handler run
+
+        # Keep a reference so it doesn't get garbage-collected
+        helper._console_ctrl_handler = _console_ctrl_handler
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(_console_ctrl_handler, True)
+        _shutdown_logger.info("[SHUTDOWN] Windows console control handler registered")
+    except Exception as e:
+        _shutdown_logger.warning(f"[SHUTDOWN] Could not register console ctrl handler: {e}")
+
+
 def main():
     """Entry point with crash handler"""
     import sys
 
+    helper = None
     try:
         helper = SentinelHelper()
+        _register_shutdown_handlers(helper)
         helper.run()
     except KeyboardInterrupt:
         print("Helper interrupted by user")
+        if helper:
+            helper.stop()
         sys.exit(0)
     except SystemExit:
         raise  # Allow normal exits
@@ -1308,6 +1420,13 @@ def main():
         import logging
 
         logger = logging.getLogger("Helper.CrashHandler")
+
+        # Mark crash before dumping
+        if helper:
+            try:
+                helper.stop(crashed=True)
+            except Exception:
+                pass
 
         # Write crash dump
         exc_info = sys.exc_info()

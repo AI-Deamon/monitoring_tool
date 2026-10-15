@@ -108,9 +108,11 @@ def create_app():
         # re-renders a dashboard page from cache — the page is stale and the
         # session is dead, but a bystander still sees monitored employee data.
         #
-        # Applied only to authenticated responses: static assets are cacheable
-        # and making them no-store would discard that for no benefit.
-        if 'user_id' in session:
+        # Also applied to all auth blueprint pages (login, password reset, etc.)
+        # so unauthenticated forms with CSRF tokens never survive in browser cache.
+        # Static assets remain cacheable.
+        is_auth_route = request.path.startswith('/auth') and not request.path.startswith('/static')
+        if 'user_id' in session or is_auth_route:
             response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'

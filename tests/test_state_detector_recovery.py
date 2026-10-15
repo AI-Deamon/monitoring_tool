@@ -280,12 +280,14 @@ class TestStateDetectorRecovery(unittest.TestCase):
     def test_6_cross_midnight_active_session_splitting(self):
         """
         Test 6 — Cross-midnight active session:
-        Session crossing UTC midnight must be split into two spans:
-        Segment 1: day 1 up to 23:59:59 UTC
-        Segment 2: day 2 starting at 00:00:00 UTC
+        Session crossing local midnight must be split into two spans:
+        Segment 1: day 1 up to local midnight
+        Segment 2: day 2 starting at local midnight
         """
-        start_dt = datetime(2026, 9, 22, 23, 0, 0, tzinfo=timezone.utc)
-        end_dt = datetime(2026, 9, 23, 2, 57, 0, tzinfo=timezone.utc)
+        from core.agent_time import get_timezone
+        local_tz = get_timezone()
+        start_dt = datetime(2026, 9, 22, 23, 0, 0, tzinfo=local_tz)
+        end_dt = datetime(2026, 9, 23, 2, 57, 0, tzinfo=local_tz)
         start_ts = start_dt.timestamp()
         end_ts = end_dt.timestamp()
         duration = end_ts - start_ts

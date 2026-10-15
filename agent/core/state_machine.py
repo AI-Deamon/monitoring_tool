@@ -158,18 +158,37 @@ class ScreenTimeEngine:
             # Update counter for PREVIOUS state
             old_state = self.current_state
 
+            was_unmonitored_gap = False
+            UNMONITORED_GAP_THRESHOLD = 120  # 2 minutes
+
             if old_state == ScreenState.ACTIVE:
-                self.active_seconds += delta
+                if delta >= UNMONITORED_GAP_THRESHOLD:
+                    was_unmonitored_gap = True
+                    logger.info(
+                        f"[STATE_MACHINE] Un-monitored active transition gap ({delta:.1f}s >= {UNMONITORED_GAP_THRESHOLD}s) "
+                        f"redirected to LOCK/AWAY progression"
+                    )
+                    self._add_to_current_bucket(delta, ScreenState.LOCKED)
+                else:
+                    self.active_seconds += delta
             elif old_state == ScreenState.IDLE:
-                self.idle_seconds += delta
+                if delta >= UNMONITORED_GAP_THRESHOLD:
+                    was_unmonitored_gap = True
+                    logger.info(
+                        f"[STATE_MACHINE] Un-monitored idle transition gap ({delta:.1f}s >= {UNMONITORED_GAP_THRESHOLD}s) "
+                        f"redirected to LOCK/AWAY progression"
+                    )
+                    self._add_to_current_bucket(delta, ScreenState.LOCKED)
+                else:
+                    self.idle_seconds += delta
             elif old_state == ScreenState.LOCKED:
                 # Do NOT directly add to locked_seconds
                 self.pending_locked_seconds += delta
             elif old_state == ScreenState.AWAY:
                 self.away_seconds += delta
 
-            # Handle LOCKED exit inside transition()
-            if old_state == ScreenState.LOCKED and new_state != ScreenState.LOCKED:
+            # Handle LOCKED exit inside transition() (or finalize unmonitored gap redirected to LOCKED)
+            if (old_state == ScreenState.LOCKED or was_unmonitored_gap) and new_state != ScreenState.LOCKED:
                 AWAY_THRESHOLD = 7200
 
                 if self.pending_locked_seconds >= AWAY_THRESHOLD:
@@ -205,16 +224,23 @@ class ScreenTimeEngine:
 
             # Log transition
             if old_state != new_state:
-                logger.info(
-                    f"[STATE_MACHINE] {old_state.value} -> {new_state.value} "
-                    f"(+{delta:.1f}s to {old_state.value.lower()}_seconds)"
-                )
+                if was_unmonitored_gap:
+                    logger.info(
+                        f"[STATE_MACHINE] {old_state.value} -> {new_state.value} "
+                        f"(+{delta:.1f}s redirected to locked_seconds)"
+                    )
+                else:
+                    logger.info(
+                        f"[STATE_MACHINE] {old_state.value} -> {new_state.value} "
+                        f"(+{delta:.1f}s to {old_state.value.lower()}_seconds)"
+                    )
 
             return {
                 "from": old_state.value,
                 "to": new_state.value,
                 "delta_seconds": delta,
                 "event_type": event_type.value,
+                "was_unmonitored_gap": was_unmonitored_gap,
             }
 
     def _add_to_current_bucket(
@@ -223,6 +249,16 @@ class ScreenTimeEngine:
         """Add delta seconds to the given state's bucket (default: current)."""
         if state is None:
             state = self.current_state
+
+        # Un-monitored gap protection: gaps >= UNMONITORED_GAP_THRESHOLD while ACTIVE must not be active time
+        UNMONITORED_GAP_THRESHOLD = 120  # 2 minutes
+        if state == ScreenState.ACTIVE and delta >= UNMONITORED_GAP_THRESHOLD:
+            logger.info(
+                f"[STATE_MACHINE] Un-monitored active gap ({delta:.1f}s >= {UNMONITORED_GAP_THRESHOLD}s) "
+                f"redirected to LOCK/AWAY progression"
+            )
+            state = ScreenState.LOCKED
+
         if state == ScreenState.ACTIVE:
             self.active_seconds += delta
         elif state == ScreenState.IDLE:
@@ -484,52 +520,44 @@ class ScreenTimeEngine:
                 }
 
             else:
-                # If workstation was LOCKED before the gap, treat extended lock according to lock/away rule
+                # Unknown/Normal gap: route to LOCKED (or AWAY if >= 2h threshold)
                 pre_gap_state = last_state_str.upper()
-                if pre_gap_state == "LOCKED":
-                    pending_before = max(
+                pending_before = (
+                    max(
                         self.pending_locked_seconds,
                         float(persisted_state.get("pending_locked_seconds", 0)),
                     )
-                    total_lock_time = pending_before + gap
-                    AWAY_THRESHOLD = 7200
-                    if total_lock_time >= AWAY_THRESHOLD:
-                        self.away_seconds += total_lock_time
-                        self.pending_locked_seconds = 0.0
-                        logger.info(
-                            f"[STATE_MACHINE] Unknown/Normal gap while LOCKED: {gap:.1f}s + pending {pending_before:.1f}s "
-                            f"= {total_lock_time:.1f}s ({total_lock_time / 3600:.1f}h) "
-                            f"counted as AWAY (was LOCKED, >= 2h threshold)"
-                        )
-                        return {
-                            "action": "counted_as_away",
-                            "gap_seconds": gap,
-                            "gap_hours": gap / 3600,
-                        }
-                    else:
-                        self.locked_seconds += total_lock_time
-                        self.pending_locked_seconds = 0.0
-                        logger.info(
-                            f"[STATE_MACHINE] Unknown/Normal gap while LOCKED: {gap:.1f}s + pending {pending_before:.1f}s "
-                            f"= {total_lock_time:.1f}s ({total_lock_time / 3600:.1f}h) "
-                            f"counted as LOCKED (was LOCKED, < 2h threshold)"
-                        )
-                        return {
-                            "action": "counted_as_locked",
-                            "gap_seconds": gap,
-                            "gap_hours": gap / 3600,
-                        }
-
-                # Otherwise (was ACTIVE or IDLE) → ignore unknown gap (reliability > accuracy)
-                logger.warning(
-                    f"[STATE_MACHINE] Unknown gap: {gap:.1f}s ({gap / 3600:.1f}h) "
-                    f"IGNORED (reliability > accuracy)"
+                    if pre_gap_state == "LOCKED"
+                    else 0.0
                 )
-                return {
-                    "action": "ignored_unknown_gap",
-                    "gap_seconds": gap,
-                    "gap_hours": gap / 3600,
-                }
+                total_lock_time = pending_before + gap
+                AWAY_THRESHOLD = 7200
+                if total_lock_time >= AWAY_THRESHOLD:
+                    self.away_seconds += total_lock_time
+                    self.pending_locked_seconds = 0.0
+                    logger.info(
+                        f"[STATE_MACHINE] Unknown/Normal gap (was {pre_gap_state}): {gap:.1f}s + pending {pending_before:.1f}s "
+                        f"= {total_lock_time:.1f}s ({total_lock_time / 3600:.1f}h) "
+                        f"counted as AWAY (>= 2h threshold)"
+                    )
+                    return {
+                        "action": "counted_as_away",
+                        "gap_seconds": gap,
+                        "gap_hours": gap / 3600,
+                    }
+                else:
+                    self.locked_seconds += total_lock_time
+                    self.pending_locked_seconds = 0.0
+                    logger.info(
+                        f"[STATE_MACHINE] Unknown/Normal gap (was {pre_gap_state}): {gap:.1f}s + pending {pending_before:.1f}s "
+                        f"= {total_lock_time:.1f}s ({total_lock_time / 3600:.1f}h) "
+                        f"counted as LOCKED (< 2h threshold)"
+                    )
+                    return {
+                        "action": "counted_as_locked",
+                        "gap_seconds": gap,
+                        "gap_hours": gap / 3600,
+                    }
 
         except Exception as e:
             logger.error(f"[STATE_MACHINE] Error handling startup: {e}", exc_info=True)
@@ -900,12 +928,20 @@ class ScreenTimeEngine:
 
     def mark_shutdown(self):
         """Mark that system is shutting down (for gap handling)"""
+        try:
+            self.tick()
+        except Exception as e:
+            logger.error(f"[STATE_MACHINE] Error ticking before shutdown: {e}")
         self.last_event = LastEvent.SHUTDOWN
         self._persist()
         logger.info("[STATE_MACHINE] Marked as SHUTDOWN (gap will be ignored)")
 
     def mark_crash(self):
         """Mark that agent crashed (for gap handling)"""
+        try:
+            self.tick()
+        except Exception as e:
+            logger.error(f"[STATE_MACHINE] Error ticking before crash: {e}")
         self.last_event = LastEvent.CRASH
         self._persist()
         logger.info("[STATE_MACHINE] Marked as CRASH (gap will be ignored)")

@@ -381,6 +381,10 @@ class StateDetector:
     def stop(self):
         """Stop detection"""
         self._running = False
+        try:
+            self.finalize_current_session(reason="stop")
+        except Exception as e:
+            logger.error(f"[STATE] Error finalizing session on stop: {e}")
         if self._hwnd:
             try:
                 win32gui.DestroyWindow(self._hwnd)
@@ -446,30 +450,6 @@ class StateDetector:
                 )
                 return
 
-            # Calculate duration in previous state (for span generation only)
-            now = time.time()
-            duration_seconds = now - self._last_state_change_time
-
-            # NEW: CREATE SPAN(s) for the exiting state (timeline visualization
-            # only). FR-012: multi-day states are split into one span per UTC
-            # day; each segment is persisted to the buffer immediately.
-            if (
-                prev_state in ("active", "idle", "locked", "away")
-                and self._last_state_change_time > 0
-                and duration_seconds >= 1.0
-            ):
-                spans = self._create_span_segments(
-                    state=prev_state,
-                    start_time=self._last_state_change_time,
-                    end_time=now,
-                    duration=duration_seconds,
-                )
-                for span in spans:
-                    self.pending_spans.append(span)
-                    # ✅ OFFLINE-FIRST: Persist span to SQLite buffer immediately
-                    # This ensures spans survive midnight resets and offline periods
-                    self.persist_span_to_buffer(span)
-
             # PHASE 2: ONLY place time is calculated - call state machine
             # Map local state names to ScreenState enum
             state_map = {
@@ -479,16 +459,52 @@ class StateDetector:
                 "away": ScreenState.AWAY,
             }
 
+            was_unmonitored_gap = False
             if new_state in state_map:
                 try:
                     transition_info = self.screen_time_engine.transition(
                         state_map[new_state]
                     )
                     logger.debug(f"[STATE] State machine transition: {transition_info}")
+                    if transition_info and transition_info.get("was_unmonitored_gap"):
+                        was_unmonitored_gap = True
                 except Exception as e:
                     logger.error(
                         f"[STATE] State machine transition error: {e}", exc_info=True
                     )
+
+            # Calculate duration in previous state (for span generation only)
+            now = time.time()
+            duration_seconds = now - self._last_state_change_time
+
+            # If unmonitored gap occurred while active or idle, redirect span to locked/away
+            span_state = prev_state
+            if was_unmonitored_gap and prev_state in ("active", "idle"):
+                span_state = "away" if duration_seconds >= 7200 else "locked"
+                logger.info(
+                    f"[STATE] Un-monitored {prev_state} gap span ({duration_seconds:.1f}s) "
+                    f"redirected to {span_state}"
+                )
+
+            # NEW: CREATE SPAN(s) for the exiting state (timeline visualization
+            # only). FR-012: multi-day states are split into one span per UTC
+            # day; each segment is persisted to the buffer immediately.
+            if (
+                span_state in ("active", "idle", "locked", "away")
+                and self._last_state_change_time > 0
+                and duration_seconds >= 1.0
+            ):
+                spans = self._create_span_segments(
+                    state=span_state,
+                    start_time=self._last_state_change_time,
+                    end_time=now,
+                    duration=duration_seconds,
+                )
+                for span in spans:
+                    self.pending_spans.append(span)
+                    # ✅ OFFLINE-FIRST: Persist span to SQLite buffer immediately
+                    # This ensures spans survive midnight resets and offline periods
+                    self.persist_span_to_buffer(span)
 
             self._last_state_change_time = now
 
@@ -532,9 +548,10 @@ class StateDetector:
             # Capture callback args — invoke outside the lock to avoid blocking
             # other threads on a slow/unreachable network request.
             if self.on_state_change:
+                effective_prev_state = span_state if was_unmonitored_gap else prev_state
                 prev_state_enum = (
-                    SystemState(prev_state)
-                    if prev_state != "unknown"
+                    SystemState(effective_prev_state)
+                    if effective_prev_state != "unknown"
                     else SystemState.UNKNOWN
                 )
                 new_state_enum = SystemState(new_state)
@@ -638,11 +655,12 @@ class StateDetector:
                 self._handle_resume()
                 return 1
         elif msg == WM_QUERYENDSESSION:
-            # Windows is asking if we can shut down - mark shutdown before process dies
+            # Windows is asking if we can shut down - finalize session and mark shutdown before process dies
             try:
+                self.finalize_current_session(reason="WM_QUERYENDSESSION")
                 self.screen_time_engine.mark_shutdown()
                 logger.info(
-                    "[STATE] WM_QUERYENDSESSION: marked shutdown in state machine"
+                    "[STATE] WM_QUERYENDSESSION: finalized session and marked shutdown in state machine"
                 )
             except Exception as e:
                 logger.error(f"[STATE] Error marking shutdown on QUERYENDSESSION: {e}")
@@ -650,8 +668,9 @@ class StateDetector:
         elif msg == WM_ENDSESSION:
             if wparam:  # Session is actually ending
                 try:
+                    self.finalize_current_session(reason="WM_ENDSESSION")
                     self.screen_time_engine.mark_shutdown()
-                    logger.info("[STATE] WM_ENDSESSION: confirmed shutdown")
+                    logger.info("[STATE] WM_ENDSESSION: finalized session and confirmed shutdown")
                 except Exception as e:
                     logger.error(f"[STATE] Error marking shutdown on ENDSESSION: {e}")
 
@@ -997,16 +1016,20 @@ class StateDetector:
         """
         try:
             from datetime import datetime, timezone, timedelta
+            from core.agent_time import get_timezone
 
             if duration is None:
                 duration = end_time - start_time
 
+            # FR-005: Only prolonged lock (>= 2h) is reclassified as away; active/idle states are preserved as-is.
             resolved_state = (
                 "away" if (state == "locked" and duration >= 7200) else state
             )
 
-            start_dt = datetime.fromtimestamp(start_time, tz=timezone.utc)
-            end_dt = datetime.fromtimestamp(end_time, tz=timezone.utc)
+            local_tz = get_timezone()
+            
+            start_dt = datetime.fromtimestamp(start_time, tz=local_tz)
+            end_dt = datetime.fromtimestamp(end_time, tz=local_tz)
 
             if start_dt.date() == end_dt.date():
                 span = self._create_span(
@@ -1019,7 +1042,7 @@ class StateDetector:
             cursor = start_dt.date() + timedelta(days=1)
             while True:
                 midnight_ts = datetime.combine(
-                    cursor, datetime.min.time(), tzinfo=timezone.utc
+                    cursor, datetime.min.time(), tzinfo=local_tz
                 ).timestamp()
                 if midnight_ts >= end_time:
                     break
@@ -1040,6 +1063,51 @@ class StateDetector:
         except Exception as e:
             logger.error(f"[SPAN] Failed to split spans: {e}")
             return []
+
+    def finalize_current_session(self, reason: str = "shutdown") -> bool:
+        """
+        Cleanly close and persist the open active/idle/locked/away session before
+        shutdown or service stop, preventing timeline data loss.
+        """
+        with self._transition_lock:
+            try:
+                now = time.time()
+                if self._last_state_change_time <= 0:
+                    return False
+                duration = now - self._last_state_change_time
+                if duration < 1.0:
+                    return False
+                if self.current_state not in ("active", "idle", "locked", "away"):
+                    return False
+
+                spans = self._create_span_segments(
+                    state=self.current_state,
+                    start_time=self._last_state_change_time,
+                    end_time=now,
+                    duration=duration,
+                )
+                if not spans:
+                    return False
+
+                for span in spans:
+                    self.pending_spans.append(span)
+                    self.persist_span_to_buffer(span)
+
+                logger.info(
+                    f"[STATE] Cleanly finalized {self.current_state} session on {reason}: "
+                    f"{duration:.1f}s ({len(spans)} span(s) persisted)"
+                )
+
+                # Reset state anchor so subsequent calls don't duplicate
+                self._last_state_change_time = now
+                self._persist_current_state()
+                return True
+            except Exception as e:
+                logger.error(
+                    f"[STATE] Failed to finalize session on {reason}: {e}",
+                    exc_info=True,
+                )
+                return False
 
     def get_pending_spans(self) -> list:
         """Return and clear pending spans (called by Collector)."""
@@ -1259,14 +1327,74 @@ class StateDetector:
 
                 # Requirement 2 & 3: Make gap_info authoritative & deterministic unknown-gap policy.
                 # Unknown gaps or shutdown/crash/sleep gaps MUST NOT be synthesized as ACTIVE time.
-                if prev_state == "active":
+                if prev_state in ("active", "idle"):
                     gap_action = (gap_info or {}).get("action")
+                    if gap_action in ("counted_as_locked", "counted_as_away"):
+                        # Gap was credited to locked/away by ScreenTimeEngine; synthesize locked/away span
+                        recovered_state = "away" if (gap_action == "counted_as_away" or duration >= 7200) else "locked"
+                        
+                        # Preserve confirmed pre-crash active/idle session
+                        last_alive_time = (state_machine_state or {}).get("persisted_at") or data.get("timestamp")
+                        try:
+                            last_alive_time = float(last_alive_time) if last_alive_time else None
+                        except (ValueError, TypeError):
+                            last_alive_time = None
+
+                        if last_alive_time and session_start < last_alive_time < now:
+                            # 1. Monitored period before crash
+                            pre_crash_duration = last_alive_time - session_start
+                            if pre_crash_duration >= 1.0:
+                                pre_spans = self._create_span_segments(
+                                    state=prev_state,
+                                    start_time=session_start,
+                                    end_time=last_alive_time,
+                                    duration=pre_crash_duration,
+                                )
+                                for span in pre_spans:
+                                    with self._transition_lock:
+                                        self.pending_spans.append(span)
+                                logger.info(
+                                    f"[RECOVERY] Preserved pre-crash {prev_state} session: "
+                                    f"{pre_crash_duration:.1f}s ({len(pre_spans)} span(s))"
+                                )
+
+                            # 2. Unmonitored gap after crash/shutdown
+                            gap_duration = now - last_alive_time
+                            gap_spans = self._create_span_segments(
+                                state=recovered_state,
+                                start_time=last_alive_time,
+                                end_time=now,
+                                duration=gap_duration,
+                            )
+                            for span in gap_spans:
+                                with self._transition_lock:
+                                    self.pending_spans.append(span)
+                            logger.info(
+                                f"[RECOVERY] Recovered {recovered_state} gap: "
+                                f"{gap_duration:.1f}s ({len(gap_spans)} span(s))"
+                            )
+                        else:
+                            spans = self._create_span_segments(
+                                state=recovered_state,
+                                start_time=session_start,
+                                end_time=now,
+                                duration=duration,
+                            )
+                            for span in spans:
+                                with self._transition_lock:
+                                    self.pending_spans.append(span)
+                            logger.info(
+                                f"[RECOVERY] Recovered {recovered_state} session from {prev_state} gap: "
+                                f"{duration:.1f}s ({len(spans)} span(s))"
+                            )
+                        break
+
                     if gap_action == "ignored_unknown_gap" or (
                         gap_action and str(gap_action).startswith("ignored_")
                     ):
                         logger.info(
-                            f"[RECOVERY] Skipping interrupted active span after "
-                            f"{gap_action}; unknown/ignored gap is not synthesized as active"
+                            f"[RECOVERY] Skipping interrupted {prev_state} span after "
+                            f"{gap_action}; unknown/ignored gap is not synthesized as {prev_state}"
                         )
                         break
 
@@ -1276,7 +1404,7 @@ class StateDetector:
                         LastEvent.SLEEP.value,
                     }:
                         logger.info(
-                            f"[RECOVERY] Skipping interrupted active span after "
+                            f"[RECOVERY] Skipping interrupted {prev_state} span after "
                             f"{last_event}; gap handled by ScreenTimeEngine"
                         )
                         break
@@ -1284,8 +1412,8 @@ class StateDetector:
                     # Deterministic Unknown-Gap Policy: gaps >= 600s are never synthesized as ACTIVE
                     if duration >= 600:
                         logger.info(
-                            f"[RECOVERY] Skipping interrupted active span with long gap "
-                            f"({duration:.1f}s >= 600s); unknown gaps are never synthesized as active"
+                            f"[RECOVERY] Skipping interrupted {prev_state} span with long gap "
+                            f"({duration:.1f}s >= 600s); unknown gaps are never synthesized as {prev_state}"
                         )
                         break
 
@@ -1293,7 +1421,7 @@ class StateDetector:
                     today = datetime.now().date().isoformat()
                     if saved_day and saved_day != today:
                         logger.info(
-                            f"[RECOVERY] Skipping interrupted active span from "
+                            f"[RECOVERY] Skipping interrupted {prev_state} span from "
                             f"previous day {saved_day}; today is {today}"
                         )
                         break
@@ -1344,8 +1472,10 @@ class StateDetector:
 
     def _persist_current_state(self):
         """Save current session metadata for crash recovery."""
+        temp_file = None
         try:
             import json
+            import uuid
 
             data = {
                 "current_state": self.current_state,
@@ -1355,10 +1485,30 @@ class StateDetector:
                 "final_totals_for_upload": self._final_totals_for_upload,
                 "final_totals_day_for_upload": self._final_totals_day_for_upload,
             }
-            with open(self.state_file, "w") as f:
+            unique_suffix = f"_{uuid.uuid4().hex[:8]}.tmp"
+            temp_file = self.state_file.with_name(f"{self.state_file.stem}{unique_suffix}")
+            with open(temp_file, "w") as f:
                 json.dump(data, f)
+            
+            for attempt in range(5):
+                try:
+                    temp_file.replace(self.state_file)
+                    break
+                except OSError as rename_err:
+                    if attempt < 4:
+                        import time as _t
+                        _t.sleep(0.05 * (attempt + 1))
+                    else:
+                        raise rename_err
         except Exception as e:
             logger.error(f"[STATE] Failed to persist state: {e}")
+        finally:
+            if temp_file is not None:
+                try:
+                    if temp_file.exists():
+                        temp_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     # ========================================================================
     # CUMULATIVE TIME TRACKING (for heartbeat deltas)

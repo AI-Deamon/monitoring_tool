@@ -276,7 +276,7 @@ def csrf_protect(f):
     def decorated_function(*args, **kwargs):
         if request.method == "POST":
             if not validate_csrf_token():
-                flash("Invalid request. Please try again.", "danger")
+                flash("The page has expired. Please try again.", "warning")
                 return redirect(request.url)
         return f(*args, **kwargs)
 
@@ -995,7 +995,7 @@ def forgot_password():
 
     if request.method == "POST":
         if not validate_csrf_token():
-            flash("Invalid request. Please try again.", "danger")
+            flash("The page has expired. Please try again.", "warning")
             return render_template("auth/forgot_password.html")
 
         email = request.form.get("email", "").strip()
@@ -1043,7 +1043,7 @@ def reset_password(token):
 
     if request.method == "POST":
         if not validate_csrf_token():
-            flash("Invalid request. Please try again.", "danger")
+            flash("The page has expired. Please try again.", "warning")
             return render_template("auth/reset_password.html", token=token)
 
         new_password = request.form.get("new_password", "")
@@ -1094,7 +1094,10 @@ def login():
     if request.method == "POST":
         # CSRF validation
         if not validate_csrf_token():
-            flash("Invalid request. Please try again.", "danger")
+            logger.warning(
+                f"[AUTH] Login rejected due to invalid or expired CSRF token from {request.remote_addr}"
+            )
+            flash("The page has expired. Please try again.", "warning")
             return render_template("auth/login.html")
 
         username = request.form.get("username", "").strip()[:100]  # Truncate overlong inputs
@@ -1402,7 +1405,7 @@ def change_password():
     if request.method == "POST":
         # CSRF validation
         if not validate_csrf_token():
-            flash("Invalid request. Please try again.", "danger")
+            flash("The page has expired. Please try again.", "warning")
             return render_template("auth/change_password.html")
 
         current = request.form.get("current_password", "")

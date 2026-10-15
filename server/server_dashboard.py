@@ -637,9 +637,16 @@ def api_overview():
             ).filter(server_models.Agent.org_id == g.current_user.org_id)
 
         screen_time_totals = screen_time_query.first()
+        # total_active = int(screen_time_totals[0] or 0) if screen_time_totals else 0
+        # total_idle = int(screen_time_totals[1] or 0) if screen_time_totals else 0
 
-        total_active = int(screen_time_totals[0] or 0) if screen_time_totals else 0
-        total_idle = int(screen_time_totals[1] or 0) if screen_time_totals else 0
+
+        total_active = (
+            int((screen_time_totals[0] or 0) + (screen_time_totals[1] or 0))
+            if screen_time_totals
+            else 0
+        )
+        total_idle = 0
         total_locked = int(screen_time_totals[2] or 0) if screen_time_totals else 0
         total_away = int(screen_time_totals[3] or 0) if screen_time_totals else 0
 
@@ -773,10 +780,11 @@ def api_overview():
                     "name": top_domain[0] if top_domain else "N/A",
                     "duration": int(top_domain[1]) if top_domain else 0,
                 },
-                "top_idle_agents": [
-                    {"hostname": agent[0], "idle_seconds": int(agent[1])}
-                    for agent in top_idle_agents
-                ],
+                # "top_idle_agents": [
+                #     {"hostname": agent[0], "idle_seconds": int(agent[1])}
+                #     for agent in top_idle_agents
+                # ],
+                "top_idle_agents": [],
                 "top_active_agents": [
                     {"hostname": agent[0], "active_seconds": int(agent[1])}
                     for agent in top_active_agents
@@ -844,9 +852,13 @@ def api_utilization_trend():
             d = start_date + timedelta(days=i)
             labels.append(d.isoformat())
             r = rows.get(d)
-            # seconds -> hours, 2dp; zero-fill days with no data
-            active.append(round((r[1] or 0) / 3600, 2) if r else 0)
-            idle.append(round((r[2] or 0) / 3600, 2) if r else 0)
+            # seconds -> hours, 2dp; zero-fill days with no data (idle merged into active)
+            # active.append(round((r[1] or 0) / 3600, 2) if r else 0)
+            # idle.append(round((r[2] or 0) / 3600, 2) if r else 0)
+            #IDLE temp
+            active.append(round(((r[1] or 0) + (r[2] or 0)) / 3600, 2) if r else 0)
+            # idle.append(round((r[2] or 0) / 3600, 2) if r else 0)
+            idle.append(0)
             locked.append(round((r[3] or 0) / 3600, 2) if r else 0)
             away.append(round((r[4] or 0) / 3600, 2) if r else 0)
 
@@ -1375,8 +1387,10 @@ def api_agents():
 
         screen_time_map = {
             st.agent_id: {
-                "active": st.active_seconds or 0,
-                "idle": st.idle_seconds or 0,
+                # "active": st.active_seconds or 0,
+                # "idle": st.idle_seconds or 0,
+                "active": (st.active_seconds or 0) + (st.idle_seconds or 0),
+                "idle": 0,
                 "locked": st.locked_seconds or 0,
             }
             for st in screen_time_records
@@ -1671,8 +1685,14 @@ def api_agent_screentime(agent_id):
             # Use fixed Sun/Mon label format for chart
             data["labels"].append(d.strftime("%a %d"))
             rec = record_map.get(d)
-            data["active"].append(rec.active_seconds if rec else 0)
-            data["idle"].append(rec.idle_seconds if rec else 0)
+            # TEMPORARY PATCH: Merge Idle into Active time
+            # Original:
+            # data["active"].append(rec.active_seconds if rec else 0)
+            # data["idle"].append(rec.idle_seconds if rec else 0)
+            active_sec = rec.active_seconds if rec else 0
+            idle_sec = rec.idle_seconds if rec else 0
+            data["active"].append(active_sec + idle_sec)
+            data["idle"].append(0)
             data["locked"].append(rec.locked_seconds if rec else 0)
             data["away"].append(rec.away_seconds if rec and rec.away_seconds else 0)
 
@@ -2550,7 +2570,38 @@ def api_agent_full_report(agent_id):
             if st_rec and st_rec.username:
                 username = st_rec.username
 
-        # Find first activity today (earliest app session active during today's window)
+        # ----------------------------------------------------------------
+        # First & Last Activity Today
+        # Considers screen_time_spans (capturing active/idle/locked presence
+        # even if no apps are opened), app_sessions, and live heartbeats.
+        # Clamped to [start_dt, end_dt] so carryover spans from midnight
+        # are attributed to 00:00 rather than leaking into yesterday.
+        # ----------------------------------------------------------------
+        start_candidates = []
+        end_candidates = []
+
+        # 1. Screen Time Spans (active user presence - excludes overnight locked/away periods)
+        try:
+            span_row = db.session.execute(
+                text(
+                    "SELECT MIN(start_time), MAX(COALESCE(end_time, start_time)) "
+                    "FROM screen_time_spans "
+                    "WHERE agent_id = :agent_id "
+                    "  AND state = 'active' "
+                    "  AND start_time <= :end_dt "
+                    "  AND (end_time >= :start_dt OR end_time IS NULL)"
+                ),
+                {"agent_id": resolved_agent_id, "start_dt": start_dt, "end_dt": end_dt},
+            ).fetchone()
+            if span_row:
+                if span_row[0] is not None:
+                    start_candidates.append(span_row[0])
+                if span_row[1] is not None:
+                    end_candidates.append(span_row[1])
+        except Exception as e:
+            logger.warning(f"Could not query screen_time_spans for activity bounds: {e}")
+
+        # 2. App Sessions (earliest and latest app usage)
         first_session_today = (
             server_models.AppSession.query.filter(
                 server_models.AppSession.agent_id == resolved_agent_id,
@@ -2563,12 +2614,9 @@ def api_agent_full_report(agent_id):
             .order_by(server_models.AppSession.start_time.asc())
             .first()
         )
+        if first_session_today and first_session_today.start_time:
+            start_candidates.append(first_session_today.start_time)
 
-        first_seen_today = (
-            utc_to_ist(first_session_today.start_time) if first_session_today else None
-        )
-
-        # Find last activity today (latest app session active during today's window)
         last_session_today = (
             server_models.AppSession.query.filter(
                 server_models.AppSession.agent_id == resolved_agent_id,
@@ -2581,20 +2629,80 @@ def api_agent_full_report(agent_id):
             .order_by(server_models.AppSession.start_time.desc())
             .first()
         )
+        if last_session_today:
+            end_candidates.append(last_session_today.end_time or last_session_today.start_time)
 
+        # 3. State changes (active transitions)
+        if not start_candidates:
+            try:
+                sc_row = db.session.execute(
+                    text(
+                        "SELECT MIN(timestamp), MAX(timestamp) "
+                        "FROM state_changes "
+                        "WHERE agent_id = :agent_id "
+                        "  AND current_state = 'active' "
+                        "  AND timestamp >= :start_dt "
+                        "  AND timestamp <= :end_dt"
+                    ),
+                    {"agent_id": resolved_agent_id, "start_dt": start_dt, "end_dt": end_dt},
+                ).fetchone()
+                if sc_row:
+                    if sc_row[0] is not None:
+                        start_candidates.append(sc_row[0])
+                    if sc_row[1] is not None:
+                        end_candidates.append(sc_row[1])
+            except Exception:
+                pass
+
+        # 4. Fallback for completely inactive day (if no active spans/sessions found, use any presence)
+        if not start_candidates:
+            try:
+                fallback_row = db.session.execute(
+                    text(
+                        "SELECT MIN(start_time), MAX(COALESCE(end_time, start_time)) "
+                        "FROM screen_time_spans "
+                        "WHERE agent_id = :agent_id "
+                        "  AND start_time <= :end_dt "
+                        "  AND (end_time >= :start_dt OR end_time IS NULL)"
+                    ),
+                    {"agent_id": resolved_agent_id, "start_dt": start_dt, "end_dt": end_dt},
+                ).fetchone()
+                if fallback_row:
+                    if fallback_row[0] is not None:
+                        start_candidates.append(fallback_row[0])
+                    if fallback_row[1] is not None:
+                        end_candidates.append(fallback_row[1])
+            except Exception:
+                pass
+
+        # 5. Agent last_seen (if viewing today and agent sent telemetry today)
+        is_viewing_today = (target_date == get_viewer_today())
+        if is_viewing_today and agent.last_seen and agent.last_seen >= start_dt:
+            end_candidates.append(agent.last_seen)
+            if not start_candidates:
+                start_candidates.append(agent.last_seen)
+
+        # Determine earliest and latest timestamps clamped to today's window
+        first_seen_today = None
         last_seen_today = None
         total_tracked_seconds = 0
-        if last_session_today:
-            if last_session_today.end_time:
-                last_seen_today = utc_to_ist(last_session_today.end_time)
-            else:
-                last_seen_today = utc_to_ist(last_session_today.start_time)
 
-        # Calculate total tracked time (last - first)
-        if first_session_today and last_session_today:
-            first_ts = first_session_today.start_time
-            last_ts = last_session_today.end_time or last_session_today.start_time
-            total_tracked_seconds = max(0, int((last_ts - first_ts).total_seconds()))
+        earliest_raw = min(start_candidates) if start_candidates else None
+        latest_raw = max(end_candidates) if end_candidates else None
+
+        if earliest_raw:
+            clamped_start = max(earliest_raw, start_dt)
+            first_seen_today = utc_to_ist(clamped_start)
+
+        if latest_raw:
+            clamped_end = min(latest_raw, end_dt)
+            last_seen_today = utc_to_ist(clamped_end)
+
+        if earliest_raw and latest_raw:
+            clamped_start = max(earliest_raw, start_dt)
+            clamped_end = min(latest_raw, end_dt)
+            if clamped_end >= clamped_start:
+                total_tracked_seconds = int((clamped_end - clamped_start).total_seconds())
 
         # Canonical first_seen: first real telemetry activity (nullable if no telemetry yet).
         first_seen = agent.first_activity_at
@@ -2635,6 +2743,16 @@ def api_agent_full_report(agent_id):
             )
 
             friendly = server_models.get_friendly_app_name(live_status.current_app)
+
+            # Temporary state mapping: idle -> active, locked -> locked
+            raw_state = (live_status.current_state or "offline").lower()
+            if raw_state == "idle":
+                effective_state = "active"
+            elif raw_state == "locked":
+                effective_state = "locked"
+            else:
+                effective_state = live_status.current_state or "offline"
+
             live_data = {
                 "current_app": friendly if not live_is_stale else None,
                 "current_app_exe": live_status.current_app
@@ -2643,7 +2761,7 @@ def api_agent_full_report(agent_id):
                 "window_title": live_status.window_title if not live_is_stale else None,
                 "current_state": "offline"
                 if live_is_stale
-                else (live_status.current_state or "offline"),
+                else effective_state,
                 "session_start": live_status.session_start.isoformat()
                 if live_status.session_start
                 else None,
@@ -2673,9 +2791,13 @@ def api_agent_full_report(agent_id):
             agent_id=resolved_agent_id, date=target_date
         ).first()
 
-        # Use screen_time table as single source of truth
-        active_s = screen_time.active_seconds if screen_time else 0
-        idle_s = screen_time.idle_seconds if screen_time else 0
+        # Use screen_time table as single source of truth (idle merged into active for display)
+        # active_s = screen_time.active_seconds if screen_time else 0
+        # idle_s = screen_time.idle_seconds if screen_time else 0
+        raw_active = screen_time.active_seconds if screen_time else 0
+        raw_idle = screen_time.idle_seconds if screen_time else 0
+        active_s = raw_active + raw_idle
+        idle_s = 0
         locked_s = screen_time.locked_seconds if screen_time else 0
         away_s = (screen_time.away_seconds or 0) if screen_time else 0
 
@@ -2969,18 +3091,18 @@ def api_agent_full_report(agent_id):
                 },
                 "state_events": [
                     {
-                        "state": span.state,
-                        "start_time": _format_ist_timestamp(span.start_time),
-                        "end_time": _format_ist_timestamp(span.end_time),
-                        "duration_seconds": span.duration_seconds,
+                        "state": "active" if span.state == "idle" else span.state,
+                        "start_time": _format_ist_timestamp(max(span.start_time, start_dt)),
+                        "end_time": _format_ist_timestamp(min(span.end_time, end_dt)),
+                        "duration_seconds": max(0, int((min(span.end_time, end_dt) - max(span.start_time, start_dt)).total_seconds())),
                     }
                     for span in db.session.execute(
                         text(
                             "SELECT state, start_time, end_time, duration_seconds"
                             " FROM screen_time_spans"
                             " WHERE agent_id = :agent_id"
-                            "   AND start_time >= :start_dt"
                             "   AND start_time < :end_dt"
+                            "   AND end_time >= :start_dt"
                             " ORDER BY start_time"
                         ),
                         {
@@ -2989,6 +3111,7 @@ def api_agent_full_report(agent_id):
                             "end_dt": end_dt,
                         },
                     ).fetchall()
+                    if min(span.end_time, end_dt) > max(span.start_time, start_dt)
                 ],
             }
         ), 200
@@ -3281,8 +3404,13 @@ def api_agent_today(agent_id):
             agent_id=agent.agent_id, date=today
         ).first()
 
-        active_s = screen_time.active_seconds if screen_time else 0
-        idle_s = screen_time.idle_seconds if screen_time else 0
+        # active_s = screen_time.active_seconds if screen_time else 0
+        # idle_s = screen_time.idle_seconds if screen_time else 0
+
+        raw_active_today = screen_time.active_seconds if screen_time else 0
+        raw_idle_today = screen_time.idle_seconds if screen_time else 0
+        active_s = raw_active_today + raw_idle_today
+        idle_s = 0
         locked_s = screen_time.locked_seconds if screen_time else 0
         away_s = (screen_time.away_seconds or 0) if screen_time else 0
 
@@ -3412,7 +3540,7 @@ def api_agent_today(agent_id):
                     "os": agent.os,
                     "username": screen_time.username if screen_time else None,
                     "status": agent.status,
-                    "last_seen": ust_to_ist(
+                    "last_seen": utc_to_ist(
                         agent.last_seen
                     ),  # if agent.last_seen else None
                 },
