@@ -31,6 +31,7 @@ ENV/
 logs/
 *.log
 backups/
+bk/
 *.db
 *.sqlite
 dashboard.txt
@@ -111,3 +112,10 @@ test_update_flow.py
 # Kilo agent tooling
 .kilo/
 .kilocode/
+
+# Temporary scratch and build scripts
+build_assets.py
+build_ui.py
+
+# Backup files
+*.bak

@@ -270,7 +270,8 @@
                     {% if session.role == 'admin' %}
                     <li>
                         <a href="{{ url_for('dashboard.dashboard_home') }}"
-                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.dashboard_home' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.dashboard_home' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint == 'dashboard.dashboard_home' %}aria-current="page"{% endif %}>
                             Overview
                         </a>
                     </li>
@@ -278,7 +279,8 @@
                     {% if session.role == 'admin' %}
                     <li>
                         <a href="{{ url_for('dashboard.agents_list') }}"
-                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.agents_list' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint in ['dashboard.agents_list', 'dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint in ['dashboard.agents_list', 'dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] %}aria-current="page"{% endif %}>
                             Agents
                         </a>
                     </li>
@@ -301,13 +303,15 @@
                     {% if session.role == 'admin' %}
                     <li>
                         <a href="{{ url_for('dashboard.assets_list') }}"
-                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.assets_list' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint in ['dashboard.assets_list', 'dashboard.single_asset_detail'] else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint in ['dashboard.assets_list', 'dashboard.single_asset_detail'] %}aria-current="page"{% endif %}>
                             Assets
                         </a>
                     </li>
                     <li>
                         <a href="{{ url_for('dashboard.updates_dashboard') }}"
-                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.updates_dashboard' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.updates_dashboard' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint == 'dashboard.updates_dashboard' %}aria-current="page"{% endif %}>
                             Updates
                         </a>
                     </li>
@@ -315,7 +319,8 @@
                     {% if session.role == 'admin' %}
                     <li>
                         <a href="{{ url_for('dashboard.reports') }}"
-                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.reports' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.reports' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint == 'dashboard.reports' %}aria-current="page"{% endif %}>
                             Reports
                         </a>
                     </li>
@@ -479,14 +484,16 @@
                 {% if session.role == 'admin' %}
                 <a href="{{ url_for('dashboard.dashboard_home') }}"
                     class="{{ 'se-nav-active' if request.endpoint == 'dashboard.dashboard_home' else '' }}"
-                    data-endpoint="dashboard.dashboard_home">
+                    data-endpoint="dashboard.dashboard_home"
+                    {% if request.endpoint == 'dashboard.dashboard_home' %}aria-current="page"{% endif %}>
                     Overview
                 </a>
                 {% endif %}
                 {% if session.role == 'admin' %}
                 <a href="{{ url_for('dashboard.agents_list') }}"
-                    class="{{ 'se-nav-active' if request.endpoint == 'dashboard.agents_list' else '' }}"
-                    data-endpoint="dashboard.agents_list">
+                    class="{{ 'se-nav-active' if request.endpoint in ['dashboard.agents_list', 'dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] else '' }}"
+                    data-endpoint="dashboard.agents_list"
+                    {% if request.endpoint in ['dashboard.agents_list', 'dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] %}aria-current="page"{% endif %}>
                     Agents
                 </a>
                 {% else %}
@@ -494,7 +501,8 @@
                 {% if user_agent_id %}
                 <a href="{{ url_for('dashboard.agent_detail', agent_id=user_agent_id) }}"
                     class="{{ 'se-nav-active' if request.endpoint == 'dashboard.agent_detail' else '' }}"
-                    data-endpoint="dashboard.agent_detail">
+                    data-endpoint="dashboard.agent_detail"
+                    {% if request.endpoint in ['dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] %}aria-current="page"{% endif %}>
                     Agent
                 </a>
                 {% else %}
@@ -504,19 +512,22 @@
                 {% if session.role == 'admin' %}
                 <a href="{{ url_for('dashboard.assets_list') }}"
                     class="{{ 'se-nav-active' if request.endpoint == 'dashboard.assets_list' else '' }}"
-                    data-endpoint="dashboard.assets_list">
+                    data-endpoint="dashboard.assets_list"
+                    {% if request.endpoint in ['dashboard.assets_list', 'dashboard.single_asset_detail'] %}aria-current="page"{% endif %}>
                     Assets
                 </a>
                 <a href="{{ url_for('dashboard.updates_dashboard') }}"
                     class="{{ 'se-nav-active' if request.endpoint == 'dashboard.updates_dashboard' else '' }}"
-                    data-endpoint="dashboard.updates_dashboard">
+                    data-endpoint="dashboard.updates_dashboard"
+                    {% if request.endpoint == 'dashboard.updates_dashboard' %}aria-current="page"{% endif %}>
                     Updates
                 </a>
                 {% endif %}
                 {% if session.role == 'admin' %}
                 <a href="{{ url_for('dashboard.reports') }}"
                     class="{{ 'se-nav-active' if request.endpoint == 'dashboard.reports' else '' }}"
-                    data-endpoint="dashboard.reports">
+                    data-endpoint="dashboard.reports"
+                    {% if request.endpoint == 'dashboard.reports' %}aria-current="page"{% endif %}>
                     Reports
                 </a>
                 {% endif %}
@@ -1031,12 +1042,14 @@
             drawer.classList.add('se-drawer-open');
             if (overlay) overlay.classList.add('se-drawer-open');
             hamburgerBtn.setAttribute('aria-expanded', 'true');
+            hamburgerBtn.setAttribute('aria-label', 'Close navigation menu');
         }
 
         function closeDrawer() {
             drawer.classList.remove('se-drawer-open');
             if (overlay) overlay.classList.remove('se-drawer-open');
             hamburgerBtn.setAttribute('aria-expanded', 'false');
+            hamburgerBtn.setAttribute('aria-label', 'Open navigation menu');
         }
 
         hamburgerBtn.addEventListener('click', function () {
