@@ -266,3 +266,186 @@ function sortTable(n) {
         }
     }
 }
+
+// =============================================================================
+// ACCESSIBILITY & INTERACTION: Date Input Picker Trigger
+// =============================================================================
+// Ensures clicking anywhere inside a date input (text area, calendar icon, or
+// padded area) opens the native date picker popup, preserving keyboard accessibility.
+(function initDateInputPickerInteraction() {
+    if (typeof document === 'undefined') return;
+    function openPicker(input) {
+        if (!input || input.disabled || input.readOnly) return;
+        if (typeof input.showPicker === 'function') {
+            try {
+                input.showPicker();
+            } catch (err) {
+                // Ignore if already open or disallowed by browser security policy
+            }
+        }
+    }
+
+    // Delegated click listener to support static and dynamically added date inputs
+    document.addEventListener('click', function (e) {
+        const dateInput = e.target && e.target.closest ? e.target.closest('input[type="date"]') : null;
+        if (dateInput) {
+            openPicker(dateInput);
+        }
+    });
+
+    // Keyboard accessibility: Space or Enter on focused date input triggers picker
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            const dateInput = e.target && e.target.closest ? e.target.closest('input[type="date"]') : null;
+            if (dateInput && document.activeElement === dateInput) {
+                openPicker(dateInput);
+            }
+        }
+    });
+})();
+
+// =============================================================================
+// GLOBAL ACCESSIBLE TOOLTIP STANDARD (SentinelEdge Tables & UI)
+// =============================================================================
+// Provides seamless, high-contrast, theme-aware tooltips for truncated table cells
+// and elements with title/data-tooltip attributes on BOTH mouse hover and keyboard focus.
+(function initGlobalAccessibleTooltip() {
+    if (typeof document === 'undefined') return;
+    let tooltipEl = null;
+    let activeTarget = null;
+
+    function getOrCreateTooltip() {
+        if (!tooltipEl) {
+            tooltipEl = document.createElement('div');
+            tooltipEl.id = 'se-global-tooltip';
+            tooltipEl.className = 'se-tooltip';
+            tooltipEl.setAttribute('role', 'tooltip');
+            tooltipEl.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(tooltipEl);
+        }
+        return tooltipEl;
+    }
+
+    function isTruncated(el) {
+        return el.scrollWidth > el.clientWidth + 1;
+    }
+
+    function showTooltip(el, isKeyboard = false) {
+        if (!el || el === document.body || el === document.documentElement) return;
+
+        if (el.hasAttribute('data-no-tooltip') || (el.closest && el.closest('[data-no-tooltip]'))) {
+            hideTooltip();
+            return;
+        }
+
+        let text = '';
+        if (el.dataset && el.dataset.seTooltip) {
+            text = el.dataset.seTooltip;
+        } else if (el.hasAttribute('title') && el.getAttribute('title').trim()) {
+            text = el.getAttribute('title').trim();
+            el.dataset.seTooltip = text;
+            el.removeAttribute('title'); // Prevent clash with native browser tooltip
+        } else if (el.hasAttribute('data-tooltip') && el.getAttribute('data-tooltip').trim()) {
+            text = el.getAttribute('data-tooltip').trim();
+        } else if (isTruncated(el)) {
+            text = (el.dataset && el.dataset.fullText) ? el.dataset.fullText : (el.innerText || el.textContent || '');
+            text = text.trim();
+        }
+
+        if (!text) {
+            hideTooltip();
+            return;
+        }
+
+        const tip = getOrCreateTooltip();
+        tip.textContent = text;
+        activeTarget = el;
+
+        tip.classList.add('se-tooltip-visible');
+        tip.setAttribute('aria-hidden', 'false');
+
+        const rect = el.getBoundingClientRect();
+        const tipHeight = tip.offsetHeight;
+        const tipWidth = tip.offsetWidth;
+
+        let top = rect.top - tipHeight - 6;
+        if (top < 8) {
+            top = rect.bottom + 6;
+        }
+
+        let left = rect.left + (rect.width - tipWidth) / 2;
+        left = Math.max(8, Math.min(window.innerWidth - tipWidth - 8, left));
+
+        tip.style.top = `${Math.round(top)}px`;
+        tip.style.left = `${Math.round(left)}px`;
+    }
+
+    function hideTooltip() {
+        if (activeTarget) {
+            if (activeTarget.dataset && activeTarget.dataset.seTooltip) {
+                activeTarget.setAttribute('title', activeTarget.dataset.seTooltip);
+            }
+            activeTarget = null;
+        }
+        if (tooltipEl) {
+            tooltipEl.classList.remove('se-tooltip-visible');
+            tooltipEl.setAttribute('aria-hidden', 'true');
+        }
+    }
+
+    // Delegated Mouse Hover Interaction
+    document.addEventListener('mouseover', function (e) {
+        const candidate = e.target.closest('[title], [data-tooltip], .se-cell-truncate, .inv-cell-truncate, .se-table td, .se-table th');
+        if (candidate) {
+            showTooltip(candidate, false);
+        }
+    }, true);
+
+    document.addEventListener('mouseout', function (e) {
+        if (activeTarget && (!e.relatedTarget || !activeTarget.contains(e.relatedTarget))) {
+            hideTooltip();
+        }
+    }, true);
+
+    // Keyboard Focus Accessibility (FR-026c standard)
+    document.addEventListener('focusin', function (e) {
+        const candidate = e.target.closest('[title], [data-tooltip], [data-se-tooltip], .se-cell-truncate, .inv-cell-truncate, [tabindex="0"], a, button');
+        if (candidate) {
+            showTooltip(candidate, true);
+        }
+    }, true);
+
+    document.addEventListener('focusout', function () {
+        hideTooltip();
+    }, true);
+
+    // Dismiss on Escape or scroll
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+            hideTooltip();
+        }
+    });
+
+    window.addEventListener('scroll', function () {
+        if (activeTarget && !document.activeElement?.contains(activeTarget)) {
+            hideTooltip();
+        }
+    }, { passive: true });
+
+    // Keyboard navigation: Ensure table cells / truncated spans have tabindex="0"
+    function ensureKeyboardAccessibility() {
+        const cells = document.querySelectorAll('.se-table td, .se-table th, .se-cell-truncate, .inv-cell-truncate');
+        cells.forEach(cell => {
+            if (cell.hasAttribute('data-no-tooltip') || (cell.closest && cell.closest('[data-no-tooltip]'))) return;
+            if ((cell.hasAttribute('title') || (cell.dataset && cell.dataset.seTooltip) || isTruncated(cell)) &&
+                !cell.hasAttribute('tabindex') &&
+                !cell.querySelector('a, button, input')) {
+                cell.setAttribute('tabindex', '0');
+            }
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', ensureKeyboardAccessibility);
+    const observer = new MutationObserver(debounce(ensureKeyboardAccessibility, 200));
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+})();

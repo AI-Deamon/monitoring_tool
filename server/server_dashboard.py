@@ -520,8 +520,22 @@ def agent_report(agent_id):
             "dashboard/403.html", message="You don't have permission to view this agent"
         ), 403
 
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    report_date = request.args.get("date") or datetime.now(ist_tz).strftime("%Y-%m-%d")
+    agent_status = getattr(agent, 'current_status', None)
+    agent_name = (
+        agent.agent_name
+        or agent.hostname
+        or (agent_status.username if agent_status else None)
+        or str(agent_id)
+    )
+
     return render_template(
-        "dashboard/agent_report.html", agent_id=agent_id, agent=agent
+        "dashboard/agent_report.html",
+        agent_id=agent_id,
+        agent=agent,
+        report_date=report_date,
+        display_name=agent_name,
     )
 
 
@@ -543,9 +557,78 @@ def agent_report_v2(agent_id):
         return render_template(
             "dashboard/404.html", message=f"Agent {agent_id} not found"
         ), 404
-    return render_template(
-        "dashboard/agent_report_v2.html", agent_id=agent_id, agent=agent
+
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    report_date = request.args.get("date") or datetime.now(ist_tz).strftime("%Y-%m-%d")
+    agent_status = getattr(agent, 'current_status', None)
+    agent_name = (
+        agent.agent_name
+        or agent.hostname
+        or (agent_status.username if agent_status else None)
+        or str(agent_id)
     )
+
+    return render_template(
+        "dashboard/agent_report_v2.html",
+        agent_id=agent_id,
+        agent=agent,
+        report_date=report_date,
+        display_name=agent_name,
+    )
+
+
+@bp.route("/agent/<path:agent_id>/report/export", methods=["GET"])
+@login_required
+def export_agent_report(agent_id):
+    """Direct download endpoint for agent report PDF or HTML with canonical filename."""
+    import os
+    from flask import Response
+    from engines.report_engine import build_individual_report, render_report_html, generate_pdf
+    from engines.report_naming import build_report_filename, get_reports_storage_dir
+
+    agent = server_models.Agent.query.filter_by(agent_id=agent_id).first()
+    if not agent:
+        return jsonify({"error": f"Agent {agent_id} not found"}), 404
+    if not can_view_agent(agent_id):
+        return jsonify({"error": "Access denied"}), 403
+
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    target_date = request.args.get("date") or datetime.now(ist_tz).strftime("%Y-%m-%d")
+    fmt = request.args.get("format", "pdf").lower()
+
+    ctx = build_individual_report(db, agent_id, target_date, target_date)
+    if not ctx:
+        return jsonify({"error": "No data found for this period"}), 404
+
+    html = render_report_html("daily", "individual", ctx)
+    agent_status = getattr(agent, 'current_status', None)
+    agent_name = (
+        agent.agent_name
+        or agent.hostname
+        or (agent_status.username if agent_status else None)
+        or str(agent_id)
+    )
+    filename = build_report_filename(
+        report_type="daily",
+        scope="individual",
+        identity=agent_name,
+        start_date=target_date,
+        end_date=target_date,
+        ext=fmt,
+    )
+
+    if fmt == "pdf":
+        dest_path = get_reports_storage_dir() / filename
+        ok, pdf_path = generate_pdf(html, dest_path)
+        if not ok or not os.path.exists(pdf_path):
+            return jsonify({"error": "PDF generation failed"}), 500
+        return send_file(pdf_path, as_attachment=True, download_name=filename, mimetype="application/pdf")
+    else:
+        return Response(
+            html,
+            mimetype="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
 
 @bp.route("/reports")
@@ -926,8 +1009,9 @@ def get_assets_data():
             )
         )
 
-        # Apply organization filter
-        if g.current_user.role != "admin" or g.current_user.org_id:
+        # Apply organization filter for non-admin users
+        # if g.current_user.role != "admin" or g.current_user.org_id:
+        if g.current_user.role != "admin" and g.current_user.org_id:
             query = query.filter(server_models.Agent.org_id == g.current_user.org_id)
 
         results = query.all()

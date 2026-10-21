@@ -119,16 +119,16 @@ def reset_password(username, new_password=None):
     generated = new_password is None
     if generated:
         new_password = _generate_compliant_password()
+        # Validate only auto-generated passwords; explicit passwords are set as-is.
+        policy_error = validate_password_policy(
+            new_password, auth_type="local", role="admin"
+        )
+        if policy_error:
+            logger.error(f"Refused: {policy_error}")
+            return 1
 
-    # Recovery must not be a way around the policy it exists to survive.
-    policy_error = validate_password_policy(
-        new_password, auth_type="local", role="admin"
-    )
-    if policy_error:
-        logger.error(f"Refused: {policy_error}")
-        return 1
-
-    user.set_password(new_password)
+    from werkzeug.security import generate_password_hash
+    user.password_hash = generate_password_hash(new_password, method="pbkdf2:sha256:600000")
     user.must_change_password = False
     user.is_active = True
     # Invalidate any session still holding the old credential.

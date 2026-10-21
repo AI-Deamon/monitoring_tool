@@ -1,80 +1,98 @@
+{% from "components/icons.html" import icon %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="se-preload">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}SentinelEdge Dashboard{% endblock %}</title>
 
+    <!-- Theme Initialization (Prevents flash of light theme before render) -->
+    <script nonce="{{ csp_nonce() }}">
+        (function () {
+            try {
+                var saved = localStorage.getItem('sentinel-theme') || localStorage.getItem('theme');
+                var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var theme = (saved === 'dark' || saved === 'light') ? saved : (prefersDark ? 'dark' : 'light');
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    document.documentElement.setAttribute('data-theme', 'light');
+                }
+            } catch (e) {}
+        })();
+    </script>
+
     <!-- External CSS Files -->
-    <link rel="stylesheet" href="/static/css/theme.css?v=20260818">
-    <link rel="stylesheet" href="/static/css/dashboard.css?v=20260818">
+    <link rel="stylesheet" href="/static/css/theme.css?v=20261008_btn_v2">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=20261013_live_v3">
+    <link rel="stylesheet" href="/static/css/header-responsive.css?v=20261008_btn_v2">
 
     <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
     <style nonce="{{ csp_nonce() }}">
-        * {
-    font-family: "Space Grotesk", sans-serif !important;
+        body {
+            font-family: var(--font-family-sans, "Space Grotesk", sans-serif);
             font-optical-sizing: auto;
-            font-weight: 400;
-            font-style: normal;
         }
     </style>
-<style nonce="{{ csp_nonce() }}">
-/* ================= PRINT MODE ================= */
-@media print {
+    <style nonce="{{ csp_nonce() }}">
+        /* ================= PRINT MODE ================= */
+        @media print {
 
-  /* Remove dashboard layout/header/sidebar */
-  nav,
-  header,
-  footer,
-  .no-print {
-    display: none !important;
-  }
+            /* Remove dashboard layout/header/sidebar */
+            nav,
+            header,
+            footer,
+            .no-print {
+                display: none !important;
+            }
 
-  /* Remove dark backgrounds for clean PDF */
-  body {
-    background: #ffffff !important;
-    color: #000000 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-  }
+            /* Remove dark backgrounds for clean PDF */
+            body {
+                background: #ffffff !important;
+                color: #000000 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
 
-  /* Align report full width */
-  #report-container {
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 auto !important;
-    box-shadow: none !important;
-    border: none !important;
-    border-radius: 0 !important;
-  }
+            /* Align report full width */
+            #report-container {
+                width: 100% !important;
+                max-width: 100% !important;
+                margin: 0 auto !important;
+                box-shadow: none !important;
+                border: none !important;
+                border-radius: 0 !important;
+            }
 
-  /* Prevent weird page breaks */
-  section,
-  table,
-  canvas,
-  .rounded-xl {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
+            /* Prevent weird page breaks */
+            section,
+            table,
+            canvas,
+            .rounded-xl {
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
 
-  /* Fix Tailwind dark mode colors in print */
-  .dark\:bg-gray-800,
-  .dark\:bg-gray-700 {
-    background: #ffffff !important;
-  }
+            /* Fix Tailwind dark mode colors in print */
+            .dark\:bg-gray-800,
+            .dark\:bg-gray-700 {
+                background: #ffffff !important;
+            }
 
-  .dark\:text-gray-100 {
-    color: #000000 !important;
-  }
+            .dark\:text-gray-100 {
+                color: #000000 !important;
+            }
 
-  /* Page margin */
-  @page {
-    size: A4 portrait;
-    margin: 12mm;
-  }
-}
-</style>
+            /* Page margin */
+            @page {
+                size: A4 portrait;
+                margin: 12mm;
+            }
+        }
+    </style>
 
     <!-- Tailwind CSS (precompiled; JS-built utility classes are literal strings
          captured by the content scan of static/js at build time) -->
@@ -82,6 +100,8 @@
 
     <!-- Chart.js -->
     <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}" nonce="{{ csp_nonce() }}"></script>
+    <!-- SentinelEdge Theme Manager (Single Source of Truth) -->
+    <script src="{{ url_for('static', filename='js/theme-manager.js') }}"></script>
     <style nonce="{{ csp_nonce() }}">
         /* Global Print Styles */
         @media print {
@@ -169,7 +189,7 @@
                 display: block !important;
             }
 
-            .grid > * {
+            .grid>* {
                 margin-bottom: 12px;
             }
 
@@ -205,143 +225,317 @@
     <!-- Navigation -->
     <nav aria-label="Global navigation"
         class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50 transition-colors">
-        <div class="max-w-7xl mx-auto px-2">
-            <div class="flex items-center justify-between h-16">
-                <div class="flex items-center gap-8">
+        <script nonce="{{ csp_nonce() }}">
+            (function () {
+                try {
+                    var st = sessionStorage.getItem('se_header_state');
+                    var nav = document.currentScript && document.currentScript.parentElement;
+                    if (nav) {
+                        if (st === '1') nav.classList.add('se-hide-brand-text');
+                        else if (st === '2') nav.classList.add('se-hide-brand-text', 'se-hamburger-mode');
+                    }
+                } catch (e) {}
+            })();
+        </script>
+        <!-- se-nav-inner governs all horizontal padding; max-w-7xl is neutralised by header-responsive.css -->
+        <div class="max-w-7xl mx-auto">
+            <div class="se-nav-inner h-16">
+
+                <!-- ── Group 1: Brand ── -->
+                <div class="se-header-brand">
                     <a href="{{ url_for('dashboard.dashboard_home') }}"
-                        class="flex items-center gap-2 text-xl font-bold text-primary-600 dark:text-primary-400">
-                        <span class="text-2xl"><img src="{{ url_for('static', filename='bsol.png') }}" class="w-15 h-8"
+                        class="flex items-center gap-2 text-xl font-normal text-primary-600 dark:text-primary-400"
+                        aria-label="SentinelEdge home">
+                        <span><img src="{{ url_for('static', filename='bsol.png') }}" class="w-15 h-8"
                                 alt="SentinelEdge Logo" /></span>
-                        <span>Sentinel<span class="text-purple-600 dark:text-purple-400">Edge</span></span>
+                        <span class="se-brand-text">Sentinel<span class="text-purple-600 dark:text-purple-400">Edge</span></span>
                     </a>
-
-                    <ul class="flex items-center gap-1">
-                        {% if session.role == 'admin' %}
-                        <li>
-                            <a href="{{ url_for('dashboard.dashboard_home') }}"
-                                class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.dashboard_home' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-                                Overview
-                            </a>
-                        </li>
-                        {% endif %}
-                        {% if session.role == 'admin' %}
-                        <li>
-                            <a href="{{ url_for('dashboard.agents_list') }}"
-                                class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.agents_list' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-                                Agents
-                            </a>
-                        </li>
-                        {% else %}
-                        <li>
-                            {% set user_agent_id = get_user_agent_id() %}
-                            {% if user_agent_id %}
-                            <a href="{{ url_for('dashboard.agent_detail', agent_id=user_agent_id) }}"
-                                class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.agent_detail' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-
-                            </a>
-                            {% else %}
-                            <span
-                                class="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-500 cursor-not-allowed">
-                                Agent
-                            </span>
-                            {% endif %}
-                        </li>
-                        {% endif %}
-                        {% if session.role == 'admin' %}
-                        <li>
-                            <a href="{{ url_for('dashboard.assets_list') }}"
-                                class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.assets_list' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-                                Assets
-                            </a>
-                        </li>
-                        <li>
-                            <a href="{{ url_for('dashboard.updates_dashboard') }}"
-                                class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.updates_dashboard' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-                                Updates
-                            </a>
-                        </li>
-                        {% endif %}
-                        {% if session.role == 'admin' %}
-                        <li>
-                            <a href="{{ url_for('dashboard.reports') }}"
-                                class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.reports' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
-                                Reports
-                            </a>
-                        </li>
-                        {% endif %}
-                    </ul>
                 </div>
 
-                <div class="flex items-center gap-4">
-                    <button id="theme-toggle"
-                        class="w-10 h-10 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center justify-center"
-                        title="Toggle Dark/Light Mode" aria-label="Toggle Dark/Light Mode">
-                        <span class="theme-toggle-icon moon text-lg dark:hidden"><img
-                                src="{{ url_for('static', filename='moon.png') }}" class="w-5 h-5" alt="" /></span>
-                        <span class="theme-toggle-icon sun text-lg hidden dark:block"><img
-                                src="{{ url_for('static', filename='day-mode.png') }}" class="w-5 h-5" alt="" /></span>
-                    </button>
+                <!-- ── Hamburger button (shown only in hamburger-mode, state 3) ── -->
+                <button id="se-hamburger-btn"
+                    type="button"
+                    aria-label="Open navigation menu"
+                    aria-expanded="false"
+                    aria-controls="se-nav-drawer">
+                    <span class="se-hamburger-icon" aria-hidden="true">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </span>
+                </button>
+
+                <!-- ── Group 2: Primary Navigation ── -->
+                <ul class="se-primary-nav" role="list">
                     {% if session.role == 'admin' %}
-                    <select id="global-agent-select"
-                        class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
-                        <option value="">Team Overview</option>
-                        <option disabled>Loading Agents...</option>
-                    </select>
-
+                    <li>
+                        <a href="{{ url_for('dashboard.dashboard_home') }}"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.dashboard_home' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint == 'dashboard.dashboard_home' %}aria-current="page"{% endif %}>
+                            Overview
+                        </a>
+                    </li>
                     {% endif %}
-                    <input type="date" id="global-date-select"
-                        class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                    {% if session.role == 'admin' %}
+                    <li>
+                        <a href="{{ url_for('dashboard.agents_list') }}"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint in ['dashboard.agents_list', 'dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint in ['dashboard.agents_list', 'dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] %}aria-current="page"{% endif %}>
+                            Agents
+                        </a>
+                    </li>
+                    {% else %}
+                    <!-- <li>
+                        {% set user_agent_id = get_user_agent_id() %}
+                        {% if user_agent_id %}
+                        <a href="{{ url_for('dashboard.agent_detail', agent_id=user_agent_id) }}"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.agent_detail' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}">
+                            Agent
+                        </a>
+                        {% else %}
+                        <span
+                            class="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 dark:text-gray-500 cursor-not-allowed">
+                            Agent
+                        </span>
+                        {% endif %}
+                    </li> -->
+                    {% endif %}
+                    {% if session.role == 'admin' %}
+                    <li>
+                        <a href="{{ url_for('dashboard.assets_list') }}"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint in ['dashboard.assets_list', 'dashboard.single_asset_detail'] else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint in ['dashboard.assets_list', 'dashboard.single_asset_detail'] %}aria-current="page"{% endif %}>
+                            Assets
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('dashboard.updates_dashboard') }}"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.updates_dashboard' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint == 'dashboard.updates_dashboard' %}aria-current="page"{% endif %}>
+                            Updates
+                        </a>
+                    </li>
+                    {% endif %}
+                    {% if session.role == 'admin' %}
+                    <li>
+                        <a href="{{ url_for('dashboard.reports') }}"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {{ 'bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300' if request.endpoint == 'dashboard.reports' else 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700' }}"
+                            {% if request.endpoint == 'dashboard.reports' %}aria-current="page"{% endif %}>
+                            Reports
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
 
+                <!-- ── Group 3: Header Actions ── -->
+                <div class="se-header-actions">
+
+                    <!-- Theme toggle (icon-only, Spec §19) -->
+                    <button id="theme-toggle"
+                        class="rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center justify-center"
+                        aria-label="Toggle Dark/Light Mode"
+                        data-no-tooltip>
+                        <span class="theme-toggle-icon moon dark:hidden">{{ icon('moon', 'w-5 h-5') }}</span>
+                        <span class="theme-toggle-icon sun hidden dark:block">{{ icon('sun', 'w-5 h-5') }}</span>
+                    </button>
+
+                    <!-- Team selector (Spec §16) — custom searchable dropdown -->
+                    {% if session.role == 'admin' %}
+                    <div id="agent-selector-wrapper" class="se-agent-selector" aria-label="Select agent or team view" data-no-tooltip>
+                        <!-- Trigger button -->
+                        <button type="button" id="agent-selector-btn"
+                            class="se-agent-selector__btn"
+                            aria-haspopup="listbox"
+                            aria-expanded="false"
+                            aria-controls="agent-selector-panel"
+                            aria-label="Select agent or team view"
+                            data-no-tooltip>
+                            <span id="agent-selector-label" class="se-agent-selector__label" data-no-tooltip>Team Overview</span>
+                            <span class="se-agent-selector__chevron" aria-hidden="true">
+                                <svg fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true" class="w-3.5 h-3.5"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
+                            </span>
+                        </button>
+                        <!-- Dropdown panel -->
+                        <div id="agent-selector-panel"
+                            class="se-agent-selector__panel"
+                            role="listbox"
+                            aria-label="Agents"
+                            hidden>
+                            <!-- Search row -->
+                            <div class="se-agent-selector__search-row">
+                                <div class="se-agent-selector__search-wrapper se-search-wrapper">
+                                    <span class="se-agent-selector__search-icon se-search-icon" aria-hidden="true">
+                                        {{ icon('search', class='w-4 h-4') }}
+                                    </span>
+                                    <input id="agent-selector-search"
+                                        type="text"
+                                        class="se-agent-selector__search-input se-search-input"
+                                        placeholder="Search team or agent..."
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        role="searchbox"
+                                        aria-label="Search agents">
+                                </div>
+                            </div>
+                            <!-- Divider -->
+                            <div class="se-agent-selector__divider" role="separator" aria-hidden="true"></div>
+                            <!-- Items list -->
+                            <ul id="agent-selector-list"
+                                class="se-agent-selector__list"
+                                role="presentation">
+                                <!-- Team Overview (always visible) -->
+                                <li class="se-agent-selector__item se-agent-selector__item--overview"
+                                    role="option"
+                                    data-value=""
+                                    tabindex="-1"
+                                    aria-selected="true">
+                                    Team Overview
+                                </li>
+                                <!-- Agent items injected by JS -->
+                                <li id="agent-selector-empty"
+                                    class="se-agent-selector__empty"
+                                    hidden
+                                    role="status"
+                                    aria-live="polite">
+                                    No agents found
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Date selector (Spec §17) -->
+                    <div class="se-custom-datepicker-wrapper se-header-datepicker">
+                        <input type="date" id="global-date-select"
+                            class="se-custom-native-hidden px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                            tabindex="-1"
+                            aria-hidden="true"
+                            aria-label="Select date">
+                    </div>
+
+                    <!-- Refresh (icon-only, Spec §18) -->
                     <button id="manual-refresh-btn"
                         onclick="if(typeof loadFullReport === 'function') loadFullReport(true); else window.location.reload();"
-                        class="w-10 h-10 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors flex items-center justify-center shrink-0"
-                        title="Refresh Data" aria-label="Refresh Data">
-                        <svg id="refresh-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                            xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                            </path>
-                        </svg>
+                        class="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors flex items-center justify-center"
+                        aria-label="Refresh Data">
+                        {{ icon('refresh', 'w-5 h-5', id='refresh-icon') }}
                     </button>
 
-                    <!-- User Menu -->
+                    <!-- User / Account control (Spec §8-10, §28) -->
                     <div class="relative group">
-                        <button type="button" id="user-menu-button" aria-haspopup="true" aria-expanded="false"
-                            class="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500">
-                            <span class="text-lg"><img src="{{ url_for('static', filename='user-setting.png') }}"
-                                    class="w-5 h-5" alt="" /></span>
-                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ session.username or
-                                'Guest' }}</span>
-                            {% if session.role == 'admin' %}
-                            <span
-                                class="px-2 py-1 text-xs font-medium bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300 rounded-full">Admin</span>
-                            {% endif %}
-                            <span class="text-xs text-gray-600 dark:text-gray-400" aria-hidden="true">▼</span>
+                        {#
+                            Avatar letter: first character of username, uppercased.
+                            Falls back to 'G' (Guest) when no session username.
+                        #}
+                        {% set _uname = session.username or 'Guest' %}
+                        {% set _uletter = _uname[0] | upper %}
+                        {% set _urole = 'Admin' if session.role == 'admin' else (session.role | title if session.role else 'User') %}
+
+                        <button type="button" id="user-menu-button"
+                            aria-haspopup="true" aria-expanded="false"
+                            class="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 text-gray-900 dark:text-gray-100"
+                            aria-label="Account menu for {{ _uname }}">
+                            <!-- 32px first-letter avatar -->
+                            <span class="se-user-avatar" aria-hidden="true">{{ _uletter }}</span>
+                            <!-- Two-line name / role -->
+                            <span class="se-user-info">
+                                <span class="se-user-name">{{ _uname }}</span>
+                                <span class="se-user-role">{{ _urole }}</span>
+                            </span>
+                            <!-- Dropdown chevron -->
+                            <span class="se-user-chevron" aria-hidden="true">{{ icon('chevron-down', 'w-3.5 h-3.5') }}</span>
                         </button>
+
+                        <!-- Dropdown panel -->
                         <div
-                            class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible transition-all">
+                            class="se-user-dropdown absolute mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible transition-all"
+                            role="menu" aria-labelledby="user-menu-button">
                             {% if session.role == 'admin' %}
                             <a href="{{ url_for('auth.list_users') }}"
-                                class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
-                                <img src="{{ url_for('static', filename='users.png') }}" class="w-4 h-4 inline mr-2" />
+                                class="flex items-center px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                role="menuitem">
+                                {{ icon('users', 'w-4 h-4 mr-2 text-gray-500 dark:text-gray-400') }}
                                 Manage Users
                             </a>
                             {% endif %}
                             <a href="{{ url_for('auth.change_password') }}"
-                                class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
-                                <img src="{{ url_for('static', filename='key.png') }}" class="w-4 h-4 inline mr-2" />
+                                class="flex items-center px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                role="menuitem">
+                                {{ icon('key', 'w-4 h-4 mr-2 text-gray-500 dark:text-gray-400') }}
                                 Change Password
                             </a>
                             <hr class="my-1 border-gray-200 dark:border-gray-600">
                             <a href="{{ url_for('auth.logout') }}"
-                                class="block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20">
-                                <img src="{{ url_for('static', filename='logout.png') }}" class="w-4 h-4 inline mr-2" />
+                                class="flex items-center px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                role="menuitem">
+                                {{ icon('logout', 'w-4 h-4 mr-2 text-red-500 dark:text-red-400') }}
                                 Logout
                             </a>
                         </div>
                     </div>
-                </div>
+
+                </div><!-- /se-header-actions -->
+            </div><!-- /se-nav-inner -->
+
+            <!-- ── Hamburger nav drawer (absolutely positioned below header) ── -->
+            <!-- Populated with nav links identical to se-primary-nav. Active state -->
+            <!-- is set by JS matching the current pathname against href values.    -->
+            <div id="se-nav-drawer" role="navigation" aria-label="Main navigation menu">
+                {% if session.role == 'admin' %}
+                <a href="{{ url_for('dashboard.dashboard_home') }}"
+                    class="{{ 'se-nav-active' if request.endpoint == 'dashboard.dashboard_home' else '' }}"
+                    data-endpoint="dashboard.dashboard_home"
+                    {% if request.endpoint == 'dashboard.dashboard_home' %}aria-current="page"{% endif %}>
+                    Overview
+                </a>
+                {% endif %}
+                {% if session.role == 'admin' %}
+                <a href="{{ url_for('dashboard.agents_list') }}"
+                    class="{{ 'se-nav-active' if request.endpoint in ['dashboard.agents_list', 'dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] else '' }}"
+                    data-endpoint="dashboard.agents_list"
+                    {% if request.endpoint in ['dashboard.agents_list', 'dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] %}aria-current="page"{% endif %}>
+                    Agents
+                </a>
+                {% else %}
+                {% set user_agent_id = get_user_agent_id() %}
+                {% if user_agent_id %}
+                <a href="{{ url_for('dashboard.agent_detail', agent_id=user_agent_id) }}"
+                    class="{{ 'se-nav-active' if request.endpoint == 'dashboard.agent_detail' else '' }}"
+                    data-endpoint="dashboard.agent_detail"
+                    {% if request.endpoint in ['dashboard.agent_detail', 'dashboard.agent_report', 'dashboard.agent_report_v2', 'dashboard.export_agent_report'] %}aria-current="page"{% endif %}>
+                    Agent
+                </a>
+                {% else %}
+                <span class="text-gray-400 dark:text-gray-500 cursor-not-allowed">Agent</span>
+                {% endif %}
+                {% endif %}
+                {% if session.role == 'admin' %}
+                <a href="{{ url_for('dashboard.assets_list') }}"
+                    class="{{ 'se-nav-active' if request.endpoint == 'dashboard.assets_list' else '' }}"
+                    data-endpoint="dashboard.assets_list"
+                    {% if request.endpoint in ['dashboard.assets_list', 'dashboard.single_asset_detail'] %}aria-current="page"{% endif %}>
+                    Assets
+                </a>
+                <a href="{{ url_for('dashboard.updates_dashboard') }}"
+                    class="{{ 'se-nav-active' if request.endpoint == 'dashboard.updates_dashboard' else '' }}"
+                    data-endpoint="dashboard.updates_dashboard"
+                    {% if request.endpoint == 'dashboard.updates_dashboard' %}aria-current="page"{% endif %}>
+                    Updates
+                </a>
+                {% endif %}
+                {% if session.role == 'admin' %}
+                <a href="{{ url_for('dashboard.reports') }}"
+                    class="{{ 'se-nav-active' if request.endpoint == 'dashboard.reports' else '' }}"
+                    data-endpoint="dashboard.reports"
+                    {% if request.endpoint == 'dashboard.reports' %}aria-current="page"{% endif %}>
+                    Reports
+                </a>
+                {% endif %}
             </div>
+
+            <!-- Transparent overlay: closes drawer when clicking outside -->
+            <div id="se-nav-overlay" aria-hidden="true"></div>
+
         </div>
     </nav>
 
@@ -370,13 +564,16 @@
     </div>
 
     <!-- Main Content -->
-    <main id="main-content" class="mx-auto min-h-[82vh] pt-8 transition-all" style="max-width: var(--container-max-width); padding-left: var(--container-padding); padding-right: var(--container-padding);" tabindex="-1">
+    <main id="main-content" class="mx-auto min-h-[82vh] pt-8 transition-all"
+        style="max-width: var(--container-max-width); padding-left: var(--container-padding); padding-right: var(--container-padding);"
+        tabindex="-1">
         {% block content %}{% endblock %}
     </main>
 
     <!-- Footer -->
     <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-3 transition-colors">
-        <div class="mx-auto px-6 py-4" style="max-width: var(--container-max-width); padding-left: var(--container-padding); padding-right: var(--container-padding);">
+        <div class="mx-auto px-6 py-4"
+            style="max-width: var(--container-max-width); padding-left: var(--container-padding); padding-right: var(--container-padding);">
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">&copy; 2025 <span
@@ -405,10 +602,10 @@
          it follows the browser's locale, so the same screen renders differently
          for different users. -->
     {# Per-tab authentication (D01 / FR-002a). Loaded before anything that
-       fetches, so the tab token is attached to every request. The bootstrap
-       value below appears exactly once, on the first authenticated response
-       after sign-in; it has already been removed from the session cookie by
-       then, so a tab opened later receives nothing and must sign in. #}
+    fetches, so the tab token is attached to every request. The bootstrap
+    value below appears exactly once, on the first authenticated response
+    after sign-in; it has already been removed from the session cookie by
+    then, so a tab opened later receives nothing and must sign in. #}
     <script src="{{ url_for('static', filename='js/tab_session.js') }}"></script>
     {% if g.get('tab_bootstrap_token') %}
     <script nonce="{{ csp_nonce() }}">
@@ -417,10 +614,13 @@
     {% endif %}
     <script src="{{ url_for('static', filename='js/datetime_format.js') }}"></script>
     {# Shared agent identity display (D21 / FR-026a-d). Loaded here for the same
-       reason as the date formatter: every screen that names an agent must apply
-       one rule, or each invents its own truncation and the defect returns. #}
+    reason as the date formatter: every screen that names an agent must apply
+    one rule, or each invents its own truncation and the defect returns. #}
     <script src="{{ url_for('static', filename='js/agent_display.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/utils.js') }}?v=20261001_table_std"></script>
+    <script src="{{ url_for('static', filename='js/confirm_modal.js') }}?v=20261006_modal_std" nonce="{{ csp_nonce() }}"></script>
+    <script src="{{ url_for('static', filename='js/custom_datepicker.js') }}?v=20261006_header_dp" nonce="{{ csp_nonce() }}"></script>
+    <script src="{{ url_for('static', filename='js/custom_select.js') }}?v=20261006_custom_select" nonce="{{ csp_nonce() }}"></script>
     <script nonce="{{ csp_nonce() }}">
         // ── Local calendar date (YYYY-MM-DD) ──────────────────────────────
         // Date.toISOString() returns the UTC day. East of Greenwich that is
@@ -434,44 +634,10 @@
             return local.toISOString().split('T')[0];
         };
 
-        // Dark Mode Toggle
-        function initTheme() {
-            const savedTheme = localStorage.getItem('theme') || 'light';
-            if (savedTheme === 'dark') {
-                document.documentElement.classList.add('dark');
-            } else {
-                document.documentElement.classList.remove('dark');
-            }
-        }
-
-        function toggleTheme() {
-            const isDark = document.documentElement.classList.contains('dark');
-            const toggleBtn = document.getElementById('theme-toggle');
-            if (isDark) {
-                document.documentElement.classList.remove('dark');
-                localStorage.setItem('theme', 'light');
-                if (toggleBtn) toggleBtn.setAttribute('aria-pressed', 'false');
-            } else {
-                document.documentElement.classList.add('dark');
-                localStorage.setItem('theme', 'dark');
-                if (toggleBtn) toggleBtn.setAttribute('aria-pressed', 'true');
-            }
-        }
-
-        // Initialize theme immediately (before content loads)
-        initTheme();
-
-        // Attach toggle event listener
+        // Initialize dashboard components
+        initDateSelector();
         document.addEventListener('DOMContentLoaded', () => {
-            const toggleBtn = document.getElementById('theme-toggle');
-            if (toggleBtn) {
-                toggleBtn.addEventListener('click', toggleTheme);
-                const isDark = document.documentElement.classList.contains('dark');
-                toggleBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
-            }
-
-            // Initialize components
-            loadGlobalAgents();
+            // loadGlobalAgents is bootstrapped by its own IIFE above.
             initDateSelector();
         });
 
@@ -509,62 +675,292 @@
                 console.error('Error navigating to agent data:', error);
             }
         }
-        async function loadGlobalAgents() {
-            const agentSelect = document.getElementById('global-agent-select');
-            if (!agentSelect) return;
+        // ── Searchable Team Selector ──────────────────────────────────────────
+        // Populates the custom dropdown. Reuses the same API endpoint, agent
+        // data, and navigation logic as the original <select> implementation.
+        // No API, route, or business logic is modified.
+        (function () {
+            'use strict';
 
-            try {
-                const data = await fetchJSON('/dashboard/api/agents');
-                if (data && data.data) {
-                    // Clear loading option
-                    agentSelect.innerHTML = '<option value="">Team Overview</option>';
+            const wrapper   = document.getElementById('agent-selector-wrapper');
+            if (!wrapper) return;  // Not on an admin page — bail out.
 
-                    // Add agents
-                    data.data.forEach(agent => {
-                        const option = document.createElement('option');
-                        option.value = agent.agent_id;
-                        option.textContent = `${agent.hostname} (${agent.username || 'Unknown'})`;
-                        agentSelect.appendChild(option);
-                    });
+            const btn       = document.getElementById('agent-selector-btn');
+            const panel     = document.getElementById('agent-selector-panel');
+            const list      = document.getElementById('agent-selector-list');
+            const searchEl  = document.getElementById('agent-selector-search');
+            const labelEl   = document.getElementById('agent-selector-label');
+            const emptyEl   = document.getElementById('agent-selector-empty');
 
-                    // Set selected agent if on agent detail page
-                    const path = window.location.pathname;
-                    if (path.includes('/dashboard/agent/')) {
-                        const parts = path.split('/');
-                        const agentIndex = parts.indexOf('agent');
-                        if (agentIndex !== -1 && parts[agentIndex + 1]) {
-                            agentSelect.value = parts[agentIndex + 1];
+            /* ── Viewport positioning ──────────────────────────────────── */
+            function positionPanel() {
+                panel.style.left = 'auto';
+                panel.style.right = '0';
+                requestAnimationFrame(() => {
+                    const rect = panel.getBoundingClientRect();
+                    if (rect.left < 8) {
+                        panel.style.right = 'auto';
+                        panel.style.left = '0';
+                    }
+                });
+            }
+
+            /* ── Open / close ──────────────────────────────────────────── */
+            function openPanel() {
+                // Dismiss open datepicker when agent selector opens
+                document.querySelectorAll('.se-custom-datepicker-wrapper.se-dropdown--open').forEach(w => {
+                    const input = w.querySelector('input');
+                    if (input && input._seCustomDatePicker) input._seCustomDatePicker.close();
+                });
+                panel.hidden = false;
+                btn.setAttribute('aria-expanded', 'true');
+                wrapper.classList.add('se-agent-selector--open');
+                positionPanel();
+                searchEl.value = '';
+                filterItems('');
+                searchEl.focus();
+            }
+
+            function closePanel() {
+                if (panel.hidden) return;
+                panel.hidden = true;
+                btn.setAttribute('aria-expanded', 'false');
+                wrapper.classList.remove('se-agent-selector--open');
+                searchEl.value = '';
+                filterItems('');
+            }
+
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                panel.hidden ? openPanel() : closePanel();
+            });
+
+            /* Open via button keyboard interaction */
+            btn.addEventListener('keydown', (e) => {
+                if (['ArrowDown', 'Enter', ' '].includes(e.key)) {
+                    e.preventDefault();
+                    openPanel();
+                }
+            });
+
+            /* Close on outside click */
+            document.addEventListener('click', (e) => {
+                if (!wrapper.contains(e.target)) closePanel();
+            });
+
+            /* Close on Escape */
+            wrapper.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closePanel();
+                    btn.focus();
+                }
+            });
+
+            /* ── Search filter ──────────────────────────────────────────── */
+            function filterItems(query) {
+                const q = query.trim().toLowerCase();
+                const agentItems = list.querySelectorAll(
+                    '.se-agent-selector__item:not(.se-agent-selector__item--overview)');
+                let visibleCount = 0;
+
+                agentItems.forEach(item => {
+                    const text = (item.dataset.label || item.textContent).toLowerCase();
+                    const show = !q || text.includes(q);
+                    item.hidden = !show;
+                    if (show) visibleCount++;
+                });
+
+                if (emptyEl) {
+                    emptyEl.hidden = visibleCount > 0 || !q;
+                }
+            }
+
+            searchEl.addEventListener('input', () => filterItems(searchEl.value));
+
+            /* ── Keyboard navigation inside panel ──────────────────────── */
+            panel.addEventListener('keydown', (e) => {
+                const isSearch = (document.activeElement === searchEl);
+                const items = [...list.querySelectorAll(
+                    '.se-agent-selector__item:not([hidden])')
+                ];
+                const focused = document.activeElement;
+                const idx = items.indexOf(focused);
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (isSearch) {
+                        if (items.length > 0) items[0].focus();
+                    } else {
+                        const next = items[idx + 1] || items[0];
+                        if (next) next.focus();
+                    }
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (isSearch) {
+                        if (items.length > 0) items[items.length - 1].focus();
+                    } else if (idx === 0) {
+                        searchEl.focus();
+                    } else {
+                        const prev = items[idx - 1] || items[items.length - 1];
+                        if (prev) prev.focus();
+                    }
+                } else if (e.key === 'Home' && !isSearch) {
+                    e.preventDefault();
+                    if (items.length > 0) items[0].focus();
+                } else if (e.key === 'End' && !isSearch) {
+                    e.preventDefault();
+                    if (items.length > 0) items[items.length - 1].focus();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (isSearch) {
+                        const q = searchEl.value.trim().toLowerCase();
+                        if (q) {
+                            // If search entered, select first matching agent
+                            const firstAgent = list.querySelector(
+                                '.se-agent-selector__item:not(.se-agent-selector__item--overview):not([hidden])'
+                            );
+                            if (firstAgent) {
+                                navigateTo(firstAgent.dataset.value);
+                            } else if (items.length > 0) {
+                                navigateTo(items[0].dataset.value);
+                            }
+                        } else if (items.length > 0) {
+                            navigateTo(items[0].dataset.value);
+                        }
+                    } else if (focused && focused.matches && focused.matches('.se-agent-selector__item')) {
+                        navigateTo(focused.dataset.value);
+                    }
+                } else if (e.key === ' ' && !isSearch) {
+                    e.preventDefault();
+                    if (focused && focused.matches && focused.matches('.se-agent-selector__item')) {
+                        navigateTo(focused.dataset.value);
+                    }
+                }
+            });
+
+            /* ── Item selection & navigation ───────────────────────────── */
+            function navigateTo(agentId) {
+                const safe = safeAgentId(agentId);
+                closePanel();
+                if (safe) {
+                    window.location.assign(`/dashboard/agent/${safe}`);
+                } else {
+                    window.location.assign('/dashboard/');
+                }
+            }
+
+            list.addEventListener('click', (e) => {
+                const item = e.target.closest('.se-agent-selector__item');
+                if (item && !item.hidden) navigateTo(item.dataset.value);
+            });
+
+            /* ── Mark the currently selected item ─────────────────────── */
+            function applySelectedState(agentId) {
+                list.querySelectorAll('.se-agent-selector__item').forEach(item => {
+                    const selected = item.dataset.value === (agentId || '');
+                    item.setAttribute('aria-selected', selected ? 'true' : 'false');
+                    item.classList.toggle('se-agent-selector__item--selected', selected);
+                });
+                // Update visible label on the button
+                const matched = list.querySelector(
+                    `.se-agent-selector__item[data-value="${CSS.escape(agentId || '')}"]`);
+                const text = matched ? matched.textContent.trim() : 'Team Overview';
+                labelEl.textContent = text;
+            }
+
+            function populateAgentItems(agents) {
+                // Remove any stale agent items (keep overview & emptyEl)
+                list.querySelectorAll(
+                    '.se-agent-selector__item:not(.se-agent-selector__item--overview)'
+                ).forEach(el => el.remove());
+
+                agents.forEach(agent => {
+                    const hostname = agent.hostname || '';
+                    const username = agent.username || 'Unknown';
+                    const text     = `${hostname} (${username})`;
+                    const li       = document.createElement('li');
+                    li.className   = 'se-agent-selector__item';
+                    li.role        = 'option';
+                    li.tabIndex    = -1;
+                    li.dataset.value   = agent.agent_id;
+                    li.dataset.label   = `${hostname} ${username} ${text}`.toLowerCase();
+                    li.setAttribute('aria-selected', 'false');
+                    li.textContent = text;
+                    if (emptyEl) {
+                        list.insertBefore(li, emptyEl);
+                    } else {
+                        list.appendChild(li);
+                    }
+                });
+
+                // Detect current agent from URL and highlight it
+                const path = window.location.pathname;
+                let currentId = '';
+                if (path.includes('/dashboard/agent/')) {
+                    const parts = path.split('/');
+                    const idx   = parts.indexOf('agent');
+                    if (idx !== -1 && parts[idx + 1]) {
+                        currentId = parts[idx + 1];
+                    }
+                }
+                applySelectedState(currentId);
+            }
+
+            /* ── API fetch & DOM population ────────────────────────────── */
+            window.loadGlobalAgents = async function loadGlobalAgents() {
+                // Instantly populate from session cache if available to prevent dropdown flash
+                try {
+                    const cached = sessionStorage.getItem('se_cached_agents');
+                    if (cached) {
+                        const parsed = JSON.parse(cached);
+                        if (parsed && Array.isArray(parsed)) {
+                            populateAgentItems(parsed);
                         }
                     }
+                } catch (e) {}
 
-                    // Add change event listener
-                    agentSelect.addEventListener('change', (e) => {
-                        const agentId = safeAgentId(e.target.value);
-                        if (agentId) {
-                            window.location.assign(`/dashboard/agent/${agentId}`);
-                        } else {
-                            window.location.assign('/dashboard/');
+                try {
+                    const data = await fetchJSON('/dashboard/api/agents');
+                    if (data && data.data) {
+                        try {
+                            sessionStorage.setItem('se_cached_agents', JSON.stringify(data.data));
+                        } catch (e) {}
+                        populateAgentItems(data.data);
+                    } else {
+                        if (!list.querySelector('.se-agent-selector__item:not(.se-agent-selector__item--overview)')) {
+                            labelEl.textContent = 'Team Overview';
                         }
-                    });
-                } else {
-                    agentSelect.innerHTML = '<option value="">No agents found</option>';
+                    }
+                } catch (error) {
+                    console.error('Failed to load agents:', error);
+                    if (!list.querySelector('.se-agent-selector__item:not(.se-agent-selector__item--overview)')) {
+                        labelEl.textContent = 'Team Overview';
+                    }
                 }
-            } catch (error) {
-                console.error('Failed to load agents:', error);
-                agentSelect.innerHTML = '<option value="">Failed to load agents</option>';
-            }
-        }
+            };
 
-        // Initialize date selector with today's date (local timezone)
+            // Bootstrap safely
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', window.loadGlobalAgents);
+            } else {
+                window.loadGlobalAgents();
+            }
+        })();
+
+        // Initialize date selector with today's date (local timezone) and enhance with SeCustomDatePicker
         function initDateSelector() {
             const dateSelect = document.getElementById('global-date-select');
-            if (dateSelect && !dateSelect.value) {
+            if (!dateSelect) return;
+            if (!dateSelect.value) {
                 // Get YYYY-MM-DD in local time
                 const now = new Date();
                 const year = now.getFullYear();
                 const month = String(now.getMonth() + 1).padStart(2, '0');
                 const day = String(now.getDate()).padStart(2, '0');
                 dateSelect.value = `${year}-${month}-${day}`;
+            }
+            if (window.SeCustomDatePicker && !dateSelect._seCustomDatePicker) {
+                new window.SeCustomDatePicker(dateSelect, { isHeader: true });
             }
         }
 
@@ -597,12 +993,209 @@
         function getCurrentTimeIST() {
             return DateFmt.formatDateTime(new Date());
         }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            initTheme();
-        });
     </script>
     <script src="{{ url_for('static', filename='js/eol-dashboard.js') }}" nonce="{{ csp_nonce() }}"></script>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         Responsive Header Controller
+         Measures true pixel availability each frame via ResizeObserver.
+         Applies three state classes on the <nav> element:
+           (default)           full brand text + inline nav + actions
+           se-hide-brand-text  logo icon only  + inline nav + actions
+           se-hamburger-mode   logo icon only  + hamburger  + actions
+         The right-side actions group always has priority.
+         No business logic is modified.
+         ═══════════════════════════════════════════════════════════════════ -->
+    <script nonce="{{ csp_nonce() }}">
+    (function () {
+        'use strict';
+
+        /* ── Elements ───────────────────────────────────────────────── */
+        const nav          = document.querySelector('nav[aria-label="Global navigation"]');
+        const navInner     = nav && nav.querySelector('.se-nav-inner');
+        const brand        = nav && nav.querySelector('.se-header-brand');
+        const brandText    = nav && nav.querySelector('.se-brand-text');
+        const primaryNav   = nav && nav.querySelector('.se-primary-nav');
+        const actions      = nav && nav.querySelector('.se-header-actions');
+        const hamburgerBtn = document.getElementById('se-hamburger-btn');
+        const drawer       = document.getElementById('se-nav-drawer');
+        const overlay      = document.getElementById('se-nav-overlay');
+
+        if (!nav || !navInner || !brand || !actions || !hamburgerBtn || !drawer) return;
+
+        // Signal that JS is active so fallback CSS relinquishes control
+        nav.classList.add('se-js-ready');
+
+        /* ── Mark active drawer links ────────────────────────────────── */
+        const currentPath = window.location.pathname;
+        drawer.querySelectorAll('a').forEach(function (a) {
+            const href = a.getAttribute('href');
+            if (href && (href === currentPath ||
+                currentPath.startsWith(href + '/') ||
+                (href.endsWith('/') && currentPath.startsWith(href)))) {
+                a.classList.add('se-nav-active');
+            }
+        });
+
+        /* ── Drawer toggle ───────────────────────────────────────────── */
+        function openDrawer() {
+            drawer.classList.add('se-drawer-open');
+            if (overlay) overlay.classList.add('se-drawer-open');
+            hamburgerBtn.setAttribute('aria-expanded', 'true');
+            hamburgerBtn.setAttribute('aria-label', 'Close navigation menu');
+        }
+
+        function closeDrawer() {
+            drawer.classList.remove('se-drawer-open');
+            if (overlay) overlay.classList.remove('se-drawer-open');
+            hamburgerBtn.setAttribute('aria-expanded', 'false');
+            hamburgerBtn.setAttribute('aria-label', 'Open navigation menu');
+        }
+
+        hamburgerBtn.addEventListener('click', function () {
+            if (hamburgerBtn.getAttribute('aria-expanded') === 'true') {
+                closeDrawer();
+            } else {
+                openDrawer();
+            }
+        });
+
+        if (overlay) overlay.addEventListener('click', closeDrawer);
+
+        drawer.addEventListener('click', function (e) {
+            if (e.target.tagName === 'A') closeDrawer();
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') closeDrawer();
+        });
+
+        /* ── Intrinsic Width Measurements ───────────────────────────── */
+        let cachedBrandTextWidth   = 105;
+        let cachedBrandIconWidth   = 68; // default logo width ~60px + 8px gap
+        let cachedNavNaturalWidth  = 380;
+
+        function measureNaturalWidths() {
+            // Measure brand text unconstrained width safely without destructive DOM mutation
+            if (brandText && brandText.offsetWidth > 0) {
+                cachedBrandTextWidth = Math.ceil(brandText.getBoundingClientRect().width);
+            }
+
+            // Measure brand logo icon unconstrained width
+            if (brand) {
+                const img = brand.querySelector('img');
+                if (img && img.offsetWidth > 0) {
+                    cachedBrandIconWidth = Math.ceil(img.getBoundingClientRect().width) + 8;
+                }
+            }
+
+            // Measure unconstrained primary navigation width (sum of items + gaps)
+            if (primaryNav && !nav.classList.contains('se-hamburger-mode') && primaryNav.children.length > 0) {
+                let total = 0;
+                for (let i = 0; i < primaryNav.children.length; i++) {
+                    total += primaryNav.children[i].getBoundingClientRect().width;
+                }
+                const gap = parseFloat(window.getComputedStyle(primaryNav).gap) || 4;
+                total += gap * Math.max(0, primaryNav.children.length - 1);
+                if (total > 0) cachedNavNaturalWidth = Math.ceil(total);
+            }
+        }
+
+        /* ── State Management ────────────────────────────────────────── */
+        // state: 0 = full header, 1 = hide brand text only, 2 = hamburger mode
+        let currentState = -1;
+
+        function applyState(state) {
+            if (state === currentState) return;
+            currentState = state;
+
+            nav.classList.remove('se-hide-brand-text', 'se-hamburger-mode');
+
+            if (state === 1) {
+                nav.classList.add('se-hide-brand-text');
+                closeDrawer();
+            } else if (state === 2) {
+                nav.classList.add('se-hide-brand-text', 'se-hamburger-mode');
+            } else {
+                closeDrawer();
+            }
+
+            try {
+                sessionStorage.setItem('se_header_state', String(state));
+            } catch (e) {}
+        }
+
+        /* ── Available-Width Evaluation ──────────────────────────────── */
+        function evaluate() {
+            measureNaturalWidths();
+
+            // True usable content width of header row
+            const cs = window.getComputedStyle(navInner);
+            const pl = parseFloat(cs.paddingLeft) || 0;
+            const pr = parseFloat(cs.paddingRight) || 0;
+            const availableWidth = Math.floor(navInner.clientWidth - pl - pr);
+            if (availableWidth <= 0) return;
+
+            // Actions group width (flex-shrink: 0, always visible)
+            const actionsWidth = Math.ceil(actions.getBoundingClientRect().width);
+
+            // Brand widths
+            const brandIconWidth = cachedBrandIconWidth || 68;
+            const brandFullWidth = brandIconWidth + (cachedBrandTextWidth || 105);
+
+            // Unconstrained navigation width
+            const navWidth = cachedNavNaturalWidth || 380;
+
+            // Margin between brand and primary nav
+            const navMargin = parseFloat(window.getComputedStyle(primaryNav).marginLeft) || 16;
+
+            // Priority 1: Full brand + full navigation + actions
+            const state1Required = brandFullWidth + navMargin + navWidth + actionsWidth;
+            if (state1Required <= availableWidth) {
+                applyState(0);
+                return;
+            }
+
+            // Priority 2: Hide only SentinelEdge text, keep logo + full navigation + actions
+            const state2Required = brandIconWidth + navMargin + navWidth + actionsWidth;
+            if (state2Required <= availableWidth) {
+                applyState(1);
+                return;
+            }
+
+            // Priority 3: If still insufficient, replace full navigation with hamburger
+            applyState(2);
+        }
+
+        window.__seEvaluateHeader = function () {
+            evaluate();
+        };
+
+        /* ── Event Observers ─────────────────────────────────────────── */
+        const ro = new ResizeObserver(function () {
+            evaluate();
+        });
+
+        function init() {
+            evaluate();
+            ro.observe(navInner);
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+
+        // Lift preload transition suppression once initial render is established
+        requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+                document.documentElement.classList.remove('se-preload');
+            });
+        });
+    }());
+    </script>
+
     {% block extra_js %}{% endblock %}
 </body>
 

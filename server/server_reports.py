@@ -43,44 +43,71 @@ def _get_schedules():
     for row in rows:
         d = dict(zip(cols, row))
         d['recipients'] = json.loads(d['recipients']) if d['recipients'] else []
-        d['last_run'] = d['last_run'].isoformat() if d['last_run'] else None
-        d['next_run'] = d['next_run'].isoformat() if d['next_run'] else None
+        nr = d.get('next_run')
+        if nr:
+            send_hr = nr.hour
+            send_min = nr.minute
+        else:
+            send_hr = d.get('send_hour') if d.get('send_hour') is not None else 9
+            send_min = 0
+        d['send_time'] = f"{send_hr:02d}:{send_min:02d}"
+        d['last_run'] = (d['last_run'].replace(tzinfo=IST) if d['last_run'].tzinfo is None else d['last_run']).isoformat() if d['last_run'] else None
+        d['next_run'] = (d['next_run'].replace(tzinfo=IST) if d['next_run'].tzinfo is None else d['next_run']).isoformat() if d['next_run'] else None
         d['created_at'] = d['created_at'].isoformat() if d['created_at'] else None
         result.append(d)
     return result
 
 
-def _calc_next_run(frequency, day_of_week, day_of_month, send_hour):
-    """Calculate next run datetime from now (IST)."""
+def _calc_next_run(frequency, day_of_week=None, day_of_month=None, send_hour=9, send_minute=0):
+    """Calculate next run datetime from now in IST."""
     now = datetime.now(IST)
-    h = send_hour or 9
+    h = 9 if send_hour is None else int(send_hour)
+    m = 0 if send_minute is None else int(send_minute)
+
     if frequency == 'daily':
-        candidate = now.replace(hour=h, minute=0, second=0, microsecond=0)
+        candidate = now.replace(hour=h, minute=m, second=0, microsecond=0)
         if candidate <= now:
             candidate += timedelta(days=1)
         return candidate
     elif frequency == 'weekly':
         dow = day_of_week if day_of_week is not None else 0  # 0=Monday
         days_ahead = (dow - now.weekday()) % 7
-        if days_ahead == 0 and now.hour >= h:
-            days_ahead = 7
-        return (now + timedelta(days=days_ahead)).replace(hour=h, minute=0, second=0, microsecond=0)
+        candidate = now.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(days=days_ahead)
+        if candidate <= now:
+            candidate += timedelta(days=7)
+        return candidate
     elif frequency == 'monthly':
         dom = day_of_month or 1
-        candidate = now.replace(day=dom, hour=h, minute=0, second=0, microsecond=0)
+        import calendar
+        _, max_days = calendar.monthrange(now.year, now.month)
+        actual_dom = min(dom, max_days)
+        candidate = now.replace(day=actual_dom, hour=h, minute=m, second=0, microsecond=0)
         if candidate <= now:
-            # next month
             if now.month == 12:
-                candidate = candidate.replace(year=now.year + 1, month=1)
+                next_year = now.year + 1
+                next_month = 1
             else:
-                candidate = candidate.replace(month=now.month + 1)
+                next_year = now.year
+                next_month = now.month + 1
+            _, max_next = calendar.monthrange(next_year, next_month)
+            candidate = candidate.replace(year=next_year, month=next_month, day=min(dom, max_next))
         return candidate
     return now + timedelta(hours=1)
 
 
 def _run_schedule(schedule_id):
     """Execute a schedule: generate report and send email."""
-    from engines.report_engine import build_individual_report, build_team_report, render_report_html, send_report_email
+    import os
+    from engines.report_naming import build_report_filename, get_reports_storage_dir, safe_write_file
+    from engines.report_engine import (
+        build_individual_report,
+        build_team_report,
+        render_report_html,
+        send_report_email,
+        render_email_body_html,
+        _get_agent_info,
+        generate_pdf,
+    )
 
     row = db.session.execute(text(
         "SELECT * FROM report_schedules WHERE id = :id"
@@ -109,8 +136,59 @@ def _run_schedule(schedule_id):
             report_type=s['report_type'], scope=s['scope'],
             start_date=start_date, end_date=end_date
         )
+        attachments = []
+        identity = 'team' if s['scope'] == 'team' else (_get_agent_info(db, s['agent_id']).get('agent_name') or s['agent_id'])
 
-        next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9))
+        # 1. Generate and attach PDF report
+        pdf_name = build_report_filename(
+            report_type=s['report_type'],
+            scope=s['scope'],
+            identity=identity,
+            start_date=start_date,
+            end_date=end_date,
+            ext='pdf',
+        )
+        target_pdf = get_reports_storage_dir() / pdf_name
+        ok_pdf, pdf_res = generate_pdf(html, target_pdf)
+        if ok_pdf and os.path.exists(pdf_res):
+            attachments.append({
+                'path': str(pdf_res),
+                'filename': pdf_name,
+                'content_type': 'application/pdf',
+            })
+
+        # 2. Generate and attach HTML report
+        html_name = build_report_filename(
+            report_type=s['report_type'],
+            scope=s['scope'],
+            identity=identity,
+            start_date=start_date,
+            end_date=end_date,
+            ext='html',
+        )
+        target_html = get_reports_storage_dir() / html_name
+        safe_write_file(content=html, target_path=target_html)
+        attachments.append({
+            'path': str(target_html),
+            'filename': html_name,
+            'content_type': 'text/html',
+        })
+
+        # Email body matching standard notification format
+        email_body = render_email_body_html(
+            report_type=s['report_type'],
+            scope=s['scope'],
+            agent_name=identity if s['scope'] != 'team' else None,
+            team_name='Team' if s['scope'] == 'team' else None,
+            start_date=str(start_date),
+            end_date=str(end_date),
+            attachments=attachments,
+        )
+
+        ok, err = send_report_email(email_body, recipients, subject, attachments=attachments if attachments else None)
+
+        send_min = s['next_run'].minute if s.get('next_run') else 0
+        next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9), send_min)
         db.session.execute(text("""
             UPDATE report_schedules SET last_run = :now, next_run = :next WHERE id = :id
         """), {'now': datetime.now(IST), 'next': next_run, 'id': schedule_id})
@@ -155,8 +233,8 @@ def generate_report():
     report_type = data.get('report_type', 'weekly')   # weekly/monthly/daily
     scope = data.get('scope', 'team')                  # team/individual
     agent_id = data.get('agent_id')
-    start_str = data.get('start_date')
-    end_str = data.get('end_date')
+    start_str = data.get('start_date') or data.get('date')
+    end_str = data.get('end_date') or (start_str if report_type == 'daily' else None)
 
     try:
         start = _parse_date(start_str) if start_str else _get_date_range(report_type, report_type)[0]
@@ -213,8 +291,8 @@ def email_report():
     report_type = data.get('report_type', 'weekly')
     scope = data.get('scope', 'team')
     agent_id = data.get('agent_id')
-    start_str = data.get('start_date')
-    end_str = data.get('end_date')
+    start_str = data.get('start_date') or data.get('date')
+    end_str = data.get('end_date') or (start_str if report_type == 'daily' else None)
     recipients = data.get('recipients', [])
 
     if not recipients:
@@ -276,8 +354,17 @@ def create_schedule():
     frequency = data['frequency']
     day_of_week = data.get('day_of_week')
     day_of_month = data.get('day_of_month')
-    send_hour = int(data.get('send_hour', 9))
-    next_run = _calc_next_run(frequency, day_of_week, day_of_month, send_hour)
+
+    send_time = data.get('send_time')
+    if send_time and ':' in str(send_time):
+        parts = str(send_time).split(':')
+        send_hour = int(parts[0])
+        send_minute = int(parts[1])
+    else:
+        send_hour = int(data.get('send_hour', 9))
+        send_minute = int(data.get('send_minute', 0))
+
+    next_run = _calc_next_run(frequency, day_of_week, day_of_month, send_hour, send_minute)
 
     db.session.execute(text("""
         INSERT INTO report_schedules
@@ -336,9 +423,12 @@ def unified_generate():
     auto_email = data.get('auto_email', False)
     recipients = data.get('recipients', [])
 
+    start_val = data.get('start_date') or data.get('date')
+    end_val = data.get('end_date') or (start_val if report_type == 'daily' else None)
+
     try:
-        start = _parse_date(data['start_date']) if data.get('start_date') else _get_date_range(report_type, report_type)[0]
-        end = _parse_date(data['end_date']) if data.get('end_date') else _get_date_range(report_type, report_type)[1]
+        start = _parse_date(start_val) if start_val else _get_date_range(report_type, report_type)[0]
+        end = _parse_date(end_val) if end_val else _get_date_range(report_type, report_type)[1]
     except (ValueError, KeyError):
         return jsonify({'error': 'Invalid or missing date'}), 400
 
@@ -470,8 +560,17 @@ def create_unified_schedule():
     frequency = data['frequency']
     day_of_week = data.get('day_of_week')
     day_of_month = data.get('day_of_month')
-    send_hour = int(data.get('send_hour', 9))
-    next_run = _calc_next_run(frequency, day_of_week, day_of_month, send_hour)
+
+    send_time = data.get('send_time')
+    if send_time and ':' in str(send_time):
+        parts = str(send_time).split(':')
+        send_hour = int(parts[0])
+        send_minute = int(parts[1])
+    else:
+        send_hour = int(data.get('send_hour', 9))
+        send_minute = int(data.get('send_minute', 0))
+
+    next_run = _calc_next_run(frequency, day_of_week, day_of_month, send_hour, send_minute)
 
     db.session.execute(text("""
         INSERT INTO report_schedules

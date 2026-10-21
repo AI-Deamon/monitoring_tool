@@ -1,24 +1,41 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Theme Initialization: must run before CSS to prevent flash of wrong theme -->
+    <script nonce="{{ csp_nonce() }}">
+        (function () {
+            try {
+                var saved = localStorage.getItem('sentinel-theme') || localStorage.getItem('theme');
+                var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var theme = (saved === 'dark' || saved === 'light') ? saved : (prefersDark ? 'dark' : 'light');
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    document.documentElement.setAttribute('data-theme', 'light');
+                }
+            } catch (e) {}
+        })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Team Weekly Activity Report</title>
     <style nonce="{{ csp_nonce() }}">
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; padding: 20px; transition: background-color 0.2s, color 0.2s; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: background-color 0.2s, box-shadow 0.2s; }
         header { background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%); color: white; padding: 30px; }
         header h1 { font-size: 28px; margin-bottom: 5px; }
         .report-meta { display: flex; gap: 30px; margin-top: 15px; font-size: 13px; opacity: 0.9; }
         .content { padding: 30px; }
-        h2 { font-size: 16px; color: #1a73e8; margin: 30px 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid #e0e0e0; }
+        h2 { font-size: 16px; color: #1a73e8; margin: 30px 0 15px 0; padding-bottom: 8px; border-bottom: 2px solid #e0e0e0; transition: color 0.2s, border-color 0.2s; }
         h2:first-of-type { margin-top: 0; }
         .team-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 25px; }
-        .stat-card { background: #f8f9fa; border-radius: 12px; padding: 25px; text-align: center; border: 1px solid #e0e0e0; }
+        .stat-card { background: #f8f9fa; border-radius: 12px; padding: 25px; text-align: center; border: 1px solid #e0e0e0; transition: background-color 0.2s, border-color 0.2s; }
         .stat-card.primary { background: linear-gradient(135deg, #e8f0fe 0%, #d2e3fc 100%); border: none; }
         .stat-card .value { font-size: 36px; font-weight: 700; color: #1a73e8; }
-        .stat-card .label { font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 8px; }
+        .stat-card .label { font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 8px; transition: color 0.2s; }
         .team-chart { display: flex; gap: 15px; margin: 25px 0; align-items: flex-end; height: 200px; padding: 0 10px; }
         .day-column { flex: 1; display: flex; flex-direction: column; align-items: center; }
         .stacked-bar { width: 100%; display: flex; flex-direction: column; border-radius: 4px 4px 0 0; overflow: hidden; }
@@ -26,17 +43,17 @@
         .bar-segment.idle { background: #f9a825; }
         .bar-segment.locked { background: #ea4335; }
         .day-info { margin-top: 10px; text-align: center; }
-        .day-name { font-size: 12px; font-weight: 600; color: #333; }
+        .day-name { font-size: 12px; font-weight: 600; color: #333; transition: color 0.2s; }
         .day-hours { font-size: 11px; color: #888; }
         .legend { display: flex; gap: 20px; justify-content: center; margin: 15px 0; }
-        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #666; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #666; transition: color 0.2s; }
         .legend-color { width: 14px; height: 14px; border-radius: 3px; }
         .legend-color.active { background: #34a853; }
         .legend-color.idle { background: #f9a825; }
         .legend-color.locked { background: #ea4335; }
         table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 13px; }
-        th { background: #f8f9fa; padding: 14px 16px; text-align: left; font-weight: 600; color: #555; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
-        td { padding: 14px 16px; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; padding: 14px 16px; text-align: left; font-weight: 600; color: #555; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; transition: background-color 0.2s, color 0.2s; }
+        td { padding: 14px 16px; border-bottom: 1px solid #eee; color: #333; transition: border-color 0.2s, color 0.2s; }
         tr:hover { background: #f8f9fa; }
         .rank { width: 40px; text-align: center; font-weight: 700; color: #1a73e8; }
         .rank-1 { color: #ffd700; }
@@ -45,10 +62,10 @@
         .user-cell { display: flex; align-items: center; gap: 12px; }
         .avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #1a73e8, #0d47a1); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; }
         .member-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; margin-top: 15px; }
-        .member-card { background: #f8f9fa; border-radius: 10px; padding: 18px; border-left: 4px solid #1a73e8; display: flex; justify-content: space-between; align-items: center; }
+        .member-card { background: #f8f9fa; border-radius: 10px; padding: 18px; border-left: 4px solid #1a73e8; display: flex; justify-content: space-between; align-items: center; transition: background-color 0.2s; }
         .member-info { display: flex; align-items: center; gap: 12px; }
         .member-avatar { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg, #1a73e8, #0d47a1); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 16px; }
-        .member-name { font-weight: 600; font-size: 14px; }
+        .member-name { font-weight: 600; font-size: 14px; color: #111; transition: color 0.2s; }
         .member-meta { font-size: 12px; color: #888; }
         .member-stats { text-align: right; }
         .member-hours { font-size: 22px; font-weight: 700; color: #1a73e8; }
@@ -61,11 +78,52 @@
         .category-Terminal { background: #eceff1; color: #455a64; }
         .category-Media { background: #fce4ec; color: #c2185b; }
         .category-Other { background: #f5f5f5; color: #616161; }
-        footer { background: #f8f9fa; padding: 15px 30px; text-align: center; font-size: 11px; color: #888; border-top: 1px solid #eee; }
+        footer { background: #f8f9fa; padding: 15px 30px; text-align: center; font-size: 11px; color: #888; border-top: 1px solid #eee; transition: background-color 0.2s, color 0.2s, border-color 0.2s; }
+
+        /* ── Dark Mode Overrides ──────────────────────────────────────────── */
+        html.dark body { color: #e2e8f0; background: #0f172a; }
+        html.dark .container { background: #1e293b; box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
+        html.dark h2 { color: #818cf8; border-bottom-color: #334155; }
+        html.dark .stat-card { background: #334155; border-color: #475569; }
+        html.dark .stat-card.primary { background: linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(99,102,241,0.1) 100%); }
+        html.dark .stat-card .value { color: #818cf8; }
+        html.dark .stat-card .label { color: #94a3b8; }
+        html.dark th { background: #334155; color: #94a3b8; }
+        html.dark td { border-bottom-color: #334155; color: #e2e8f0; }
+        html.dark tr:hover { background: #334155; }
+        html.dark .day-name { color: #e2e8f0; }
+        html.dark .day-hours { color: #94a3b8; }
+        html.dark .legend-item { color: #94a3b8; }
+        html.dark .member-card { background: #334155; }
+        html.dark .member-name { color: #f1f5f9; }
+        html.dark .member-meta { color: #94a3b8; }
+        html.dark .member-hours { color: #818cf8; }
+        html.dark .member-label { color: #94a3b8; }
+        html.dark .rank { color: #818cf8; }
+        html.dark footer { background: #1e293b; color: #64748b; border-top-color: #334155; }
+        html.dark .category-Development { background: rgba(21,101,192,0.25); color: #93c5fd; }
+        html.dark .category-Communication { background: rgba(46,125,50,0.25); color: #86efac; }
+        html.dark .category-Browsers { background: rgba(239,108,0,0.25); color: #fdba74; }
+        html.dark .category-Productivity { background: rgba(123,31,162,0.25); color: #d8b4fe; }
+        html.dark .category-Terminal { background: rgba(69,90,100,0.25); color: #94a3b8; }
+        html.dark .category-Media { background: rgba(194,24,91,0.25); color: #f9a8d4; }
+        html.dark .category-Other { background: rgba(97,97,97,0.25); color: #9ca3af; }
+
         @media print {
-            body { background: white; padding: 0; }
-            .container { box-shadow: none; }
+            /* Force light mode output for print/PDF regardless of screen theme */
+            html, body { background: white !important; color: #333 !important; }
+            .container { box-shadow: none !important; background: white !important; }
             header { background: #1a73e8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            h2 { color: #1a73e8 !important; border-bottom-color: #e0e0e0 !important; }
+            th { background: #f8f9fa !important; color: #555 !important; }
+            td { border-bottom-color: #eee !important; color: #333 !important; }
+            tr:hover { background: transparent !important; }
+            .stat-card { background: #f8f9fa !important; border-color: #e0e0e0 !important; }
+            .stat-card .value { color: #1a73e8 !important; }
+            .member-card { background: #f8f9fa !important; }
+            .member-name { color: #111 !important; }
+            .member-hours { color: #1a73e8 !important; }
+            footer { background: #f8f9fa !important; color: #888 !important; border-top-color: #eee !important; }
         }
         @page { margin: 1cm; }
     </style>

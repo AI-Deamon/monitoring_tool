@@ -1,24 +1,26 @@
 /**
  * SentinelEdge Theme Manager
- * Complete Dark/Light Mode Implementation with System Preference Detection
- * 
- * Features:
- * - localStorage persistence
- * - System preference detection (prefers-color-scheme)
- * - Smooth transitions between themes
- * - Chart color updates on theme change
- * - Event dispatch for other components
+ * Single source of truth for dark/light mode toggling, state persistence,
+ * system preference detection, and Chart.js theme synchronization.
+ *
+ * Design Strategy:
+ * - Single localStorage key: 'sentinel-theme' (with fallback read for legacy 'theme')
+ * - Primary class strategy: .dark on document.documentElement (aligned with Tailwind)
+ * - Co-set data-theme="dark"|"light" on document.documentElement for backward compatibility
+ * - Automatic Chart.js grid, tick, and legend color updates
+ * - Broadcasts 'themechange' CustomEvent for dashboard components
  */
 
 const ThemeManager = {
     STORAGE_KEY: 'sentinel-theme',
+    LEGACY_KEY: 'theme',
 
     /**
      * Detect system color scheme preference
      * @returns {'dark' | 'light'} System preference
      */
     getSystemPreference() {
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
             return 'dark';
         }
         return 'light';
@@ -29,19 +31,24 @@ const ThemeManager = {
      * @returns {'dark' | 'light'} Theme to use
      */
     getSavedPreference() {
-        const saved = localStorage.getItem(this.STORAGE_KEY);
-        if (saved === 'dark' || saved === 'light') {
-            return saved;
+        try {
+            const saved = localStorage.getItem(this.STORAGE_KEY) || localStorage.getItem(this.LEGACY_KEY);
+            if (saved === 'dark' || saved === 'light') {
+                return saved;
+            }
+        } catch (e) {
+            console.warn('[ThemeManager] Could not access localStorage', e);
         }
         return this.getSystemPreference();
     },
 
     /**
-     * Get current theme
+     * Get current theme from the root element
      * @returns {'dark' | 'light'} Current theme
      */
     getCurrentTheme() {
-        return document.body.getAttribute('data-theme') || 'light';
+        if (typeof document === 'undefined') return 'light';
+        return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
     },
 
     /**
@@ -49,11 +56,31 @@ const ThemeManager = {
      * @param {'dark' | 'light'} theme Theme to apply
      */
     setTheme(theme) {
-        // Apply to body
-        document.body.setAttribute('data-theme', theme);
+        if (typeof document === 'undefined') return;
+        const isDark = theme === 'dark';
+        const root = document.documentElement;
 
-        // Save preference
-        localStorage.setItem(this.STORAGE_KEY, theme);
+        // Apply .dark class to root (Tailwind & CSS tokens standard)
+        if (isDark) {
+            root.classList.add('dark');
+            root.setAttribute('data-theme', 'dark');
+        } else {
+            root.classList.remove('dark');
+            root.setAttribute('data-theme', 'light');
+        }
+
+        // Clean up any legacy body attribute to avoid conflicting selectors
+        if (document.body) {
+            document.body.removeAttribute('data-theme');
+            document.body.classList.remove('dark');
+        }
+
+        // Save preference to unified localStorage key
+        try {
+            localStorage.setItem(this.STORAGE_KEY, theme);
+        } catch (e) {
+            console.warn('[ThemeManager] Could not save to localStorage', e);
+        }
 
         // Update toggle button UI
         this.updateToggleButton(theme);
@@ -62,20 +89,24 @@ const ThemeManager = {
         this.updateChartColors(theme);
 
         // Dispatch event for other components
-        window.dispatchEvent(new CustomEvent('themechange', {
-            detail: { theme, isDark: theme === 'dark' }
-        }));
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('themechange', {
+                detail: { theme, isDark }
+            }));
+        }
 
         console.log(`[Theme] Applied: ${theme}`);
     },
 
     /**
      * Toggle between dark and light mode
+     * @returns {'dark' | 'light'} The newly applied theme
      */
     toggle() {
         const current = this.getCurrentTheme();
         const newTheme = current === 'dark' ? 'light' : 'dark';
         this.setTheme(newTheme);
+        return newTheme;
     },
 
     /**
@@ -83,14 +114,16 @@ const ThemeManager = {
      * @param {'dark' | 'light'} theme Current theme
      */
     updateToggleButton(theme) {
+        if (typeof document === 'undefined') return;
         const toggleBtn = document.getElementById('theme-toggle');
         if (!toggleBtn) return;
 
-        // Update icon visibility via data attribute
+        const isDark = theme === 'dark';
+        const label = isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode';
         toggleBtn.setAttribute('data-theme', theme);
-
-        // Update tooltip
-        toggleBtn.title = theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode';
+        toggleBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+        toggleBtn.setAttribute('title', label);
+        toggleBtn.setAttribute('aria-label', label);
     },
 
     /**
@@ -98,12 +131,12 @@ const ThemeManager = {
      * @param {'dark' | 'light'} theme Current theme
      */
     updateChartColors(theme) {
-        // Update all existing Chart.js instances
         if (typeof Chart !== 'undefined' && Chart.instances) {
+            const isDark = theme === 'dark';
             Object.values(Chart.instances).forEach(chart => {
-                const isDark = theme === 'dark';
+                if (!chart || !chart.options) return;
 
-                // Update grid colors
+                // Update grid and tick colors
                 if (chart.options.scales) {
                     Object.values(chart.options.scales).forEach(scale => {
                         if (scale.grid) {
@@ -111,6 +144,9 @@ const ThemeManager = {
                         }
                         if (scale.ticks) {
                             scale.ticks.color = isDark ? '#94a3b8' : '#64748b';
+                            if (scale.ticks.font) {
+                                scale.ticks.font.family = "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+                            }
                         }
                     });
                 }
@@ -118,6 +154,9 @@ const ThemeManager = {
                 // Update legend colors
                 if (chart.options.plugins && chart.options.plugins.legend && chart.options.plugins.legend.labels) {
                     chart.options.plugins.legend.labels.color = isDark ? '#cbd5e1' : '#475569';
+                    if (chart.options.plugins.legend.labels.font) {
+                        chart.options.plugins.legend.labels.font.family = "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+                    }
                 }
 
                 chart.update('none'); // Update without animation
@@ -126,31 +165,43 @@ const ThemeManager = {
     },
 
     /**
-     * Initialize theme manager on page load
+     * Initialize theme manager
      */
     init() {
         // Apply saved/system preference immediately
         const theme = this.getSavedPreference();
         this.setTheme(theme);
 
-        // Listen for system preference changes
-        if (window.matchMedia) {
+        // Listen for system preference changes (only auto-switch if no manual saved preference)
+        if (typeof window !== 'undefined' && window.matchMedia) {
             window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-                // Only auto-switch if user hasn't manually set a preference
-                const savedPref = localStorage.getItem(this.STORAGE_KEY);
-                if (!savedPref) {
-                    this.setTheme(e.matches ? 'dark' : 'light');
-                }
+                try {
+                    const savedPref = localStorage.getItem(this.STORAGE_KEY) || localStorage.getItem(this.LEGACY_KEY);
+                    if (!savedPref) {
+                        this.setTheme(e.matches ? 'dark' : 'light');
+                    }
+                } catch (err) {}
             });
         }
 
         // Attach toggle button click handler
-        document.addEventListener('DOMContentLoaded', () => {
+        const attachHandler = () => {
             const toggleBtn = document.getElementById('theme-toggle');
-            if (toggleBtn) {
-                toggleBtn.addEventListener('click', () => this.toggle());
+            if (toggleBtn && !toggleBtn._themeBound) {
+                toggleBtn._themeBound = true;
+                toggleBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.toggle();
+                });
+                this.updateToggleButton(this.getCurrentTheme());
             }
-        });
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', attachHandler);
+        } else {
+            attachHandler();
+        }
 
         console.log('[Theme] Manager initialized');
     }
@@ -215,7 +266,7 @@ function getChartOptions(type = 'bar') {
                     color: colors.text,
                     font: {
                         size: 12,
-                        family: "'Inter', sans-serif"
+                        family: "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
                     }
                 }
             },
@@ -223,8 +274,8 @@ function getChartOptions(type = 'bar') {
                 backgroundColor: isDark ? 'rgba(30, 41, 59, 0.95)' : 'rgba(15, 23, 42, 0.95)',
                 titleColor: '#ffffff',
                 bodyColor: '#e2e8f0',
-                titleFont: { size: 13, weight: '600' },
-                bodyFont: { size: 12 },
+                titleFont: { size: 13, weight: '600', family: "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+                bodyFont: { size: 12, family: "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
                 padding: 12,
                 cornerRadius: 8,
                 displayColors: true
@@ -241,11 +292,23 @@ function getChartOptions(type = 'bar') {
         baseOptions.scales = {
             x: {
                 grid: { color: colors.grid },
-                ticks: { color: colors.textSecondary }
+                ticks: {
+                    color: colors.textSecondary,
+                    font: {
+                        size: 11,
+                        family: "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                    }
+                }
             },
             y: {
                 grid: { color: colors.grid },
-                ticks: { color: colors.textSecondary },
+                ticks: {
+                    color: colors.textSecondary,
+                    font: {
+                        size: 11,
+                        family: "'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                    }
+                },
                 beginAtZero: true
             }
         };
@@ -279,11 +342,37 @@ function getChartPalette(count = 7) {
     return palette.slice(0, count);
 }
 
-// Initialize theme manager immediately (before DOM ready)
-ThemeManager.init();
+/**
+ * Get CVD-accessible category colors for app usage
+ * @returns {Object} Category colors for current theme
+ */
+function getCategoryColors() {
+    const isDark = ThemeManager.getCurrentTheme() === 'dark';
+    return isDark ? {
+        productivity: '#3987e5',
+        communication: '#10b981',
+        browsing: '#f472b6',
+        development: '#fbbf24',
+        other: '#94a3b8'
+    } : {
+        productivity: '#2a78d6',
+        communication: '#008300',
+        browsing: '#e87ba4',
+        development: '#eda100',
+        other: '#94a3af'
+    };
+}
 
-// Export for use in other scripts
+// Initialize theme manager immediately
+ThemeManager.init();
+ThemeManager.getCategoryColors = getCategoryColors;
+
+// Export globals
 window.ThemeManager = ThemeManager;
+window.initTheme = () => ThemeManager.init();
+window.toggleTheme = () => ThemeManager.toggle();
 window.getChartColors = getChartColors;
 window.getChartOptions = getChartOptions;
 window.getChartPalette = getChartPalette;
+window.getCategoryColors = getCategoryColors;
+

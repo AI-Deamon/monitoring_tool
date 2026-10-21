@@ -1,392 +1,220 @@
+{% from "components/icons.html" import icon %}
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit User - SentinelEdge</title>
-    <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Edit User - SentinelEdge</title>
+
+  <!-- Theme Initialization (Prevents flash of light theme before render) -->
+  <script nonce="{{ csp_nonce() }}">
+    (function () {
+      try {
+        var saved = localStorage.getItem('sentinel-theme') || localStorage.getItem('theme');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = (saved === 'dark' || saved === 'light') ? saved : (prefersDark ? 'dark' : 'light');
+        if (theme === 'dark') {
+          document.documentElement.classList.add('dark');
+          document.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      } catch (e) {}
+    })();
+  </script>
+
+  <link href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}" rel="stylesheet">
   <!-- Tailwind (precompiled) -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
-<style nonce="{{ csp_nonce() }}">
-  * {
-    font-family: "Space Grotesk", sans-serif !important;
-  }
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}?v=20261012_v2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261008_btn_v2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/header-responsive.css') }}?v=20261008_btn_v2">
+  <style nonce="{{ csp_nonce() }}">
+    * {
+      font-family: "Space Grotesk", sans-serif !important;
+    }
   </style>
-    <style nonce="{{ csp_nonce() }}">
-        :root {
-            --bg-color: #f4f7f9;
-            --primary-color: #4a90e2;
-            --text-color: #333;
-            --card-bg: #ffffff;
-            --border-color: #e0e0e0;
-            --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            --danger-color: #dc3545;
-            --warning-color: #ffc107;
-        }
-
-        body {
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-        }
-
-        .header {
-            background: var(--card-bg);
-            padding: 1rem 2rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .header h1 {
-            margin: 0;
-            font-weight: 700;
-            font-size: 1.5rem;
-            color: var(--primary-color);
-        }
-
-        .container {
-            padding: 2rem;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        .card {
-            background-color: var(--card-bg);
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-            margin-bottom: 1.5rem;
-        }
-
-        .card h2 {
-            margin-top: 0;
-            color: var(--primary-color);
-            border-bottom: 2px solid var(--border-color);
-            padding-bottom: 1rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-
-        .form-group label {
-            display: block;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-            color: #555;
-        }
-
-        .form-group input,
-        .form-group select {
-            width: 100%;
-            padding: 0.75rem;
-            font-size: 1rem;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: #f9fafb;
-        }
-
-        .form-group input:focus,
-        .form-group select:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
-        }
-
-        .form-group small {
-            display: block;
-            margin-top: 0.25rem;
-            color: #888;
-            font-size: 0.85rem;
-        }
-
-        .form-check {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .form-check input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-        }
-
-        .btn-group {
-            display: flex;
-            gap: 1rem;
-            margin-top: 2rem;
-        }
-
-        .btn {
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 1rem;
-            text-decoration: none;
-            cursor: pointer;
-            border: none;
-            transition: all 0.2s;
-        }
-
-        .btn-primary {
-            background-color: var(--primary-color);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background-color: #357ABD;
-        }
-
-        .btn-secondary {
-            background-color: #6c757d;
-            color: white;
-        }
-
-        .btn-secondary:hover {
-            background-color: #5a6268;
-        }
-
-        .alert {
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1.5rem;
-        }
-
-        .alert-danger {
-            background-color: #f8d7da;
-            border: 1px solid #f5c6cb;
-            color: #721c24;
-        }
-
-        .alert-warning {
-            background-color: #fff3cd;
-            border: 1px solid #ffeeba;
-            color: #856404;
-        }
-
-        .info-box {
-            background-color: #e7f3ff;
-            border: 1px solid #b8daff;
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .info-box strong {
-            color: #004085;
-        }
-    </style>
 </head>
 
-<body>
+<body class="se-auth-body font-inter min-h-screen flex flex-col">
 
-  <!-- ================= NAVBAR ================= -->
-  <nav class="bg-white border-b border-slate-200 shadow-sm">
-    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-      <!-- Brand -->
-      <div class="flex items-center gap-3">
-        <img src="{{ url_for('static', filename='bsol.png') }}" class="h-10 w-14"/>
-        <span class="text-lg font-bold text-slate-900">SentinelEdge</span>
-      </div>
+  <!-- ================= HEADER ================= -->
+  {% include "components/header.html" %}
 
-      <!-- User Info -->
-      <div class="flex items-center gap-6 text-sm">
-        <span class="text-slate-600">
-          Logged in as <strong class="text-slate-900">{{ session.username }}</strong>
-        </span>
-        <a href="{{ url_for('dashboard.dashboard_home') }}"
-           class="text-slate-600 hover:text-slate-900 transition">
-          Dashboard
-        </a>
-        <a href="{{ url_for('auth.logout') }}"
-           class="text-red-600 hover:text-red-700 font-medium transition">
-          Logout
-        </a>
-      </div>
+  <main class="flex-1 w-full max-w-3xl mx-auto px-6 py-10">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for category, message in messages %}
+    <div class="mb-6 rounded-lg px-4 py-3 text-sm
+        {% if category == 'danger' %}se-alert-danger
+        {% elif category == 'success' %}se-alert-success
+        {% elif category == 'warning' %}se-alert-warning
+        {% else %}se-alert-info{% endif %}">
+        {{ message }}
     </div>
-  </nav>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
 
-    <div class="max-w-3xl mx-auto px-6 py-10">
+    {% if user.is_locked %}
+    <div class="mb-6 rounded-lg px-4 py-3 text-sm se-alert-warning flex items-center gap-2">
+        {{ icon('warning', class='w-5 h-5 flex-shrink-0') }}
+        <span>This account is currently locked due to too many failed login attempts. Saving this form will unlock the account.</span>
+    </div>
+    {% endif %}
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-  {% for category, message in messages %}
-  <div class="mb-6 rounded-lg px-4 py-3 text-sm
-      {% if category == 'danger' %}bg-red-50 border border-red-200 text-red-700
-      {% elif category == 'success' %}bg-green-50 border border-green-200 text-green-700
-      {% elif category == 'warning' %}bg-yellow-50 border border-yellow-200 text-yellow-700
-      {% else %}bg-blue-50 border border-blue-200 text-blue-700{% endif %}">
-      {{ message }}
-  </div>
-  {% endfor %}
-  {% endif %}
-  {% endwith %}
+    <!-- CARD -->
+    <div class="se-auth-card p-8">
 
-  {% if user.is_locked %}
-  <div class="mb-6 rounded-lg px-4 py-3 text-sm bg-yellow-50 border border-yellow-200 text-yellow-700">
-      ⚠️ This account is currently locked due to too many failed login attempts.
-      Saving this form will unlock the account.
-  </div>
-  {% endif %}
+        <h2 class="se-auth-card-title text-xl font-semibold border-b border-slate-200 dark:border-slate-700 pb-4 mb-6">
+            Edit Dashboard User
+        </h2>
 
-  <!-- CARD -->
-  <div class="bg-white rounded-xl shadow-md border border-slate-200 p-8">
+        <!-- INFO BOX -->
+        <div class="se-auth-infobox mb-6 p-4 text-sm leading-6">
+            <strong>Username:</strong> {{ user.username }}<br>
+            <strong>Created:</strong>
+            {{ user.created_at | fmt_datetime if user.created_at else 'Unknown' }}<br>
+            <strong>Last Login:</strong>
+            {{ user.last_login | fmt_datetime if user.last_login else 'Never' }}
+        </div>
 
-      <h2 class="text-xl font-semibold text-slate-900 border-b border-slate-200 pb-4 mb-6">
-          Edit Dashboard User
-      </h2>
+        <form method="POST" action="{{ url_for('auth.edit_user', user_id=user.id) }}" class="space-y-6">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-      <!-- INFO BOX -->
-      <div class="mb-6 p-4 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-700 leading-6">
-          <strong>Username:</strong> {{ user.username }}<br>
-          <strong>Created:</strong>
-          {{ user.created_at | fmt_datetime if user.created_at else 'Unknown' }}<br>
-          <strong>Last Login:</strong>
-          {{ user.last_login | fmt_datetime if user.last_login else 'Never' }}
-      </div>
+            <!-- Role -->
+            <div>
+                <label for="role" class="se-auth-label block mb-2">
+                    Role *
+                </label>
+                <select id="role" name="role" required
+                    class="se-auth-select px-4 py-2.5">
+                    <option value="user" {% if user.role=='user' %}selected{% endif %}>
+                        User (can only view own data)
+                    </option>
+                    <option value="admin" {% if user.role=='admin' %}selected{% endif %}>
+                        Admin (can view all data)
+                    </option>
+                </select>
+            </div>
 
-      <form method="POST" action="{{ url_for('auth.edit_user', user_id=user.id) }}" class="space-y-6">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <!-- Email Address -->
+            <div>
+                <label for="email" class="se-auth-label block mb-2">
+                    Email Address
+                </label>
+                <input type="email"
+                    id="email"
+                    name="email"
+                    value="{{ user.email or '' }}"
+                    placeholder="Optional - for password resets"
+                    class="se-auth-input px-4 py-2.5">
+            </div>
 
-          <!-- Role -->
-          <div>
-              <label for="role" class="block text-sm font-semibold text-slate-700 mb-2">
-                  Role *
-              </label>
-              <select id="role" name="role" required
-                  class="w-full px-4 py-2.5 rounded-lg border border-slate-300 bg-slate-50
-                  focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="user" {% if user.role=='user' %}selected{% endif %}>
-                      User (can only view own data)
-                  </option>
-                  <option value="admin" {% if user.role=='admin' %}selected{% endif %}>
-                      Admin (can view all data)
-                  </option>
-              </select>
-          </div>
+            <!-- Linked Username -->
+            <div>
+                <label for="linked_username" class="se-auth-label block mb-2">
+                    Linked Windows Username
+                </label>
+                <input type="text"
+                    id="linked_username"
+                    name="linked_username"
+                    value="{{ user.linked_username or '' }}"
+                    placeholder="e.g., john.doe or L230101PG"
+                    class="se-auth-input px-4 py-2.5">
+                <p class="se-auth-helper text-xs mt-1">
+                    For users: The Windows username from the agent they can view. Leave empty for admins.
+                </p>
+            </div>
 
-          <!-- Email Address -->
-          <div>
-              <label for="email" class="block text-sm font-semibold text-slate-700 mb-2">
-                  Email Address
-              </label>
-              <input type="email"
-                  id="email"
-                  name="email"
-                  value="{{ user.email or '' }}"
-                  placeholder="Optional - for password resets"
-                  class="w-full px-4 py-2.5 rounded-lg border border-slate-300 bg-slate-50
-                  focus:outline-none focus:ring-2 focus:ring-blue-500">
-          </div>
+            <!-- Auth Type -->
+            <div>
+                <label for="auth_type" class="se-auth-label block mb-2">
+                    Authentication Type *
+                </label>
+                <select id="auth_type" name="auth_type" required
+                    class="se-auth-select px-4 py-2.5"
+                    onchange="togglePasswordField()">
+                    <option value="local" {% if user.auth_type=='local' or not user.auth_type %}selected{% endif %}>
+                        Local (password stored in database)
+                    </option>
+                    <option value="ad" {% if user.auth_type=='ad' %}selected{% endif %}>
+                        Active Directory (authenticate via AD)
+                    </option>
+                </select>
+                <p class="se-auth-helper text-xs mt-1">
+                    Select "Active Directory" if this user will log in with their AD credentials.
+                </p>
+            </div>
 
-          <!-- Linked Username -->
-          <div>
-              <label for="linked_username" class="block text-sm font-semibold text-slate-700 mb-2">
-                  Linked Windows Username
-              </label>
-              <input type="text"
-                  id="linked_username"
-                  name="linked_username"
-                  value="{{ user.linked_username or '' }}"
-                  placeholder="e.g., john.doe or L230101PG"
-                  class="w-full px-4 py-2.5 rounded-lg border border-slate-300 bg-slate-50
-                  focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <p class="text-xs text-slate-500 mt-1">
-                  For users: The Windows username from the agent they can view. Leave empty for admins.
-              </p>
-          </div>
+            <!-- Active Checkbox -->
+            <div class="flex items-center gap-2">
+                <input type="checkbox"
+                    id="is_active"
+                    name="is_active"
+                    class="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                    {% if user.is_active %}checked{% endif %}>
+                <label for="is_active" class="se-auth-label cursor-pointer inline font-normal">
+                    Account is active
+                </label>
+            </div>
 
-          <!-- Auth Type -->
-          <div>
-              <label for="auth_type" class="block text-sm font-semibold text-slate-700 mb-2">
-                  Authentication Type *
-              </label>
-              <select id="auth_type" name="auth_type" required
-                  class="w-full px-4 py-2.5 rounded-lg border border-slate-300 bg-slate-50
-                  focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  onchange="togglePasswordField()">
-                  <option value="local" {% if user.auth_type=='local' or not user.auth_type %}selected{% endif %}>
-                      Local (password stored in database)
-                  </option>
-                  <option value="ad" {% if user.auth_type=='ad' %}selected{% endif %}>
-                      Active Directory (authenticate via AD)
-                  </option>
-              </select>
-              <p class="text-xs text-slate-500 mt-1">
-                  Select "Active Directory" if this user will log in with their AD credentials.
-              </p>
-          </div>
+            <hr class="se-auth-divider my-6">
 
-          <!-- Active Checkbox -->
-          <div class="flex items-center gap-2">
-              <input type="checkbox"
-                  id="is_active"
-                  name="is_active"
-                  class="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                  {% if user.is_active %}checked{% endif %}>
-              <label for="is_active" class="text-sm text-slate-700">
-                  Account is active
-              </label>
-          </div>
+            <!-- Password -->
+            <div id="password_field">
+                <label for="new_password" class="se-auth-label block mb-2">
+                    New Password (leave empty to keep current)
+                </label>
+                <input type="password"
+                    id="new_password"
+                    name="new_password"
+                    minlength="8"
+                    placeholder="Enter new password"
+                    class="se-auth-input px-4 py-2.5">
+                <p class="se-auth-helper text-xs mt-1">
+                    Minimum 8 characters. Only fill this if you want to reset the password.
+                </p>
+            </div>
 
-          <hr class="border-slate-200 my-6">
+            <!-- Buttons -->
+            <div class="flex gap-4 pt-4">
+                <button type="submit"
+                    class="btn btn-primary">
+                    Save Changes
+                </button>
 
-          <!-- Password -->
-          <div>
-              <label for="new_password" class="block text-sm font-semibold text-slate-700 mb-2">
-                  New Password (leave empty to keep current)
-              </label>
-              <input type="password"
-                  id="new_password"
-                  name="new_password"
-                  minlength="8"
-                  placeholder="Enter new password"
-                  class="w-full px-4 py-2.5 rounded-lg border border-slate-300 bg-slate-50
-                  focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <p class="text-xs text-slate-500 mt-1">
-                  Minimum 8 characters. Only fill this if you want to reset the password.
-              </p>
-          </div>
+                <a href="{{ url_for('auth.list_users') }}"
+                    class="btn btn-secondary">
+                    Cancel
+                </a>
+            </div>
 
-          <!-- Buttons -->
-          <div class="flex gap-4 pt-4">
-              <button type="submit"
-                  class="px-6 py-2.5 rounded-lg font-semibold text-white
-                  bg-blue-600 hover:bg-blue-700 transition shadow-sm">
-                  Save Changes
-              </button>
+        </form>
+    </div>
+  </main>
 
-              <a href="{{ url_for('auth.list_users') }}"
-                  class="px-6 py-2.5 rounded-lg font-semibold text-white
-                  bg-slate-500 hover:bg-slate-600 transition shadow-sm">
-                  Cancel
-              </a>
-          </div>
-
-      </form>
-  </div>
-</div>
-
-<script nonce="{{ csp_nonce() }}">
-  function togglePasswordField() {
-    const authType = document.getElementById('auth_type').value;
-    const passwordField = document.getElementById('password_field');
-    
-    if (authType === 'ad') {
-      passwordField.style.display = 'none';
-    } else {
-      passwordField.style.display = 'block';
+  <script src="{{ url_for('static', filename='js/theme-manager.js') }}"></script>
+  <script nonce="{{ csp_nonce() }}">
+    function togglePasswordField() {
+      const authType = document.getElementById('auth_type').value;
+      const passwordField = document.getElementById('password_field');
+      
+      if (passwordField) {
+        if (authType === 'ad') {
+          passwordField.style.display = 'none';
+        } else {
+          passwordField.style.display = 'block';
+        }
+      }
     }
-  }
-  
-  // Initialize on page load
-  document.addEventListener('DOMContentLoaded', togglePasswordField);
-</script>
+    
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', togglePasswordField);
+  </script>
 
 </body>
 

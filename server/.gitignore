@@ -42,6 +42,9 @@ sentineledge_server_deploy_*/
 sentineledge_server_v3_final/
 *.zip
 
+# Build output from release_agent.py
+release/
+
 # IDEs
 .vscode/
 .idea/
@@ -57,6 +60,34 @@ check_screentime_heartbeat.py
 check_server_status.py
 check_spans_flow.py
 clear_agent_data.py
+
+# PyInstaller & Build artifacts
+*.spec
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Additional Python & Testing rules
+*.pyd
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+
+graphify-out/cache
+server/graphify-out/cache
+server/graphify-out
+graphify-out/
+.gstack/
+
+
 
 # Redundant duplicate of engines/admin_classification.py - not importable
 # as a script (defines a Flask Blueprint, no __main__), nothing referenced it
@@ -82,3 +113,26 @@ migrations/apply_domain_classification.sql
 migrations/apply_session_sync_functions.sql
 migrations/fix_sync_function.sql
 migrations/performance_optimization.py
+
+# Reference materials (local docs, external copies - not source)
+reference/
+
+# Generated report output (not source - rendered from weekly_cron/templates/)
+weekly_cron/reports/
+
+# One-off security scan dumps (not code; risk of exposing vuln detail)
+weekly_cron/Burp dast reprot.html
+weekly_cron/BURP_DAST_REMEDIATION.md
+
+# Manual/ad-hoc smoke-test script - not in tests/, not run by CI
+test_update_flow.py
+
+# Documentation / Markdown files (ignore all markdown files except README.md)
+*.md
+!README.md
+
+.git-local/
+
+# Kilo agent tooling
+.kilo/
+.kilocode/

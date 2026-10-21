@@ -58,6 +58,10 @@ def create_app():
     app.jinja_env.filters['fmt_datetime'] = _fmt_datetime
     from utils.datetime_format import format_datetime_labelled as _fmt_dt_lbl
     app.jinja_env.filters['fmt_datetime_tz'] = _fmt_dt_lbl
+    from utils.datetime_format import format_datetime_seconds as _fmt_dt_s
+    app.jinja_env.filters['fmt_datetime_seconds'] = _fmt_dt_s
+    from utils.datetime_format import format_datetime_seconds_labelled as _fmt_dt_s_lbl
+    app.jinja_env.filters['fmt_datetime_seconds_tz'] = _fmt_dt_s_lbl
     
     # H-17 FIX: Add Content-Security-Policy header for defense-in-depth
     @app.before_request

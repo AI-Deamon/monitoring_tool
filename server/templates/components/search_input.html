@@ -1,0 +1,42 @@
+{# ==============================================================================
+   CENTRALIZED SEARCH INPUT COMPONENT
+   Standardized Search Field for SentinelEdge
+   Usage:
+     {% from "components/search_input.html" import search_input %}
+     {{ search_input(id="agent-search", placeholder="Search hostname, user, or ID...", class="w-full sm:w-64") }}
+   ============================================================================== #}
+{% from "components/icons.html" import icon %}
+
+{% macro search_input(
+    id="",
+    name="",
+    placeholder="Search...",
+    value="",
+    class="",
+    wrapper_class="",
+    size="md",
+    autocomplete="off",
+    aria_label=None,
+    oninput=None,
+    attrs=""
+) -%}
+{%- set is_compact = (size in ['sm', 'compact']) -%}
+{%- set label_text = aria_label or placeholder -%}
+<div class="se-search-wrapper{% if is_compact %} se-search-wrapper--compact{% endif %}{% if wrapper_class %} {{ wrapper_class }}{% endif %}">
+    <span class="se-search-icon" aria-hidden="true">
+        {{ icon('search', class=('w-3.5 h-3.5' if is_compact else 'w-4 h-4')) }}
+    </span>
+    <input type="text"
+        {% if id %}id="{{ id }}"{% endif %}
+        {% if name %}name="{{ name }}"{% endif %}
+        class="se-search-input{% if is_compact %} se-search-input--compact{% endif %}{% if class %} {{ class }}{% endif %}"
+        placeholder="{{ placeholder }}"
+        value="{{ value }}"
+        autocomplete="{{ autocomplete }}"
+        spellcheck="false"
+        role="searchbox"
+        aria-label="{{ label_text }}"
+        {% if oninput %}oninput="{{ oninput }}"{% endif %}
+        {{ attrs | safe }}>
+</div>
+{%- endmacro %}

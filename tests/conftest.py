@@ -23,3 +23,10 @@ if str(server_dir) not in sys.path:
 # Also add agent dir directly so 'from core.xxx import ...' works
 if str(agent_dir) not in sys.path:
     sys.path.insert(0, str(agent_dir))
+
+# Pre-import auth so models (TabSession, DashboardUser) bind to real db before any test patches extensions.db
+try:
+    import auth  # noqa: F401
+except Exception:
+    pass
+
