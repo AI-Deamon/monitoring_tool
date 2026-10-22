@@ -198,6 +198,7 @@ class StateDetector:
 
         # NEW: Duration tracking
         self._last_state_change_time = time.time()  # Track time of last transition
+        self._last_alive_time = time.time()  # Track last heartbeat/poll for runtime gap detection
 
         # NEW: Final totals for midnight boundary upload
         self._final_totals_for_upload = None  # Set at midnight, sent via next heartbeat
@@ -421,6 +422,8 @@ class StateDetector:
         """PHASE 2: Use state machine for ALL time calculations"""
         callback_args = None
         with self._transition_lock:
+            now = time.time()
+            self._check_and_handle_unmonitored_gap(now)
             prev_state = self.current_state
             if prev_state == new_state:
                 # A real OS lock event can arrive after a desktop/process
@@ -544,6 +547,7 @@ class StateDetector:
             self._heuristic_unlock_streak = 0
             # NEW: Persist current state for crash recovery
             self._persist_current_state()
+            self._last_alive_time = now
 
             # Capture callback args — invoke outside the lock to avoid blocking
             # other threads on a slow/unreachable network request.
@@ -718,34 +722,121 @@ class StateDetector:
         except Exception as e:
             logger.error(f"[STATE] Suspend handling error: {e}", exc_info=True)
 
+    def _check_and_handle_unmonitored_gap(self, now: float) -> bool:
+        """
+        Detect and reconcile unmonitored runtime gaps (system sleep, suspend, hibernate).
+        Must be called with self._transition_lock held.
+        """
+        if self._suspended:
+            self._last_alive_time = now
+            return False
+
+        UNMONITORED_GAP_THRESHOLD = 120  # 2 minutes
+        if not hasattr(self, "_last_alive_time") or self._last_alive_time <= 0:
+            self._last_alive_time = now
+            return False
+
+        gap = now - self._last_alive_time
+        if gap < UNMONITORED_GAP_THRESHOLD:
+            self._last_alive_time = now
+            return False
+
+        logger.info(
+            f"[STATE] Un-monitored runtime gap detected: {gap:.1f}s (current_state={self.current_state})"
+        )
+
+        gap_start = self._last_alive_time
+        gap_end = now
+
+        # 1. Close monitored state before sleep if duration was >= 1.0s
+        pre_gap_duration = gap_start - self._last_state_change_time
+        if (
+            self.current_state in ("active", "idle", "locked", "away")
+            and self._last_state_change_time > 0
+            and pre_gap_duration >= 1.0
+        ):
+            pre_spans = self._create_span_segments(
+                state=self.current_state,
+                start_time=self._last_state_change_time,
+                end_time=gap_start,
+                duration=pre_gap_duration,
+            )
+            for span in pre_spans:
+                self.pending_spans.append(span)
+                self.persist_span_to_buffer(span)
+            logger.info(
+                f"[STATE] Preserved pre-gap {self.current_state} session: "
+                f"{pre_gap_duration:.1f}s ({len(pre_spans)} span(s))"
+            )
+
+        # 2. Synthesize gap span for the sleep/suspend period
+        # If sleep gap was >= 2 hours, record as AWAY, otherwise LOCKED
+        gap_state = "away" if gap >= 7200 else "locked"
+        gap_spans = self._create_span_segments(
+            state=gap_state,
+            start_time=gap_start,
+            end_time=gap_end,
+            duration=gap,
+        )
+        for span in gap_spans:
+            self.pending_spans.append(span)
+            self.persist_span_to_buffer(span)
+        logger.info(
+            f"[STATE] Emitted un-monitored gap span: {gap_state} {gap:.1f}s ({len(gap_spans)} span(s))"
+        )
+
+        # 3. Synchronize ScreenTimeEngine so tick() accounts for the gap in daily buckets
+        try:
+            self.screen_time_engine.tick()
+        except Exception as e:
+            logger.error(f"[STATE] Error syncing screen time engine on gap: {e}")
+
+        # 4. Advance timestamps so future transitions and spans measure from wake-up
+        self._last_state_change_time = gap_end
+        self._last_alive_time = gap_end
+        self._persist_current_state()
+
+        return True
+
     def _handle_resume(self):
         """Handle OS resume and reconcile immediately to LOCKED/ACTIVE."""
         try:
-            if not self._suspended:
-                return
-            self._suspended = False
-            logger.info("[STATE] System RESUME detected (OS Event)")
+            with self._transition_lock:
+                now = time.time()
+                if not self._suspended:
+                    # Windows resumed without having fired a prior suspend event.
+                    # Reconcile unmonitored runtime gap directly.
+                    self._check_and_handle_unmonitored_gap(now)
+                    if self._is_session_locked():
+                        self._transition("locked", source="os")
+                    else:
+                        self._transition("active", source="os")
+                    self._last_alive_time = now
+                    return
 
-            # Reconcile elapsed suspend gap into screen-time counters BEFORE any
-            # transition/last-timestamp reset. This keeps cumulative totals aligned
-            # with state-change durations (especially long locked intervals).
-            try:
-                self.screen_time_engine.tick()
-            except Exception as e:
-                logger.error(f"[STATE] Resume gap reconciliation failed: {e}", exc_info=True)
+                self._suspended = False
+                logger.info("[STATE] System RESUME detected (OS Event)")
 
-            # Reconcile final state based on lock status right after resume.
-            # RDP Logic Disabled: ignoring _is_remote_session()
-            # if self._is_session_locked() and not self._is_remote_session():
-            if self._is_session_locked():
-                self._transition("locked", source="os")
-            else:
-                self._transition("active", source="os")
+                # Reconcile elapsed suspend gap into screen-time counters BEFORE any
+                # transition/last-timestamp reset. This keeps cumulative totals aligned
+                # with state-change durations (especially long locked intervals).
+                try:
+                    self._check_daily_boundary()
+                    self.screen_time_engine.tick()
+                except Exception as e:
+                    logger.error(f"[STATE] Resume gap reconciliation failed: {e}", exc_info=True)
 
-            # Reset sleep marker after reconciliation + transition.
-            self.screen_time_engine.mark_resume()
+                # Reconcile final state based on lock status right after resume.
+                if self._is_session_locked():
+                    self._transition("locked", source="os")
+                else:
+                    self._transition("active", source="os")
 
-            self._persist_current_state()
+                # Reset sleep marker after reconciliation + transition.
+                self.screen_time_engine.mark_resume()
+
+                self._persist_current_state()
+                self._last_alive_time = now
         except Exception as e:
             logger.error(f"[STATE] Resume handling error: {e}", exc_info=True)
 
@@ -798,10 +889,12 @@ class StateDetector:
         with self._transition_lock:
             self._check_daily_boundary()
 
-            if self._suspended:
-                return
-
             now = time.time()
+            self._check_and_handle_unmonitored_gap(now)
+
+            if self._suspended:
+                self._last_alive_time = now
+                return
 
             # Grace period after any unlock path (WTS or fallback unlock transition).
             UNLOCK_GRACE_SECONDS = 10
@@ -930,6 +1023,7 @@ class StateDetector:
                     self._transition("active", source="idle")
             else:
                 self._transition("active", source="idle")
+            self._last_alive_time = time.time()
 
     # ========================================================================
     # SPAN GENERATION
@@ -1429,6 +1523,14 @@ class StateDetector:
                 # Requirement 4: Overnight LOCKED Recovery.
                 # When prev_state == 'locked', use the persisted lock boundary (session_start -> now).
                 if prev_state == "locked":
+                    gap_action = (gap_info or {}).get("action")
+                    if gap_action and str(gap_action).startswith("ignored_"):
+                        logger.info(
+                            f"[RECOVERY] Skipping interrupted locked span after {gap_action}; "
+                            f"shutdown/reboot gap is ignored and not synthesized"
+                        )
+                        break
+
                     # Hard cap to prevent runaway corruption beyond 24 hours
                     if duration > 86400:
                         logger.warning(
@@ -1550,6 +1652,9 @@ class StateDetector:
         """
         # Handle midnight/day rollover before reading counters.
         self._check_daily_boundary()
+
+        with self._transition_lock:
+            self._check_and_handle_unmonitored_gap(time.time())
 
         # CRITICAL: Call tick() to update counters before reading
         try:

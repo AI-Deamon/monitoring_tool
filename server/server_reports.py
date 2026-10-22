@@ -8,6 +8,7 @@ Routes:
   DELETE /dashboard/reports/schedules/<id> → delete schedule (admin)
   POST /dashboard/reports/schedules/<id>/run → run schedule now (admin)
 """
+import os
 import json
 import logging
 from threading import Thread
@@ -618,6 +619,15 @@ def _async_send_job_email(app, job_id, recipients, subject):
         if not subject or subject == 'SentinelEdge Report':
             subject = f"Weekly Team Activity Report - {start_str} to {end_str}" if (start_str and end_str) else f"SentinelEdge {report_type.title()} {scope.title()} Report"
 
+        attachments = None
+        pdf_path = job.get('result_pdf_path')
+        if pdf_path and os.path.exists(pdf_path):
+            attachments = [{
+                'path': str(pdf_path),
+                'filename': os.path.basename(str(pdf_path)),
+                'content_type': 'application/pdf',
+            }]
+
         ok, err = send_report_email(
             html_content=job['result_html'],
             recipients=recipients,
@@ -626,7 +636,8 @@ def _async_send_job_email(app, job_id, recipients, subject):
             scope=scope,
             start_date=start_str,
             end_date=end_str,
-            pdf_path=job.get('result_pdf_path')
+            pdf_path=pdf_path,
+            attachments=attachments,
         )
         if not ok:
             logger.error(f"[REPORTS] Background email send for job {job_id} failed: {err}")

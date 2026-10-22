@@ -362,15 +362,177 @@ def render_report_html(report_type, scope, context):
     return env.get_template(tpl_name).render(**context)
 
 
-def render_email_body_html(report_type, scope, start_str, end_str):
-    """Render HTML email body from email_body_template.html."""
+def validate_attachments(attachments):
+    """Validate attachments list, filtering out non-existent, empty, or unreadable files.
+    Returns a list of validated attachment dicts with 'path'/'content', 'filename', and 'content_type'.
+    """
+    if not attachments:
+        return []
+
+    validated = []
+    for att in attachments:
+        if not isinstance(att, dict):
+            continue
+
+        path = att.get('path')
+        content = att.get('content')
+        filename = att.get('filename') or (os.path.basename(path) if path else 'attachment')
+        content_type = att.get('content_type') or att.get('mimetype')
+        if not content_type:
+            lower_fn = filename.lower()
+            if lower_fn.endswith('.pdf'):
+                content_type = 'application/pdf'
+            elif lower_fn.endswith('.html') or lower_fn.endswith('.htm'):
+                content_type = 'text/html'
+            else:
+                content_type = 'application/octet-stream'
+
+        if path:
+            if not os.path.exists(path):
+                continue
+            try:
+                if os.path.getsize(path) <= 0:
+                    continue
+            except OSError:
+                continue
+            validated.append({
+                'path': str(path),
+                'filename': filename,
+                'content_type': content_type,
+            })
+        elif content is not None:
+            if len(content) == 0:
+                continue
+            validated.append({
+                'content': content,
+                'filename': filename,
+                'content_type': content_type,
+            })
+
+    return validated
+
+
+def describe_attachments(attachments):
+    """Describe attachments for email body presentation."""
+    if not attachments:
+        return {
+            "attachment_type": "none",
+            "description": "No report files are attached."
+        }
+
+    has_pdf = False
+    has_html = False
+    for att in attachments:
+        fn = (att.get('filename') or att.get('path') or '').lower()
+        ct = (att.get('content_type') or att.get('mimetype') or '').lower()
+        if fn.endswith('.pdf') or ct == 'application/pdf':
+            has_pdf = True
+        if fn.endswith('.html') or fn.endswith('.htm') or ct == 'text/html':
+            has_html = True
+
+    if has_pdf and has_html:
+        return {
+            "attachment_type": "both",
+            "description": "Both HTML and PDF versions are included for ease of review."
+        }
+    elif has_pdf:
+        return {
+            "attachment_type": "pdf",
+            "description": "A PDF version is included for ease of review."
+        }
+    elif has_html:
+        return {
+            "attachment_type": "html",
+            "description": "An HTML version is included for ease of review."
+        }
+    else:
+        return {
+            "attachment_type": "other",
+            "description": "Report attachments are included for ease of review."
+        }
+
+
+def render_email_body_html(*args, **kwargs):
+    """Render HTML email body from email_body_template.html.
+    Supports positional: (report_type, scope, start_str, end_str)
+    or keyword arguments / metadata dict.
+    """
     try:
         env = _make_jinja_env()
-        r_type = (report_type or 'weekly').title()
-        s_scope = (scope or 'team').title()
-        report_title = f"{r_type} {s_scope} Activity Report"
+        meta = kwargs.get('metadata') or {}
+
+        # Extract parameters with fallbacks
+        report_type = kwargs.get('report_type') or meta.get('report_type')
+        if not report_type and len(args) > 0:
+            report_type = args[0]
+
+        scope = kwargs.get('scope') or meta.get('scope')
+        if not scope and len(args) > 1:
+            scope = args[1]
+
+        start_date = kwargs.get('start_date') or kwargs.get('start_str') or meta.get('start_date') or meta.get('start_str')
+        if not start_date and len(args) > 2:
+            start_date = args[2]
+
+        end_date = kwargs.get('end_date') or kwargs.get('end_str') or meta.get('end_date') or meta.get('end_str')
+        if not end_date and len(args) > 3:
+            end_date = args[3]
+
+        start_str = str(start_date) if start_date else ''
+        end_str = str(end_date) if end_date else ''
+
+        report_title = kwargs.get('report_title') or meta.get('report_title')
+        if not report_title:
+            if report_type and scope:
+                report_title = f"{report_type.title()} {scope.title()} Activity Report"
+            elif report_type:
+                report_title = f"{report_type.title()} Activity Report"
+            elif scope:
+                report_title = f"{scope.title()} Activity Report"
+            else:
+                report_title = "Activity Report"
+
+        period = kwargs.get('period') or meta.get('period')
+        if period:
+            period_display = str(period)
+        elif start_str and end_str:
+            period_display = f"{start_str} to {end_str}"
+        elif start_str or end_str:
+            period_display = start_str or end_str
+        else:
+            period_display = "N/A"
+
+        agent_name = kwargs.get('agent_name') or meta.get('agent_name')
+        team_name = kwargs.get('team_name') or meta.get('team_name')
+        support_contact = kwargs.get('support_contact') or meta.get('support_contact')
+
+        generated_at = (
+            kwargs.get('generated_at') or kwargs.get('generated_at_utc') or
+            meta.get('generated_at') or meta.get('generated_at_utc')
+        )
+        generated_at_display = str(generated_at) if generated_at else "N/A"
+
+        report_type_display = report_type.title() if report_type else "N/A"
+        scope_display = scope.title() if scope else "N/A"
+
+        attachments = kwargs.get('attachments') if 'attachments' in kwargs else meta.get('attachments')
+        if attachments is not None:
+            valid_atts = validate_attachments(attachments)
+            desc_info = describe_attachments(valid_atts)
+        else:
+            desc_info = describe_attachments(None)
+        attachment_desc = desc_info["description"]
+
         return env.get_template('email_body_template.html').render(
             report_title=report_title,
+            report_type_display=report_type_display,
+            scope_display=scope_display,
+            agent_name=agent_name,
+            team_name=team_name,
+            period_display=period_display,
+            generated_at_display=generated_at_display,
+            attachment_desc=attachment_desc,
+            support_contact=support_contact,
             start_str=start_str,
             end_str=end_str,
         )
@@ -398,13 +560,136 @@ def send_report_email(html_content, recipients, subject, cc=None, body_text=None
         logger.warning("[REPORTS] send_report_email: SMTP_USER/SMTP_PASSWORD not configured")
         return False, 'SMTP credentials not configured'
 
-    msg = MIMEMultipart('alternative')
-    msg['From'] = f'{from_name} <{smtp_user}>'
-    msg['To'] = ', '.join(recipients) if isinstance(recipients, list) else recipients
-    if cc:
-        msg['Cc'] = ', '.join(cc) if isinstance(cc, list) else cc
-    msg['Subject'] = subject
-    msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+    is_attachment_mode = (attachments is not None or start_date is not None or pdf_path is not None or body_text is not None)
+
+    if not is_attachment_mode:
+        msg = MIMEMultipart('alternative')
+        msg['From'] = f'{from_name} <{smtp_user}>'
+        msg['To'] = ', '.join(recipients) if isinstance(recipients, list) else recipients
+        if cc:
+            msg['Cc'] = ', '.join(cc) if isinstance(cc, list) else cc
+        msg['Subject'] = subject
+        msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+    else:
+        if attachments is not None:
+            validated_attachments = validate_attachments(attachments)
+            if len(attachments) > 0 and len(validated_attachments) == 0:
+                logger.warning("[REPORTS] send_report_email: No valid attachments found")
+                return False, 'No valid attachments found'
+        else:
+            start_str = str(start_date) if start_date else ''
+            end_str = str(end_date) if end_date else ''
+            r_type = (report_type or 'weekly').lower()
+            s_scope = (scope or 'team').lower()
+            prefix = f"{s_scope}_{r_type}_{start_str}_to_{end_str}" if (start_str and end_str) else "sentineledge_report"
+            auto_atts = []
+            if html_content:
+                auto_atts.append({
+                    'filename': f"{prefix}.html",
+                    'content': html_content.encode('utf-8') if isinstance(html_content, str) else html_content,
+                    'content_type': 'text/html',
+                })
+            if pdf_path and os.path.exists(pdf_path):
+                auto_atts.append({
+                    'path': str(pdf_path),
+                    'filename': os.path.basename(str(pdf_path)),
+                    'content_type': 'application/pdf',
+                })
+            elif html_content:
+                import tempfile
+                tmp = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+                tmp.close()
+                ok_pdf, res_pdf = generate_pdf(html_content, tmp.name)
+                if ok_pdf and os.path.exists(res_pdf):
+                    try:
+                        with open(res_pdf, 'rb') as f:
+                            auto_atts.append({
+                                'filename': f"{prefix}.pdf",
+                                'content': f.read(),
+                                'content_type': 'application/pdf',
+                            })
+                    except Exception:
+                        pass
+                    finally:
+                        try:
+                            os.unlink(res_pdf)
+                        except Exception:
+                            pass
+            validated_attachments = validate_attachments(auto_atts)
+
+        msg = MIMEMultipart('mixed')
+        msg['From'] = f'{from_name} <{smtp_user}>'
+        msg['To'] = ', '.join(recipients) if isinstance(recipients, list) else recipients
+        if cc:
+            msg['Cc'] = ', '.join(cc) if isinstance(cc, list) else cc
+        msg['Subject'] = subject
+
+        start_str = str(start_date) if start_date else ''
+        end_str = str(end_date) if end_date else ''
+        r_type = (report_type or 'weekly').title()
+        s_scope = (scope or 'team').title()
+
+        if body_text is None:
+            body_text = f"""Good Morning Team,
+
+Please find attached the {r_type} {s_scope} Activity Report for the period {start_str} to {end_str}.
+This report presents an overview of team productivity, including:
+
+  - Total team working hours and average hours per member
+  - Top-performing team members
+  - Most frequently used applications
+  - Most visited websites
+  - Detailed member-wise activity summary
+
+Both HTML and PDF versions are included for ease of review.
+Should you require any additional information or clarification, please feel free to contact the CCD team.
+
+Best regards,
+SentinelEdge Monitoring System
+
+This is an automated report generated by SentinelEdge. Please do not reply to this email."""
+
+        body_alt = MIMEMultipart('alternative')
+        body_alt.attach(MIMEText(body_text, 'plain'))
+
+        if html_content and ('email-container' in html_content or 'meta-table' in html_content):
+            body_html = html_content
+        else:
+            body_html = render_email_body_html(
+                report_type=report_type,
+                scope=scope,
+                start_date=start_date,
+                end_date=end_date,
+                attachments=validated_attachments,
+            )
+            if not body_html:
+                body_html = html_content
+
+        if body_html:
+            body_alt.attach(MIMEText(body_html, 'html', 'utf-8'))
+
+        msg.attach(body_alt)
+
+        for att in validated_attachments:
+            filename = att.get('filename') or 'attachment'
+            content_type = att.get('content_type') or 'application/octet-stream'
+            main_type, sub_type = content_type.split('/', 1) if '/' in content_type else ('application', 'octet-stream')
+
+            part = MIMEBase(main_type, sub_type)
+            if att.get('path'):
+                with open(att['path'], 'rb') as f:
+                    part.set_payload(f.read())
+            elif att.get('content'):
+                raw_c = att['content']
+                if isinstance(raw_c, str):
+                    raw_c = raw_c.encode('utf-8')
+                part.set_payload(raw_c)
+            else:
+                continue
+
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+            msg.attach(part)
 
     all_rcpt = list(recipients) if isinstance(recipients, list) else [recipients]
     if cc:
@@ -670,8 +955,49 @@ def run_report_job(app, db, job_id, report_type, scope, agent_id, start_date, en
                 db.session.commit()
 
             if auto_email and recipients:
-                subject = f"SentinelEdge {report_type.title()} {scope.title()} Report \u2014 {start_date} to {end_date}"
-                ok, err = send_report_email(html, recipients, subject)
+                attachments = []
+                if pdf_path and os.path.exists(pdf_path):
+                    attachments.append({
+                        'path': str(pdf_path),
+                        'filename': os.path.basename(str(pdf_path)),
+                        'content_type': 'application/pdf',
+                    })
+                else:
+                    html_filename = build_report_filename(
+                        report_type=report_type,
+                        scope=scope,
+                        identity=meta_identity or (identity if 'identity' in locals() else 'report'),
+                        start_date=start_date,
+                        end_date=end_date,
+                        export_id=job_id[:8] if job_id else None,
+                        ext='html',
+                    )
+                    target_html = get_reports_storage_dir() / html_filename
+                    try:
+                        safe_write_file(target_html, html)
+                    except Exception:
+                        with open(target_html, 'w', encoding='utf-8') as f:
+                            f.write(html)
+                    attachments.append({
+                        'path': str(target_html),
+                        'filename': html_filename,
+                        'content_type': 'text/html',
+                    })
+
+                body_html = render_email_body_html(
+                    report_type=report_type,
+                    scope=scope,
+                    start_date=start_date,
+                    end_date=end_date,
+                    attachments=attachments,
+                )
+                subject = f"SentinelEdge {report_type.title()} {scope.title()} Report — {start_date} to {end_date}"
+                ok, err = send_report_email(
+                    body_html, recipients, subject,
+                    report_type=report_type, scope=scope,
+                    start_date=start_date, end_date=end_date,
+                    attachments=attachments,
+                )
                 if not ok:
                     logger.warning(f"[REPORTS] Job {job_id}: email failed — {err}")
                     job = db.session.get(ReportGenerationJob, job_id)

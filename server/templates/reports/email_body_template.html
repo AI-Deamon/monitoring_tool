@@ -111,8 +111,39 @@
         <div class="content">
             <div class="greeting">Good Morning Team,</div>
             <div class="intro-text">
-                Please find attached the <strong>{{ report_title }}</strong> for the period <strong>{{ start_str }}</strong> to <strong>{{ end_str }}</strong>.
+                Please find attached the <strong>{{ report_title }}</strong> for the period <strong>{{ period_display }}</strong>.
             </div>
+
+            <table class="meta-table" style="width: 100%; border-collapse: collapse; margin-bottom: 20px; background-color: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0; font-size: 13px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                <tr>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #475569; width: 140px;">Report Type:</td>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; color: #0f172a;">{{ report_type_display }}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #475569;">Scope:</td>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; color: #0f172a;">{{ scope_display }}</td>
+                </tr>
+                {% if agent_name %}
+                <tr>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #475569;">Agent / Machine:</td>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; color: #0f172a;">{{ agent_name }}</td>
+                </tr>
+                {% endif %}
+                {% if team_name %}
+                <tr>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #475569;">Team:</td>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; color: #0f172a;">{{ team_name }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #475569;">Period:</td>
+                    <td style="padding: 7px 14px; border-bottom: 1px solid #e2e8f0; color: #0f172a;">{{ period_display }}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 7px 14px; font-weight: 600; color: #475569;">Generated At:</td>
+                    <td style="padding: 7px 14px; color: #0f172a;">{{ generated_at_display }}</td>
+                </tr>
+            </table>
 
             <div class="summary-box">
                 <h3>Report Highlights Included</h3>
@@ -126,7 +157,7 @@
             </div>
 
             <div class="attachment-notice">
-                &check;&nbsp;Both <strong>HTML</strong> and <strong>PDF</strong> versions are attached to this email for ease of review.
+                &check;&nbsp;{{ attachment_desc }}
             </div>
 
             <p style="margin-bottom: 0;">

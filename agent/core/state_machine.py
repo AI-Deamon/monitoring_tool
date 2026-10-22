@@ -21,6 +21,7 @@ import json
 import time
 import logging
 import threading
+import uuid
 from enum import Enum
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -116,8 +117,14 @@ class ScreenTimeEngine:
         # Idempotency guard: only allow one reset per calendar day
         self._last_reset_date = None
 
-        # ✅ NEW: Track pending locked seconds for 2-hour Away rule
+        # Track pending locked seconds for 2-hour Away rule
         self.pending_locked_seconds = 0.0
+
+        # Track if current lock session has escalated to Away (>= 2 hours)
+        self._is_lock_escalated_to_away: bool = False
+
+        # Unconsumed final totals for daily boundary
+        self.pending_final_totals: Optional[Dict] = None
 
         logger.info("[STATE_MACHINE] Screen Time Engine initialized")
         logger.info(f"[STATE_MACHINE] State file: {self.state_file}")
@@ -182,8 +189,15 @@ class ScreenTimeEngine:
                 else:
                     self.idle_seconds += delta
             elif old_state == ScreenState.LOCKED:
-                # Do NOT directly add to locked_seconds
-                self.pending_locked_seconds += delta
+                if self._is_lock_escalated_to_away:
+                    self.away_seconds += delta
+                else:
+                    self.pending_locked_seconds += delta
+                    AWAY_THRESHOLD = 7200
+                    if self.pending_locked_seconds >= AWAY_THRESHOLD:
+                        self.away_seconds += self.pending_locked_seconds
+                        self.pending_locked_seconds = 0.0
+                        self._is_lock_escalated_to_away = True
             elif old_state == ScreenState.AWAY:
                 self.away_seconds += delta
 
@@ -191,7 +205,12 @@ class ScreenTimeEngine:
             if (old_state == ScreenState.LOCKED or was_unmonitored_gap) and new_state != ScreenState.LOCKED:
                 AWAY_THRESHOLD = 7200
 
-                if self.pending_locked_seconds >= AWAY_THRESHOLD:
+                if self._is_lock_escalated_to_away:
+                    self._is_lock_escalated_to_away = False
+                    logger.info(
+                        f"[STATE_MACHINE] Lock session ended (was escalated to AWAY)"
+                    )
+                elif self.pending_locked_seconds >= AWAY_THRESHOLD:
                     self.away_seconds += self.pending_locked_seconds
                     logger.info(
                         f"[STATE_MACHINE] Lock session → AWAY "
@@ -204,6 +223,12 @@ class ScreenTimeEngine:
                         f"({self.pending_locked_seconds:.1f}s)"
                     )
 
+                self.pending_locked_seconds = 0.0
+                self._is_lock_escalated_to_away = False
+
+            # Reset lock escalation tracking when entering a new LOCKED session from a non-locked state
+            if new_state == ScreenState.LOCKED and old_state != ScreenState.LOCKED:
+                self._is_lock_escalated_to_away = False
                 self.pending_locked_seconds = 0.0
 
             # Transition
@@ -250,11 +275,11 @@ class ScreenTimeEngine:
         if state is None:
             state = self.current_state
 
-        # Un-monitored gap protection: gaps >= UNMONITORED_GAP_THRESHOLD while ACTIVE must not be active time
+        # Un-monitored gap protection: gaps >= UNMONITORED_GAP_THRESHOLD while ACTIVE or IDLE must not be active/idle time
         UNMONITORED_GAP_THRESHOLD = 120  # 2 minutes
-        if state == ScreenState.ACTIVE and delta >= UNMONITORED_GAP_THRESHOLD:
+        if state in (ScreenState.ACTIVE, ScreenState.IDLE) and delta >= UNMONITORED_GAP_THRESHOLD:
             logger.info(
-                f"[STATE_MACHINE] Un-monitored active gap ({delta:.1f}s >= {UNMONITORED_GAP_THRESHOLD}s) "
+                f"[STATE_MACHINE] Un-monitored {state.value.lower()} gap ({delta:.1f}s >= {UNMONITORED_GAP_THRESHOLD}s) "
                 f"redirected to LOCK/AWAY progression"
             )
             state = ScreenState.LOCKED
@@ -264,15 +289,19 @@ class ScreenTimeEngine:
         elif state == ScreenState.IDLE:
             self.idle_seconds += delta
         elif state == ScreenState.LOCKED:
-            self.pending_locked_seconds += delta
-            AWAY_THRESHOLD = 7200  # 2 hours
-            if self.pending_locked_seconds >= AWAY_THRESHOLD:
-                self.away_seconds += self.pending_locked_seconds
-                logger.info(
-                    f"[STATE_MACHINE] 2h+ lock → AWAY "
-                    f"({self.pending_locked_seconds:.1f}s)"
-                )
-                self.pending_locked_seconds = 0.0
+            if self._is_lock_escalated_to_away:
+                self.away_seconds += delta
+            else:
+                self.pending_locked_seconds += delta
+                AWAY_THRESHOLD = 7200  # 2 hours
+                if self.pending_locked_seconds >= AWAY_THRESHOLD:
+                    self.away_seconds += self.pending_locked_seconds
+                    logger.info(
+                        f"[STATE_MACHINE] 2h+ lock → AWAY "
+                        f"({self.pending_locked_seconds:.1f}s)"
+                    )
+                    self.pending_locked_seconds = 0.0
+                    self._is_lock_escalated_to_away = True
         elif state == ScreenState.AWAY:
             self.away_seconds += delta
 
@@ -288,6 +317,44 @@ class ScreenTimeEngine:
             and not self.user_active_fn()
         )
 
+    def _tick_until(self, target_ts: float):
+        """
+        Advance counters from last_timestamp up to target_ts only.
+
+        Used by check_daily_boundary() to flush the pre-midnight portion
+        before reading final totals, without consuming post-midnight time.
+        """
+        with self._lock:
+            if target_ts <= self.last_timestamp:
+                return
+
+            delta = target_ts - self.last_timestamp
+
+            # Sanity check: cap delta at 24 hours
+            if delta > 86400:
+                logger.warning(
+                    f"[STATE_MACHINE] _tick_until delta too large: {delta:.1f}s (>24h), "
+                    f"capping to 86400s"
+                )
+                delta = 86400
+            elif delta < 0:
+                logger.error(
+                    f"[STATE_MACHINE] Negative _tick_until delta: {delta:.1f}s, ignoring"
+                )
+                return
+
+            bucket_state = (
+                ScreenState.IDLE if self._route_to_idle() else self.current_state
+            )
+
+            self._add_to_current_bucket(delta, bucket_state)
+            self.last_timestamp = target_ts
+            self._persist()
+
+            logger.debug(
+                f"[STATE_MACHINE] Tick until {target_ts}: +{delta:.1f}s to {self.current_state.value.lower()}_seconds"
+            )
+
     def tick(self):
         """
         Update counter for current state (MANDATORY - prevents time freezing).
@@ -298,15 +365,20 @@ class ScreenTimeEngine:
         Called every heartbeat (~30s) by state_detector.get_cumulative_totals().
 
         US1: when `user_active_fn` is set and reports unattended while ACTIVE,
-        the whole delta (including any IST-midnight split segment) is credited
-        to IDLE. `current_state` is never mutated.
+        the whole delta is credited to IDLE. `current_state` is never mutated.
         """
         with self._lock:
+            current_date = _now_ist().date()
+            if current_date != self.current_date:
+                crossed, final_totals = self.check_daily_boundary()
+                if crossed and final_totals:
+                    self.pending_final_totals = final_totals
+                return
+
             now = time.time()
             delta = now - self.last_timestamp
 
-            # Evaluate the predicate ONCE so both midnight-split segments below
-            # share the same routing decision.
+            # Evaluate the predicate ONCE
             bucket_state = (
                 ScreenState.IDLE if self._route_to_idle() else self.current_state
             )
@@ -324,26 +396,6 @@ class ScreenTimeEngine:
                     f"ignoring"
                 )
                 return
-
-            # Split delta at IST midnight if we crossed a day boundary.
-            # This prevents overnight sleep/resume from dumping the entire
-            # gap onto one calendar day.
-            last_date = datetime.fromtimestamp(
-                self.last_timestamp, tz=_local_tz()
-            ).date()
-            today = _now_ist().date()
-            if last_date != today:
-                # Compute local midnight of the day the gap started
-                midnight_ts = (
-                    datetime.combine(
-                        last_date, datetime.min.time(), tzinfo=_local_tz()
-                    ).timestamp()
-                    + 86400
-                )
-                pre_midnight_delta = max(0.0, midnight_ts - self.last_timestamp)
-                self._add_to_current_bucket(pre_midnight_delta, bucket_state)
-                self.last_timestamp = midnight_ts
-                delta = now - midnight_ts
 
             self._add_to_current_bucket(delta, bucket_state)
 
@@ -441,12 +493,41 @@ class ScreenTimeEngine:
                 )
                 last_event = LastEvent.SLEEP
 
+            # Check if system rebooted/started up during the gap.
+            # When boot_time > last_timestamp, the system was powered off / restarted,
+            # meaning this was a shutdown gap (even if the process died before mark_shutdown ran).
+            if last_event != LastEvent.SLEEP:
+                boot_time = self._get_system_boot_time()
+                if boot_time is not None and boot_time > (last_timestamp + 2.0):
+                    logger.info(
+                        f"[STATE_MACHINE] System rebooted during gap "
+                        f"(boot_time={datetime.fromtimestamp(boot_time, tz=_local_tz()).strftime('%Y-%m-%d %H:%M:%S')} > "
+                        f"last_timestamp={datetime.fromtimestamp(last_timestamp, tz=_local_tz()).strftime('%Y-%m-%d %H:%M:%S')}). "
+                        f"Inferred as SHUTDOWN. Gap: {gap:.1f}s ({gap / 3600:.1f}h) IGNORED (not counted)"
+                    )
+                    return {
+                        "action": "ignored_shutdown_gap",
+                        "gap_seconds": gap,
+                        "gap_hours": gap / 3600,
+                    }
+
             # ✅ CRITICAL: Gap handling logic
             if last_event == LastEvent.SLEEP:
                 # Sleep/Hibernate → If agent was locked before sleep, apply 2h rule.
                 # Otherwise count gap as AWAY.
                 pre_sleep_state = last_state_str.upper()
                 if pre_sleep_state == "LOCKED":
+                    if self._is_lock_escalated_to_away:
+                        self.away_seconds += gap
+                        logger.info(
+                            f"[STATE_MACHINE] Sleep gap: {gap:.1f}s ({gap / 3600:.1f}h) "
+                            f"counted as AWAY (was already escalated LOCKED)"
+                        )
+                        return {
+                            "action": "counted_as_away",
+                            "gap_seconds": gap,
+                            "gap_hours": gap / 3600,
+                        }
                     # FIX #2: Apply the same 2-hour Away rule here as tick() does.
                     # A long lock-before-sleep must become AWAY, not LOCKED.
                     # Read pending from the persisted dict directly so handle_startup()
@@ -460,6 +541,7 @@ class ScreenTimeEngine:
                     if total_lock_time >= AWAY_THRESHOLD:
                         self.away_seconds += total_lock_time
                         self.pending_locked_seconds = 0.0
+                        self._is_lock_escalated_to_away = True
                         logger.info(
                             f"[STATE_MACHINE] Sleep gap: {gap:.1f}s + pending {pending_before:.1f}s "
                             f"= {total_lock_time:.1f}s ({total_lock_time / 3600:.1f}h) "
@@ -522,6 +604,17 @@ class ScreenTimeEngine:
             else:
                 # Unknown/Normal gap: route to LOCKED (or AWAY if >= 2h threshold)
                 pre_gap_state = last_state_str.upper()
+                if pre_gap_state == "LOCKED" and self._is_lock_escalated_to_away:
+                    self.away_seconds += gap
+                    logger.info(
+                        f"[STATE_MACHINE] Unknown/Normal gap (was {pre_gap_state}): {gap:.1f}s ({gap / 3600:.1f}h) "
+                        f"counted as AWAY (was already escalated LOCKED)"
+                    )
+                    return {
+                        "action": "counted_as_away",
+                        "gap_seconds": gap,
+                        "gap_hours": gap / 3600,
+                    }
                 pending_before = (
                     max(
                         self.pending_locked_seconds,
@@ -535,6 +628,7 @@ class ScreenTimeEngine:
                 if total_lock_time >= AWAY_THRESHOLD:
                     self.away_seconds += total_lock_time
                     self.pending_locked_seconds = 0.0
+                    self._is_lock_escalated_to_away = True
                     logger.info(
                         f"[STATE_MACHINE] Unknown/Normal gap (was {pre_gap_state}): {gap:.1f}s + pending {pending_before:.1f}s "
                         f"= {total_lock_time:.1f}s ({total_lock_time / 3600:.1f}h) "
@@ -570,18 +664,34 @@ class ScreenTimeEngine:
             self._persist()
             logger.debug("[STATE_MACHINE] Reset last_event to NORMAL after startup")
 
+    def _get_system_boot_time(self) -> Optional[float]:
+        """
+        Get system boot timestamp using psutil or Windows GetTickCount64.
+        Returns timestamp (seconds since epoch) or None.
+        """
+        try:
+            import psutil
+            return psutil.boot_time()
+        except Exception:
+            pass
+
+        try:
+            import ctypes
+            # GetTickCount64 returns milliseconds since system was started
+            uptime_seconds = ctypes.windll.kernel32.GetTickCount64() / 1000.0
+            return time.time() - uptime_seconds
+        except Exception:
+            return None
+
     def _was_system_asleep_during_gap(self, start_time: float, end_time: float) -> bool:
         """
         Best-effort crash/sleep disambiguation using system boot time.
         Returns True only when heuristic confidence is high.
         """
         try:
-            import psutil  # Optional dependency
-        except Exception:
-            return False
-
-        try:
-            boot_time = psutil.boot_time()
+            boot_time = self._get_system_boot_time()
+            if boot_time is None:
+                return False
 
             # Reboot during the gap means shutdown/crash path, not sleep.
             if boot_time > start_time:
@@ -660,10 +770,11 @@ class ScreenTimeEngine:
         - Daily totals align with server/business-day expectations in IST
 
         CRITICAL: At midnight:
-        1. Send final totals to server (VIA HEARTBEAT with is_final=True)
-        2. Reset counters
-        3. Keep current state (continuity)
-        4. Reset last_timestamp to now
+        1. Flush pre-midnight time into old day's counters
+        2. Capture final totals for old day (to send to server via heartbeat)
+        3. Reset counters for new day
+        4. Accrue post-midnight time into new day's counters
+        5. Keep current state (continuity)
 
         Returns:
             Tuple of (boundary_crossed: bool, final_totals: dict or None)
@@ -673,16 +784,35 @@ class ScreenTimeEngine:
         with self._lock:
             current_date = _now_ist().date()
 
-            if current_date != self.current_date:
-                logger.info(
-                    f"[STATE_MACHINE] Daily boundary crossed: "
-                    f"{self.current_date} -> {current_date}"
+            # If a boundary was already crossed (e.g. by tick()) but final totals
+            # have not yet been consumed by a caller, return them now.
+            if self.pending_final_totals is not None and current_date == self.current_date:
+                final_to_send = self.pending_final_totals
+                self.pending_final_totals = None
+                return True, final_to_send
+
+            if self.current_date >= current_date:
+                return False, None
+
+            logger.info(
+                f"[STATE_MACHINE] Daily boundary crossed: "
+                f"{self.current_date} -> {current_date}"
+            )
+
+            last_final_totals = None
+
+            # Handle potentially multiple day boundaries (e.g. weekend suspend)
+            while self.current_date < current_date:
+                next_day = self.current_date + timedelta(days=1)
+                midnight_dt = datetime.combine(
+                    next_day, datetime.min.time(), tzinfo=_local_tz()
                 )
+                midnight_ts = midnight_dt.timestamp()
 
-                # Flush current state time before reading final totals
-                self.tick()
+                # 1. Flush pre-midnight time into current day's counters up to midnight
+                self._tick_until(midnight_ts)
 
-                # Get final totals for yesterday (before reset)
+                # 2. Get final totals for the day that just ended
                 final_totals = self.get_daily_totals()
                 logger.info(
                     f"[STATE_MACHINE] Final totals for {self.current_date}: "
@@ -692,20 +822,36 @@ class ScreenTimeEngine:
                     f"W={final_totals['away_seconds']}s, "
                     f"Total={final_totals['total_seconds']}s ({final_totals['total_seconds'] / 3600:.1f}h)"
                 )
+                last_final_totals = final_totals.copy() if final_totals else None
 
-                # Save final totals before reset (to send to server)
-                final_totals_to_send = final_totals.copy() if final_totals else None
+                # 3. Reset counters for next day, setting last_timestamp to midnight_ts
+                self.reset_daily(reset_date=next_day, reset_timestamp=midnight_ts)
+                self.current_date = next_day
 
-                # Reset for new day but keep current state continuity.
-                self.reset_daily()
-                self.current_date = current_date
-                self._persist()
+            # 4. Accrue post-midnight delta for today
+            now = time.time()
+            post_midnight_delta = now - self.last_timestamp
+            if post_midnight_delta > 0:
+                if post_midnight_delta > 86400:
+                    post_midnight_delta = 86400
+                bucket_state = (
+                    ScreenState.IDLE if self._route_to_idle() else self.current_state
+                )
+                self._add_to_current_bucket(post_midnight_delta, bucket_state)
+                self.last_timestamp = now
 
-                return True, final_totals_to_send
+            self._persist()
 
-            return False, None
+            final_to_send = last_final_totals
+            self.pending_final_totals = None
+            return True, final_to_send
 
-    def reset_daily(self, on_final_totals_callback: Optional[Callable[[Dict], None]] = None):
+    def reset_daily(
+        self,
+        on_final_totals_callback: Optional[Callable[[Dict], None]] = None,
+        reset_date: Optional[object] = None,
+        reset_timestamp: Optional[float] = None,
+    ):
         """
         Reset counters at midnight (IDEMPOTENT).
 
@@ -714,22 +860,25 @@ class ScreenTimeEngine:
         - Calls callback with final totals BEFORE resetting (for offline persistence)
         - Reset counters to 0
         - Keep current_state (LOCKED/AWAY continuity matters)
-        - Reset last_timestamp to now
+        - Reset last_timestamp to now or reset_timestamp
         
         Args:
             on_final_totals_callback: Optional callback(final_totals: dict) called before reset
                                      to persist data for offline resilience
+            reset_date: Optional date for which this reset is being executed (default: today IST)
+            reset_timestamp: Optional timestamp to set last_timestamp to (default: time.time())
         """
         with self._lock:
-            current_date = _now_ist().date()
-            if self._last_reset_date == current_date:
+            from datetime import date
+            target_date = reset_date if isinstance(reset_date, date) else _now_ist().date()
+            if self._last_reset_date == target_date:
                 logger.info(
-                    f"[STATE_MACHINE] Daily reset already done for {current_date}, "
+                    f"[STATE_MACHINE] Daily reset already done for {target_date}, "
                     f"skipping (idempotent guard)"
                 )
                 return
 
-            self._last_reset_date = current_date
+            self._last_reset_date = target_date
 
             logger.info(
                 f"[STATE_MACHINE] Resetting daily counters "
@@ -741,10 +890,15 @@ class ScreenTimeEngine:
             # Store final values BEFORE reset so they can be sent to server
             final_locked = 0.0
             final_away = 0.0
-            if self.pending_locked_seconds > 0:
+            if self._is_lock_escalated_to_away:
+                # Already escalated to AWAY; pending_locked_seconds is 0.0 and all seconds
+                # have already accrued into self.away_seconds
+                pass
+            elif self.pending_locked_seconds > 0:
                 AWAY_THRESHOLD = 7200  # 2 hours
                 if self.pending_locked_seconds >= AWAY_THRESHOLD:
                     final_away = self.pending_locked_seconds
+                    self._is_lock_escalated_to_away = True
                     logger.info(
                         f"[STATE_MACHINE] Midnight: pending {self.pending_locked_seconds:.0f}s → AWAY "
                         f"(crossed midnight)"
@@ -782,7 +936,10 @@ class ScreenTimeEngine:
             self.locked_seconds = 0.0
             self.away_seconds = 0.0
 
-            self.last_timestamp = time.time()
+            if self.current_state != ScreenState.LOCKED:
+                self._is_lock_escalated_to_away = False
+
+            self.last_timestamp = reset_timestamp if reset_timestamp is not None else time.time()
 
             # Persist immediately
             self._persist()
@@ -800,6 +957,7 @@ class ScreenTimeEngine:
         - daily counters
         - current_date
         """
+        temp_file = None
         try:
             data = {
                 "current_state": self.current_state.value,
@@ -810,6 +968,7 @@ class ScreenTimeEngine:
                 "locked_seconds": self.locked_seconds,
                 "away_seconds": self.away_seconds,
                 "pending_locked_seconds": self.pending_locked_seconds,  # FIX #1: Persist buffer
+                "_is_lock_escalated_to_away": self._is_lock_escalated_to_away,
                 "current_date": self.current_date.isoformat(),
                 "last_reset_date": self._last_reset_date.isoformat()
                 if self._last_reset_date
@@ -818,14 +977,35 @@ class ScreenTimeEngine:
                 "persisted_at": time.time(),
             }
 
-            # Atomic write
-            temp_file = self.state_file.with_suffix(".tmp")
+            # Atomic write with unique temp file to avoid WinError 32 races
+            unique_suffix = f"_{uuid.uuid4().hex[:8]}.tmp"
+            temp_file = self.state_file.with_name(
+                f"{self.state_file.stem}{unique_suffix}"
+            )
             with open(temp_file, "w") as f:
                 json.dump(data, f, indent=2)
-            temp_file.replace(self.state_file)
+
+            # Retry loop for atomic rename
+            for attempt in range(5):
+                try:
+                    temp_file.replace(self.state_file)
+                    temp_file = None  # Rename succeeded, no cleanup needed
+                    break
+                except OSError as rename_err:
+                    if attempt < 4:
+                        time.sleep(0.05 * (attempt + 1))
+                    else:
+                        raise rename_err
 
         except Exception as e:
             logger.error(f"[STATE_MACHINE] Failed to persist state: {e}")
+        finally:
+            if temp_file is not None:
+                try:
+                    if temp_file.exists():
+                        temp_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     def load_persisted_state(self) -> Optional[Dict]:
         """
@@ -902,6 +1082,17 @@ class ScreenTimeEngine:
                 logger.info(
                     f"[STATE_MACHINE] Discarding counters from previous day "
                     f"({saved_date}) - starting fresh for {self.current_date.isoformat()}"
+                )
+
+            # Restore lock escalation state
+            self._is_lock_escalated_to_away = bool(
+                data.get("_is_lock_escalated_to_away", False)
+            )
+            if self.current_state != ScreenState.LOCKED:
+                self._is_lock_escalated_to_away = False
+            else:
+                logger.info(
+                    f"[STATE_MACHINE] Restored _is_lock_escalated_to_away: {self._is_lock_escalated_to_away}"
                 )
 
             # Restore lock session start

@@ -65,26 +65,29 @@
         min-height: 24px;
     }
 
-    .update-pill-badge {
+    .update-pill-badge,
+    .update-card-title {
         display: inline-flex;
         align-items: center;
         gap: 0.375rem;
-        padding: 0.2rem 0.55rem;
-        border-radius: var(--radius-full, 9999px);
-        background: var(--bg-secondary, #f1f5f9);
-        border: 1px solid var(--border, #e2e8f0);
-        font-size: 0.6875rem;
-        font-weight: 700;
+        font-size: 0.75rem;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        color: var(--text-secondary, #475569);
+        color: var(--text-secondary, #64748b);
         user-select: none;
+        margin: 0;
+        padding: 0;
+        background: transparent !important;
+        border: none !important;
     }
 
     html.dark .update-pill-badge,
-    [data-theme="dark"] .update-pill-badge {
-        background: rgba(30, 41, 59, 0.75);
-        border-color: rgba(51, 65, 85, 0.8);
+    [data-theme="dark"] .update-pill-badge,
+    html.dark .update-card-title,
+    [data-theme="dark"] .update-card-title {
+        background: transparent !important;
+        border: none !important;
         color: #94a3b8;
     }
 
@@ -135,6 +138,7 @@
     }
 
     @keyframes pulse-blue {
+
         0%,
         100% {
             opacity: 1;
@@ -318,31 +322,32 @@
     /* Deploy Controls Layout: version select & Deploy All on one row */
     .deploy-action-row {
         display: flex;
-        gap: 0.625rem;
+        gap: 0.75rem;
         align-items: center;
         min-width: 0;
         width: 100%;
+        margin-bottom: 0.875rem;
     }
 
     .deploy-action-row select {
         flex: 1 1 auto;
         min-width: 0;
         box-sizing: border-box;
-        height: 32px;
+        height: 38px;
     }
 
     .deploy-action-row .deploy-all-btn {
         flex: 0 0 auto;
         white-space: nowrap;
-        height: 32px;
-        padding: 0 0.875rem;
+        height: 38px;
+        padding: 0 1rem;
     }
 
     @container (max-width: 250px) {
         .deploy-action-row {
             flex-direction: column;
             align-items: stretch;
-            gap: 0.375rem;
+            gap: 0.4rem;
         }
 
         .deploy-action-row select,
@@ -351,13 +356,25 @@
         }
     }
 
+    /* Canary Section Divider */
+    .canary-section {
+        border-top: 1px solid var(--border, #e2e8f0);
+        padding-top: 0.875rem;
+    }
+
+    html.dark .canary-section,
+    [data-theme="dark"] .canary-section {
+        border-top-color: var(--border, #334155);
+    }
+
     /* Canary Slider Constraints */
     .canary-range-wrapper {
         width: 100%;
         box-sizing: border-box;
         display: flex;
         align-items: center;
-        padding: 4px 2px;
+        padding: 10px 2px;
+        margin: 8px 0;
     }
 
     .canary-range {
@@ -443,9 +460,7 @@
                 agent versions</p>
         </div>
         <div class="flex items-center gap-3">
-            <button id="refresh-btn" onclick="initUpdates()"
-                class="btn btn-icon btn-secondary"
-                title="Refresh Updates">
+            <button id="refresh-btn" onclick="initUpdates()" class="btn btn-icon btn-secondary" title="Refresh Updates">
                 {{ icon('refresh', class='w-5 h-5') }}
             </button>
         </div>
@@ -456,9 +471,10 @@
         <!-- Fleet Version Distribution -->
         <div class="update-card" id="card-version-dist">
             <div class="update-card-header">
-                <span class="update-pill-badge">
+                <h3
+                    class="update-card-title text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Fleet Versions
-                </span>
+                </h3>
             </div>
             <div id="version-dist" class="update-card-body update-scroll-list space-y-1.5">
                 <div class="animate-pulse flex items-center justify-between py-1 px-1.5">
@@ -471,9 +487,10 @@
         <!-- Current Update Status -->
         <div class="update-card" id="card-status-dist">
             <div class="update-card-header">
-                <span class="update-pill-badge">
+                <h3
+                    class="update-card-title text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Update Status
-                </span>
+                </h3>
             </div>
             <div id="status-dist" class="update-card-body update-scroll-list space-y-1.5">
                 <div class="animate-pulse flex items-center justify-between py-1 px-1.5">
@@ -486,9 +503,10 @@
         <!-- Auto-Update Policy -->
         <div class="update-card" id="card-auto-update-policy">
             <div class="update-card-header">
-                <span class="update-pill-badge">
+                <h3
+                    class="update-card-title text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Auto-Update Policy
-                </span>
+                </h3>
             </div>
             <div id="policy-card" class="update-card-body space-y-2">
                 <div class="policy-toggle-row">
@@ -499,7 +517,8 @@
                     </label>
                 </div>
                 <div class="policy-channel-row">
-                    <label for="policy-channel" class="text-xs text-gray-700 dark:text-gray-300 font-medium">Channel</label>
+                    <label for="policy-channel"
+                        class="text-xs text-gray-700 dark:text-gray-300 font-medium">Channel</label>
                     <select id="policy-channel" onchange="savePolicy()"
                         class="text-xs px-2.5 py-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 font-medium cursor-pointer">
                         <option value="stable">Stable</option>
@@ -515,11 +534,11 @@
                     </label>
                 </div>
                 <div id="window-times" class="hidden window-times-row">
-                    <input type="time" id="policy-window-start" value="02:00"
-                        class="window-time-input" aria-label="Window start time">
+                    <input type="time" id="policy-window-start" value="02:00" class="window-time-input"
+                        aria-label="Window start time">
                     <span class="window-time-separator">to</span>
-                    <input type="time" id="policy-window-end" value="06:00"
-                        class="window-time-input" aria-label="Window end time">
+                    <input type="time" id="policy-window-end" value="06:00" class="window-time-input"
+                        aria-label="Window end time">
                 </div>
             </div>
         </div>
@@ -527,9 +546,10 @@
         <!-- Deploy Controls -->
         <div class="update-card" id="card-deploy-controls">
             <div class="update-card-header">
-                <span class="update-pill-badge">
+                <h3
+                    class="update-card-title text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Deploy Controls
-                </span>
+                </h3>
                 <span class="update-icon-pill">
                     {{ icon('bolt', class='w-3.5 h-3.5', variant='solid') }}
                 </span>
@@ -537,26 +557,27 @@
             <div class="update-card-body flex flex-col flex-1">
                 <div class="deploy-action-row">
                     <select id="target-version-select"
-                        class="px-2.5 py-1.5 text-xs font-medium border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                        class="px-3 py-2 text-sm font-medium border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 cursor-pointer">
                         <option value="">Select version...</option>
                     </select>
                     <button onclick="setTargetAll()"
-                        class="btn btn-primary deploy-all-btn text-xs py-1.5 px-3 whitespace-nowrap">
+                        class="btn btn-primary deploy-all-btn text-sm font-semibold py-2 px-4 whitespace-nowrap">
                         Deploy All
                     </button>
                 </div>
                 <!-- Canary rollout -->
-                <div class="border-t border-gray-100 dark:border-gray-700/60 pt-3.5 mt-3 flex flex-col justify-between flex-1">
-                    <div class="flex items-center justify-between mb-2">
+                <div
+                    class="canary-section border-t border-gray-200 dark:border-gray-700 pt-3.5 flex flex-col justify-between flex-1">
+                    <div class="flex items-center justify-between mb-3">
                         <span class="text-xs text-gray-500 dark:text-gray-400 font-medium">Canary Rollout</span>
-                        <span id="canary-pct-label" class="text-xs font-bold text-blue-600 dark:text-blue-400 font-mono px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 border border-blue-200/50 dark:border-blue-800/40">10%</span>
+                        <span id="canary-pct-label"
+                            class="text-xs font-bold text-blue-600 dark:text-blue-400 font-mono">10%</span>
                     </div>
-                    <div class="canary-range-wrapper my-auto py-1">
+                    <div class="canary-range-wrapper my-2.5 py-1.5">
                         <input type="range" id="canary-range" class="canary-range" min="1" max="100" value="10"
                             oninput="document.getElementById('canary-pct-label').textContent = this.value + '%'">
                     </div>
-                    <button onclick="canaryDeploy()"
-                        class="btn btn-warning w-full text-xs py-2 px-3 mt-3">
+                    <button onclick="canaryDeploy()" class="btn btn-warning w-full text-xs font-bold py-2.5 px-3 mt-4">
                         Canary Deploy
                     </button>
                 </div>
@@ -583,10 +604,7 @@
                     {{ icon('search', class='w-4 h-4') }}
                 </span>
                 <input type="text" id="update-search" placeholder="Search agent name or ID..." oninput="filterAgents()"
-                    class="se-search-input w-full"
-                    autocomplete="off"
-                    spellcheck="false"
-                    role="searchbox"
+                    class="se-search-input w-full" autocomplete="off" spellcheck="false" role="searchbox"
                     aria-label="Search agent name or ID">
             </div>
         </div>
@@ -624,7 +642,7 @@
     <!-- Tab: History Panel (hidden by default) -->
     <div id="panel-history"
         class="hidden bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden min-h-[400px]">
-        <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700/60">
+        <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
             <h3 class="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">Update Audit
                 History</h3>
         </div>
@@ -655,24 +673,33 @@
     </div>
 
     <!-- Error Detail Modal -->
-    <div id="error-detail-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity" role="dialog" aria-modal="true" aria-labelledby="error-modal-title" onclick="if(event.target===this)closeErrorModal()">
-        <div class="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-2xl overflow-hidden p-6" onclick="event.stopPropagation()">
+    <div id="error-detail-modal"
+        class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity"
+        role="dialog" aria-modal="true" aria-labelledby="error-modal-title"
+        onclick="if(event.target===this)closeErrorModal()">
+        <div class="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-2xl overflow-hidden p-6"
+            onclick="event.stopPropagation()">
             <div class="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-700">
-                <h3 id="error-modal-title" class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <h3 id="error-modal-title"
+                    class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <span class="p-1.5 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-lg">
                         {{ icon('warning', class='w-5 h-5') }}
                     </span>
                     Update Audit Error Details
                 </h3>
-                <button onclick="closeErrorModal()" class="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 p-1 rounded-lg" aria-label="Close modal">
+                <button onclick="closeErrorModal()"
+                    class="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 p-1 rounded-lg"
+                    aria-label="Close modal">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M6 18L18 6M6 6l12 12" />
                     </svg>
                 </button>
             </div>
             <div class="mt-4">
                 <div class="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">Error Message:</div>
-                <pre id="error-modal-content" class="bg-gray-900 text-rose-300 p-4 rounded-lg font-mono text-xs overflow-x-auto whitespace-pre-wrap break-words max-h-80 select-all"></pre>
+                <pre id="error-modal-content"
+                    class="bg-gray-900 text-rose-300 p-4 rounded-lg font-mono text-xs overflow-x-auto whitespace-pre-wrap break-words max-h-80 select-all"></pre>
             </div>
             <div class="mt-6 flex justify-end gap-3">
                 <button id="error-modal-copy-btn" onclick="copyErrorContent()" class="btn btn-secondary text-xs">
@@ -956,7 +983,7 @@
         });
     }
 
-    document.addEventListener('keydown', function(e) {
+    document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
             closeErrorModal();
         }

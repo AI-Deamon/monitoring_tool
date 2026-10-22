@@ -150,6 +150,80 @@ class TestStateDetectorSpanResolution(unittest.TestCase):
         self.assertTrue(len(detector.pending_spans) >= 1)
         self.assertEqual(detector.pending_spans[-1]["state"], "away")
 
+    def test_runtime_sleep_gap_emits_away_span_and_preserves_pre_gap_active(self):
+        """Simulate 2h17m sleep gap while ACTIVE: must emit pre-gap active span, away gap span, and fresh active span."""
+        from helper.state_detector import StateDetector
+        from core.state_machine import ScreenTimeEngine
+
+        engine = MagicMock(spec=ScreenTimeEngine)
+        detector = StateDetector(agent_id="test-agent")
+        detector.screen_time_engine = engine
+
+        t0 = 1000000.0
+        detector.current_state = "active"
+        detector._last_state_change_time = t0
+        detector._last_alive_time = t0 + 60.0  # alive for 60s before sleep
+
+        # System wakes up 8215s later
+        t_wake = t0 + 60.0 + 8215.0
+        handled = detector._check_and_handle_unmonitored_gap(t_wake)
+        self.assertTrue(handled)
+
+        # Must have emitted 2 spans: 60s active, 8215s away
+        self.assertEqual(len(detector.pending_spans), 2)
+        pre_span = detector.pending_spans[0]
+        gap_span = detector.pending_spans[1]
+
+        self.assertEqual(pre_span["state"], "active")
+        self.assertEqual(pre_span["duration_seconds"], 60)
+
+        self.assertEqual(gap_span["state"], "away")
+        self.assertEqual(gap_span["duration_seconds"], 8215)
+
+        # Timestamp must be advanced to t_wake
+        self.assertEqual(detector._last_state_change_time, t_wake)
+
+        # Subsequent transition after 30 min (1800s) active work
+        t_idle = t_wake + 1800.0
+        detector._last_alive_time = t_idle
+        engine.transition.return_value = {
+            "from": "ACTIVE",
+            "to": "IDLE",
+            "delta_seconds": 1800.0,
+            "was_unmonitored_gap": False,
+        }
+        with patch("time.time", return_value=t_idle):
+            detector._transition("idle", source="idle")
+
+        # 3rd span must be active for only 1800s
+        self.assertEqual(len(detector.pending_spans), 3)
+        post_span = detector.pending_spans[2]
+        self.assertEqual(post_span["state"], "active")
+        self.assertEqual(post_span["duration_seconds"], 1800)
+
+    def test_runtime_sleep_gap_under_2h_emits_locked_span(self):
+        """Simulate 30m sleep gap (< 2h) while ACTIVE: must emit locked span."""
+        from helper.state_detector import StateDetector
+        from core.state_machine import ScreenTimeEngine
+
+        engine = MagicMock(spec=ScreenTimeEngine)
+        detector = StateDetector(agent_id="test-agent")
+        detector.screen_time_engine = engine
+
+        t0 = 1000000.0
+        detector.current_state = "active"
+        detector._last_state_change_time = t0
+        detector._last_alive_time = t0 + 100.0
+
+        t_wake = t0 + 100.0 + 1800.0  # 30m sleep
+        handled = detector._check_and_handle_unmonitored_gap(t_wake)
+        self.assertTrue(handled)
+
+        self.assertEqual(len(detector.pending_spans), 2)
+        gap_span = detector.pending_spans[1]
+        self.assertEqual(gap_span["state"], "locked")
+        self.assertEqual(gap_span["duration_seconds"], 1800)
+
 
 if __name__ == "__main__":
     unittest.main()
