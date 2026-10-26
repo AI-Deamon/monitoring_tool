@@ -49,7 +49,18 @@ function setupSearch(inputId, containerId, selector) {
     input.addEventListener('input', () => {
         const term = input.value.toLowerCase();
         document.querySelectorAll(`#${containerId} ${selector}`).forEach(el => {
-            el.style.display = el.textContent.toLowerCase().includes(term) ? '' : 'none';
+            const matches = el.textContent.toLowerCase().includes(term);
+            el.style.display = matches ? '' : 'none';
+            if (el.dataset.subrowId) {
+                const sub = document.getElementById(el.dataset.subrowId);
+                if (sub) {
+                    if (!matches) {
+                        sub.style.display = 'none';
+                    } else if (!sub.classList.contains('hidden')) {
+                        sub.style.display = '';
+                    }
+                }
+            }
         });
     });
 }
@@ -57,7 +68,7 @@ function setupSearch(inputId, containerId, selector) {
 document.addEventListener('DOMContentLoaded', () => {
     setupSearch('app-search', 'apps-body', 'tr');
     setupSearch('domain-search', 'domains-body', 'tr');
-    setupSearch('inventory-search', 'inventory-body', 'tr');
+    setupSearch('inventory-search', 'inventory-body', 'tr.inv-row');
     setupSearch('visits-search', 'visits-list', '.site-item');
 });
 
@@ -159,9 +170,10 @@ async function loadFullReport(isManual = false) {
     // Update agent info
     if (data.agent) {
         if (data.agent.username) {
+            const userIcon = window.USER_ICON_SVG || `<img src="${window.USER_ICON_URL}" class="w-8 h-8 mr-2 inline-block" />`;
             document.getElementById('agent-title').innerHTML = `
-                    <img src="${window.USER_ICON_URL}" class="w-8 h-8 mr-2 inline-block" />
-                    ${data.agent.username}
+                    ${userIcon}
+                    <span>${data.agent.username}</span>
                 `;
         }
 
@@ -178,21 +190,38 @@ async function loadFullReport(isManual = false) {
             : 'No activity';
 
         // Live status
+        const liveBanner = document.getElementById('live-status-banner');
         if (data.live_status && data.live_status.current_app) {
-            document.getElementById('live-status-banner').classList.remove('hidden');
-            document.getElementById('live-app-name').textContent = data.live_status.current_app;
-            document.getElementById('live-window-title').textContent = data.live_status.window_title || '';
+            if (liveBanner) liveBanner.classList.remove('hidden');
+            const liveAppEl = document.getElementById('live-app-name');
+            if (liveAppEl) liveAppEl.textContent = data.live_status.current_app;
+            const liveTitleEl = document.getElementById('live-window-title');
+            if (liveTitleEl) liveTitleEl.textContent = data.live_status.window_title || '';
             const durationEl = document.getElementById('live-duration');
-            if (data.live_status.duration_seconds > 0) {
-                durationEl.textContent = formatTime(data.live_status.duration_seconds);
-                durationEl.classList.remove('hidden');
-            } else {
-                durationEl.classList.add('hidden');
+            if (durationEl) {
+                if (data.live_status.duration_seconds > 0) {
+                    durationEl.textContent = formatTime(data.live_status.duration_seconds);
+                    durationEl.classList.remove('hidden');
+                } else {
+                    durationEl.classList.add('hidden');
+                }
             }
-            document.getElementById('current-activity').textContent = data.live_status.current_app;
+            const actEl = document.getElementById('current-activity');
+            if (actEl) {
+                const app = escapeHtml(data.live_status.current_app);
+                actEl.innerHTML = `
+                    <span class="se-live-indicator" title="${app}">
+                        <span class="se-live-dot"></span>
+                        <span class="se-live-text">${app}</span>
+                    </span>
+                `;
+            }
         } else {
-            document.getElementById('live-status-banner').classList.add('hidden');
-            document.getElementById('current-activity').innerHTML = '<span class="opacity-70">Offline</span>';
+            if (liveBanner) liveBanner.classList.add('hidden');
+            const actEl = document.getElementById('current-activity');
+            if (actEl) {
+                actEl.innerHTML = '<span class="text-xs text-gray-500 dark:text-gray-400 font-medium">Offline</span>';
+            }
         }
 
         const stateEl = document.getElementById('current-state');
@@ -245,21 +274,12 @@ function renderAppUsage(appData) {
     }
 
     appData.data.forEach(app => {
-        const pct = parseFloat(app.percentage) || 0;
         const tr = document.createElement('tr');
-        tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
         tr.innerHTML = `
-                <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${app.app}</td>
-                <td class="px-4 py-3 text-center text-sm text-gray-600 dark:text-gray-300">${app.session_count || '-'}</td>
-                <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(app.duration_seconds)}</td>
-                <td class="px-4 py-3 text-right">
-                    <div class="flex items-center justify-end gap-2">
-                        <div class="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-full" style="width:${Math.min(pct, 100)}%"></div>
-                        </div>
-                        <span class="text-sm font-medium w-10 text-right">${app.percentage}%</span>
-                    </div>
-                </td>
+                <td class="col-app-name"><span class="se-cell-truncate font-medium text-gray-900 dark:text-gray-100" title="${escapeHtml(app.app)}">${escapeHtml(app.app)}</span></td>
+                <td class="col-app-sessions se-align-right text-sm text-gray-600 dark:text-gray-300">${app.session_count || '-'}</td>
+                <td class="col-app-duration se-align-right se-cell-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(app.duration_seconds)}</td>
+                <td class="col-app-pct se-align-right"><span class="text-xs font-medium">${app.percentage}%</span></td>
             `;
         tbody.appendChild(tr);
     });
@@ -279,19 +299,11 @@ function renderDomainUsage(domainData) {
     domainData.data.forEach(d => {
         const pct = total > 0 ? ((d.duration_seconds || 0) / total * 100).toFixed(1) : 0;
         const tr = document.createElement('tr');
-        tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
         tr.innerHTML = `
-                <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">${d.domain}</td>
-                <td class="px-4 py-3 text-center text-sm text-gray-600 dark:text-gray-300">${d.session_count || '-'}</td>
-                <td class="px-4 py-3 text-right font-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(d.duration_seconds)}</td>
-                <td class="px-4 py-3 text-right">
-                    <div class="flex items-center justify-end gap-2">
-                        <div class="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div class="h-full bg-gradient-to-r from-green-500 to-blue-500 rounded-full" style="width:${Math.min(pct, 100)}%"></div>
-                        </div>
-                        <span class="text-sm font-medium w-10 text-right">${pct}%</span>
-                    </div>
-                </td>
+                <td class="col-domain-name"><span class="se-cell-truncate font-medium text-gray-900 dark:text-gray-100" title="${escapeHtml(d.domain)}">${escapeHtml(d.domain)}</span></td>
+                <td class="col-domain-sessions se-align-right text-sm text-gray-600 dark:text-gray-300">${d.session_count || '-'}</td>
+                <td class="col-domain-duration se-align-right se-cell-mono text-sm text-gray-900 dark:text-gray-100">${formatTime(d.duration_seconds)}</td>
+                <td class="col-domain-pct se-align-right"><span class="text-xs font-medium">${pct}%</span></td>
             `;
         tbody.appendChild(tr);
     });
@@ -330,62 +342,114 @@ function renderInventory(invData) {
     document.getElementById('inventory-count').textContent = `${invData?.count || 0} apps`;
 
     if (!invData?.data?.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No inventory data</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">No inventory data</td></tr>';
         return;
     }
 
-    invData.data.forEach(app => {
-        const tr = document.createElement('tr');
-        tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-700';
-        tr.innerHTML = `
-                <td class="px-3 py-2 font-medium text-sm break-words text-gray-900 dark:text-gray-100">${escapeHtml(app.name)}</td>
-                <td class="px-3 py-2 text-xs text-gray-600 dark:text-gray-300 font-mono break-all">${escapeHtml(app.version || '-')}</td>
-                <td class="px-3 py-2 text-xs break-words text-gray-900 dark:text-gray-100">${escapeHtml(cleanPublisher(app.publisher))}</td>
-                <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 font-mono break-all">${app.install_location || '-'}</td>
-          <td class="px-3 py-2 text-xs text-gray-900 dark:text-gray-100">
-  ${app.install_date
-                ? (() => {
-                    const d = new Date(app.install_date);
-                    const day = String(d.getDate()).padStart(2, '0');
-                    const month = String(d.getMonth() + 1).padStart(2, '0');
-                    const year = d.getFullYear();
-                    return `${day}-${month}-${year}`;
-                })()
-                : '-'
-            }
-</td>
+    invData.data.forEach((app, idx) => {
+        const rawName = app.name || 'Unnamed Application';
+        const rawVersion = app.version || '-';
+        const cleanPub = cleanPublisher(app.publisher);
+        const fullPub = app.publisher || cleanPub;
+        const rawLocation = app.install_location || '-';
+        const dateFormatted = formatInstallDate(app.install_date);
+        const sourceBadgeHtml = getSourceBadge(app.source);
 
-                <td class="px-3 py-2 text-center">${getSourceBadge(app.source)}</td>
-            `;
+        const tr = document.createElement('tr');
+        tr.className = 'inv-row';
+        tr.id = `inv-row-${idx}`;
+        tr.dataset.subrowId = `inv-subrow-${idx}`;
+        tr.onclick = (e) => {
+            if (!e.target.closest('button') && !e.target.closest('a')) {
+                toggleInventoryDetail(idx);
+            }
+        };
+
+        const locationTooltip = app.install_location ? app.install_location : 'Not specified';
+
+        tr.innerHTML = `
+            <td class="col-inv-name">
+                <div class="flex items-center justify-between w-full min-w-0">
+                    <span class="inv-cell-truncate font-medium text-sm text-gray-900 dark:text-gray-100 flex-1 min-w-0" title="${escapeHtml(rawName)}">${escapeHtml(rawName)}</span>
+                    <span class="inv-mobile-source-badge ml-2 shrink-0 md:hidden">${sourceBadgeHtml}</span>
+                </div>
+            </td>
+            <td class="col-inv-version">
+                <span class="inv-mobile-label">Version</span>
+                <span class="inv-cell-truncate text-xs text-gray-600 dark:text-gray-300 font-mono" title="${escapeHtml(rawVersion)}">${escapeHtml(rawVersion)}</span>
+            </td>
+            <td class="col-inv-publisher">
+                <span class="inv-mobile-label">Publisher</span>
+                <span class="inv-cell-truncate text-xs text-gray-900 dark:text-gray-100" title="${escapeHtml(fullPub)}">${escapeHtml(cleanPub)}</span>
+            </td>
+            <td class="col-inv-location">
+                <span class="inv-mobile-label">Install Location</span>
+                <span class="inv-cell-truncate text-xs text-gray-500 dark:text-gray-400 font-mono" title="${escapeHtml(locationTooltip)}">${escapeHtml(rawLocation)}</span>
+            </td>
+            <td class="col-inv-date">
+                <span class="inv-mobile-label">Install Date</span>
+                <span class="inv-cell-truncate text-xs text-gray-900 dark:text-gray-100" title="${dateFormatted}">${dateFormatted}</span>
+            </td>
+            <td class="col-inv-source">
+                <span class="inv-mobile-label">Source</span>
+                <div class="inv-source-badge-wrap">${sourceBadgeHtml}</div>
+            </td>
+            <td class="col-inv-action">
+                <button type="button" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors focus:outline-none" onclick="event.stopPropagation(); toggleInventoryDetail(${idx})" title="Toggle install location">
+                    ${window.CHEVRON_DOWN_SVG ? window.CHEVRON_DOWN_SVG(`inv-chevron-${idx}`) : `<svg class="w-4 h-4 transform transition-transform duration-200" id="inv-chevron-${idx}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>`}
+                </button>
+            </td>
+        `;
+
+        const subTr = document.createElement('tr');
+        subTr.className = 'inv-subrow hidden';
+        subTr.id = `inv-subrow-${idx}`;
+        subTr.innerHTML = `
+            <td colspan="7" class="p-0 border-b border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/60">
+                <div class="px-4 py-2.5 flex items-center gap-2 text-xs">
+                    <span class="font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-[11px] shrink-0">Install Location:</span>
+                    <span class="font-mono text-gray-700 dark:text-gray-300 break-all select-all">${escapeHtml(rawLocation)}</span>
+                </div>
+            </td>
+        `;
+
         tbody.appendChild(tr);
+        tbody.appendChild(subTr);
     });
 }
 
+window.toggleInventoryDetail = function (idx) {
+    const subrow = document.getElementById(`inv-subrow-${idx}`);
+    const chevron = document.getElementById(`inv-chevron-${idx}`);
+    if (!subrow) return;
+    const isHidden = subrow.classList.contains('hidden');
+    if (isHidden) {
+        subrow.classList.remove('hidden');
+        if (chevron) chevron.classList.add('rotate-180');
+    } else {
+        subrow.classList.add('hidden');
+        if (chevron) chevron.classList.remove('rotate-180');
+    }
+};
+
 function cleanPublisher(publisher) {
-    if (!publisher || publisher === '-') return 'Unknown';
+    if (!publisher || publisher === '-' || publisher.trim() === '') return 'Unknown';
     const cnMatch = publisher.match(/CN=([^,]+)/);
     const oMatch = publisher.match(/O=([^,]+)/);
     if (cnMatch && cnMatch[1]) return cnMatch[1].trim();
     if (oMatch && oMatch[1]) return oMatch[1].trim();
-    return publisher.length > 40 ? publisher.substring(0, 37) + '...' : publisher;
+    return publisher.trim();
 }
 
 function cleanInstallLocation(location) {
     if (!location || location === '-') return '-';
-    const parts = location.split('\\\\');
-    if (parts.length > 4) return `${parts[0]}\\\\...\\\\${parts[parts.length - 1]}`;
-    if (location.length > 40) return '...' + location.slice(-37);
     return location;
 }
 
 function formatInstallDate(dateStr) {
     if (!dateStr || dateStr === '-') return '-';
-    try {
-        const formatted = DateFmt.formatDate(dateStr);
-        return formatted === DateFmt.EMPTY_DISPLAY ? dateStr : formatted;
-    } catch {
-        return dateStr;
-    }
+    const result = DateFmt.formatDate(dateStr);
+    return result === DateFmt.EMPTY_DISPLAY ? dateStr : result;
 }
 
 function escapeHtml(text) {
@@ -396,11 +460,20 @@ function escapeHtml(text) {
 }
 
 function getSourceBadge(source) {
-    if (!source) return '<span class="  px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs rounded-full">Unknown</span>';
-    if (source.includes('HKLM')) return '<span  class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs rounded-full">System</span>';
-    if (source.includes('HKCU')) return '<span class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 text-xs rounded-full">User</span>';
-    if (source.includes('Store')) return '<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs rounded-full">Store</span>';
-    return `<span class="px-2  py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs rounded-full">${escapeHtml(source)}</span>`;
+    if (!source || source === '-' || String(source).trim() === '' || String(source).toLowerCase() === 'unknown') {
+        return '<span class="inv-badge-source inv-badge-unknown" title="Unknown Source">Unknown</span>';
+    }
+    const s = String(source).trim().toLowerCase();
+    if (s.includes('hklm') || s === 'system') {
+        return `<span class="inv-badge-source inv-badge-system" title="${escapeHtml(source)}">System</span>`;
+    }
+    if (s.includes('hkcu') || s === 'user') {
+        return `<span class="inv-badge-source inv-badge-user" title="${escapeHtml(source)}">User</span>`;
+    }
+    if (s.includes('store')) {
+        return `<span class="inv-badge-source inv-badge-store" title="${escapeHtml(source)}">Store</span>`;
+    }
+    return `<span class="inv-badge-source inv-badge-other" title="${escapeHtml(source)}">${escapeHtml(source)}</span>`;
 }
 
 async function loadScreenTimeHistory() {
@@ -419,7 +492,8 @@ async function loadScreenTimeHistory() {
             labels: data.labels,
             datasets: [
                 { label: 'Active', data: data.active, backgroundColor: '#00ffaa', stack: 'Stack 0', borderRadius: 4 },
-                { label: 'Idle', data: data.idle, backgroundColor: '#f59e0b', stack: 'Stack 0', borderRadius: 4 },
+                // TEMPORARY: Idle disabled / merged into Active
+                // { label: 'Idle', data: data.idle, backgroundColor: '#f59e0b', stack: 'Stack 0', borderRadius: 4 },
                 { label: 'Locked', data: data.locked, backgroundColor: '#e6005c', stack: 'Stack 0', borderRadius: 4 }
             ]
         },
@@ -617,11 +691,11 @@ async function loadExtendedInventory() {
     const cliToolsCount = document.getElementById('cli-tools-count');
     if (cliToolsBody && data.cli_tools && data.cli_tools.length > 0) {
         cliToolsBody.innerHTML = data.cli_tools.map(tool => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-4 py-2 text-sm font-medium text-gray-900 dark:text-gray-100">${escapeHtml(tool.name || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(tool.version || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs" title="${escapeHtml(tool.executable_path || '')}">${escapeHtml(tool.executable_path || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(tool.source || '-')}</td>
+            <tr>
+                <td class="col-cli-name font-medium text-gray-900 dark:text-gray-100"><span class="se-cell-truncate" title="${escapeHtml(tool.name || '-')}">${escapeHtml(tool.name || '-')}</span></td>
+                <td class="col-cli-ver text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(tool.version || '-')}">${escapeHtml(tool.version || '-')}</span></td>
+                <td class="col-cli-path text-gray-500 dark:text-gray-400"><span class="se-cell-truncate se-cell-mono" title="${escapeHtml(tool.executable_path || '')}">${escapeHtml(tool.executable_path || '-')}</span></td>
+                <td class="col-cli-src text-gray-500 dark:text-gray-400"><span class="se-cell-truncate" title="${escapeHtml(tool.source || '-')}">${escapeHtml(tool.source || '-')}</span></td>
             </tr>
         `).join('');
         if (cliToolsCount) cliToolsCount.textContent = `${data.cli_tools.length} tools`;
@@ -632,12 +706,12 @@ async function loadExtendedInventory() {
     const driversCount = document.getElementById('drivers-count');
     if (driversBody && data.drivers && data.drivers.length > 0) {
         driversBody.innerHTML = data.drivers.map(driver => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-4 py-2 text-sm font-medium text-gray-900 dark:text-gray-100">${escapeHtml(driver.device_name || driver.driver_name || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(driver.driver_version || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(driver.manufacturer || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(driver.device_class || '-')}</td>
-                <td class="px-4 py-2 text-sm">${driver.is_signed ? '<span class="text-green-600 dark:text-green-400">✓ Signed</span>' : '<span class="text-red-600 dark:text-red-400">✗ Unsigned</span>'}</td>
+            <tr>
+                <td class="col-drv-dev font-medium text-gray-900 dark:text-gray-100"><span class="se-cell-truncate" title="${escapeHtml(driver.device_name || driver.driver_name || '-')}">${escapeHtml(driver.device_name || driver.driver_name || '-')}</span></td>
+                <td class="col-drv-ver text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(driver.driver_version || '-')}">${escapeHtml(driver.driver_version || '-')}</span></td>
+                <td class="col-drv-mfr text-gray-500 dark:text-gray-400"><span class="se-cell-truncate" title="${escapeHtml(driver.manufacturer || '-')}">${escapeHtml(driver.manufacturer || '-')}</span></td>
+                <td class="col-drv-class text-gray-500 dark:text-gray-400"><span class="se-cell-truncate" title="${escapeHtml(driver.device_class || '-')}">${escapeHtml(driver.device_class || '-')}</span></td>
+                <td class="col-drv-sign se-align-center">${driver.is_signed ? '<span class="text-green-600 dark:text-green-400 font-semibold text-xs">✓ Signed</span>' : '<span class="text-red-600 dark:text-red-400 font-semibold text-xs">✗ Unsigned</span>'}</td>
             </tr>
         `).join('');
         if (driversCount) driversCount.textContent = `${data.drivers.length} drivers`;
@@ -648,11 +722,11 @@ async function loadExtendedInventory() {
     const vscodeExtCount = document.getElementById('vscode-ext-count');
     if (vscodeExtBody && data.vscode_extensions && data.vscode_extensions.length > 0) {
         vscodeExtBody.innerHTML = data.vscode_extensions.map(ext => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-4 py-2 text-sm font-medium text-gray-900 dark:text-gray-100">${escapeHtml(ext.display_name || ext.extension_id || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(ext.publisher || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(ext.version || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(ext.source || '-')}</td>
+            <tr>
+                <td class="col-vsc-ext font-medium text-gray-900 dark:text-gray-100"><span class="se-cell-truncate" title="${escapeHtml(ext.display_name || ext.extension_id || '-')}">${escapeHtml(ext.display_name || ext.extension_id || '-')}</span></td>
+                <td class="col-vsc-pub text-gray-500 dark:text-gray-400"><span class="se-cell-truncate" title="${escapeHtml(ext.publisher || '-')}">${escapeHtml(ext.publisher || '-')}</span></td>
+                <td class="col-vsc-ver text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(ext.version || '-')}">${escapeHtml(ext.version || '-')}</span></td>
+                <td class="col-vsc-src text-gray-500 dark:text-gray-400"><span class="se-cell-truncate" title="${escapeHtml(ext.source || '-')}">${escapeHtml(ext.source || '-')}</span></td>
             </tr>
         `).join('');
         if (vscodeExtCount) vscodeExtCount.textContent = `${data.vscode_extensions.length} extensions`;
@@ -663,11 +737,11 @@ async function loadExtendedInventory() {
     const browserExtCount = document.getElementById('browser-ext-count');
     if (browserExtBody && data.browser_extensions && data.browser_extensions.length > 0) {
         browserExtBody.innerHTML = data.browser_extensions.map(ext => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400 capitalize">${escapeHtml(ext.browser || '-')}</td>
-                <td class="px-4 py-2 text-sm font-medium text-gray-900 dark:text-gray-100">${escapeHtml(ext.name || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(ext.version || '-')}</td>
-                <td class="px-4 py-2 text-sm">${ext.enabled ? '<span class="text-green-600 dark:text-green-400">✓</span>' : '<span class="text-gray-400">✗</span>'}</td>
+            <tr>
+                <td class="col-brw-type text-gray-500 dark:text-gray-400 capitalize"><span class="se-cell-truncate" title="${escapeHtml(ext.browser || '-')}">${escapeHtml(ext.browser || '-')}</span></td>
+                <td class="col-brw-name font-medium text-gray-900 dark:text-gray-100"><span class="se-cell-truncate" title="${escapeHtml(ext.name || '-')}">${escapeHtml(ext.name || '-')}</span></td>
+                <td class="col-brw-ver text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(ext.version || '-')}">${escapeHtml(ext.version || '-')}</span></td>
+                <td class="col-brw-status se-align-center">${ext.enabled ? '<span class="text-green-600 dark:text-green-400 font-bold">✓</span>' : '<span class="text-gray-400">✗</span>'}</td>
             </tr>
         `).join('');
         if (browserExtCount) browserExtCount.textContent = `${data.browser_extensions.length} extensions`;
@@ -678,11 +752,11 @@ async function loadExtendedInventory() {
     const pluginsCount = document.getElementById('plugins-count');
     if (pluginsBody && data.plugins && data.plugins.length > 0) {
         pluginsBody.innerHTML = data.plugins.map(plugin => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(plugin.plugin_type || '-')}</td>
-                <td class="px-4 py-2 text-sm font-medium text-gray-900 dark:text-gray-100">${escapeHtml(plugin.name || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(plugin.host_application || '-')}</td>
-                <td class="px-4 py-2 text-sm">${plugin.enabled ? '<span class="text-green-600 dark:text-green-400">✓</span>' : '<span class="text-gray-400">✗</span>'}</td>
+            <tr>
+                <td class="col-plg-type text-gray-500 dark:text-gray-400"><span class="se-cell-truncate" title="${escapeHtml(plugin.plugin_type || '-')}">${escapeHtml(plugin.plugin_type || '-')}</span></td>
+                <td class="col-plg-name font-medium text-gray-900 dark:text-gray-100"><span class="se-cell-truncate" title="${escapeHtml(plugin.name || '-')}">${escapeHtml(plugin.name || '-')}</span></td>
+                <td class="col-plg-host text-gray-500 dark:text-gray-400"><span class="se-cell-truncate" title="${escapeHtml(plugin.host_application || '-')}">${escapeHtml(plugin.host_application || '-')}</span></td>
+                <td class="col-plg-status se-align-center">${plugin.enabled ? '<span class="text-green-600 dark:text-green-400 font-bold">✓</span>' : '<span class="text-gray-400">✗</span>'}</td>
             </tr>
         `).join('');
         if (pluginsCount) pluginsCount.textContent = `${data.plugins.length} plugins`;
@@ -697,12 +771,12 @@ async function loadExtendedInventory() {
             const driveMatch = (app.executable_path || '').match(/^[A-Za-z]:/);
             const drive = driveMatch ? driveMatch[0].toUpperCase() : '-';
             return `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-4 py-2 text-sm font-medium text-gray-900 dark:text-gray-100">${escapeHtml(app.name || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(app.version || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(drive)}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs" title="${escapeHtml(app.executable_path || '')}">${escapeHtml(app.executable_path || '-')}</td>
-                <td class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${sizeStr}</td>
+            <tr>
+                <td class="col-prt-name font-medium text-gray-900 dark:text-gray-100"><span class="se-cell-truncate" title="${escapeHtml(app.name || '-')}">${escapeHtml(app.name || '-')}</span></td>
+                <td class="col-prt-ver text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(app.version || '-')}">${escapeHtml(app.version || '-')}</span></td>
+                <td class="col-prt-drv se-align-center text-gray-500 dark:text-gray-400">${escapeHtml(drive)}</td>
+                <td class="col-prt-path text-gray-500 dark:text-gray-400"><span class="se-cell-truncate se-cell-mono" title="${escapeHtml(app.executable_path || '')}">${escapeHtml(app.executable_path || '-')}</span></td>
+                <td class="col-prt-size se-align-right text-gray-500 dark:text-gray-400 font-mono text-xs">${sizeStr}</td>
             </tr>
         `}).join('');
         if (portableCount) portableCount.textContent = `${data.portable_apps.length} apps`;
@@ -754,10 +828,10 @@ async function loadSystemVisibility() {
     fillBody(
         'visibility-ports-body',
         openPorts.map(p => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">${escapeHtml(String(p.local_port ?? '-'))}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(p.local_address || '-')}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(p.process_name || '-')}</td>
+            <tr>
+                <td class="col-port-num se-cell-mono font-medium text-gray-900 dark:text-gray-100">${escapeHtml(String(p.local_port ?? '-'))}</td>
+                <td class="col-port-addr text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(p.local_address || '-')}">${escapeHtml(p.local_address || '-')}</span></td>
+                <td class="col-port-proc text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(p.process_name || '-')}">${escapeHtml(p.process_name || '-')}</span></td>
             </tr>
         `),
         3,
@@ -770,10 +844,10 @@ async function loadSystemVisibility() {
             const remote = `${c.remote_address || '-'}:${c.remote_port ?? '-'}`;
             const local = `${c.local_address || '-'}:${c.local_port ?? '-'}`;
             return `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">${escapeHtml(remote)}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(local)}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(c.process_name || '-')}</td>
+            <tr>
+                <td class="col-conn-remote text-gray-900 dark:text-gray-100"><span class="se-cell-truncate se-cell-mono" title="${escapeHtml(remote)}">${escapeHtml(remote)}</span></td>
+                <td class="col-conn-local text-gray-600 dark:text-gray-300"><span class="se-cell-truncate se-cell-mono" title="${escapeHtml(local)}">${escapeHtml(local)}</span></td>
+                <td class="col-conn-proc text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(c.process_name || '-')}">${escapeHtml(c.process_name || '-')}</span></td>
             </tr>
         `}),
         3,
@@ -783,10 +857,10 @@ async function loadSystemVisibility() {
     fillBody(
         'visibility-startup-body',
         startups.map(s => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">${escapeHtml(s.name || s.program_name || '-')}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300 truncate max-w-xs" title="${escapeHtml(s.command || s.path || '')}">${escapeHtml(s.command || s.path || '-')}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(s.source || s.location || '-')}</td>
+            <tr>
+                <td class="col-startup-name text-gray-900 dark:text-gray-100"><span class="se-cell-truncate font-medium" title="${escapeHtml(s.name || s.program_name || '-')}">${escapeHtml(s.name || s.program_name || '-')}</span></td>
+                <td class="col-startup-cmd text-gray-600 dark:text-gray-300"><span class="se-cell-truncate se-cell-mono" title="${escapeHtml(s.command || s.path || '')}">${escapeHtml(s.command || s.path || '-')}</span></td>
+                <td class="col-startup-src text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(s.source || s.location || '-')}">${escapeHtml(s.source || s.location || '-')}</span></td>
             </tr>
         `),
         3,
@@ -796,10 +870,10 @@ async function loadSystemVisibility() {
     fillBody(
         'visibility-tasks-body',
         tasks.map(t => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">${escapeHtml(t.task_name || t.name || '-')}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300 truncate max-w-xs" title="${escapeHtml(t.task_path || t.path || '')}">${escapeHtml(t.task_path || t.path || '-')}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(t.principal || '-')}</td>
+            <tr>
+                <td class="col-task-name text-gray-900 dark:text-gray-100"><span class="se-cell-truncate font-medium" title="${escapeHtml(t.task_name || t.name || '-')}">${escapeHtml(t.task_name || t.name || '-')}</span></td>
+                <td class="col-task-path text-gray-600 dark:text-gray-300"><span class="se-cell-truncate se-cell-mono" title="${escapeHtml(t.task_path || t.path || '')}">${escapeHtml(t.task_path || t.path || '-')}</span></td>
+                <td class="col-task-prin text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(t.principal || '-')}">${escapeHtml(t.principal || '-')}</span></td>
             </tr>
         `),
         3,
@@ -809,12 +883,12 @@ async function loadSystemVisibility() {
     fillBody(
         'visibility-disk-body',
         disks.map(d => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td class="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">${escapeHtml(d.drive || '-')}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(d.volume_name || '-')}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(String(d.used_percent ?? '-'))}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(String(d.free_gb ?? '-'))}</td>
-                <td class="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(String(d.size_gb ?? '-'))}</td>
+            <tr>
+                <td class="col-disk-drive font-bold text-gray-900 dark:text-gray-100">${escapeHtml(d.drive || '-')}</td>
+                <td class="col-disk-vol text-gray-600 dark:text-gray-300"><span class="se-cell-truncate" title="${escapeHtml(d.volume_name || '-')}">${escapeHtml(d.volume_name || '-')}</span></td>
+                <td class="col-disk-pct se-align-right text-gray-600 dark:text-gray-300">${escapeHtml(String(d.used_percent ?? '-'))}%</td>
+                <td class="col-disk-free se-align-right text-gray-600 dark:text-gray-300 font-mono">${escapeHtml(String(d.free_gb ?? '-'))}</td>
+                <td class="col-disk-size se-align-right text-gray-600 dark:text-gray-300 font-mono">${escapeHtml(String(d.size_gb ?? '-'))}</td>
             </tr>
         `),
         5,
@@ -1034,10 +1108,10 @@ function renderSecurityTable(tableId, items, category) {
         }
 
         return `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                <td class="px-4 py-3 text-sm font-medium text-gray-600 dark:text-gray-400 capitalize">${escapeHtml(col1)}</td>
-                <td class="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 truncate max-w-xs" title="${escapeHtml(col2)}">${escapeHtml(col2)}</td>
-                <td class="px-4 py-3 text-right">${getSeverityBadge(item.severity)}</td>
+            <tr>
+                <td class="col-sec-type text-sm font-medium text-gray-600 dark:text-gray-400 capitalize">${escapeHtml(col1)}</td>
+                <td class="col-sec-desc"><span class="se-cell-truncate text-gray-900 dark:text-gray-100" title="${escapeHtml(col2)}">${escapeHtml(col2)}</span></td>
+                <td class="col-sec-risk se-align-right">${getSeverityBadge(item.severity)}</td>
             </tr>
         `;
     }).join('');
@@ -1094,9 +1168,10 @@ function renderFlipCards(st, stateEvents) {
     // ── New shift-goal card (ea-*) ────────────────────────────────────────────
     const productivePct = st.productive_pct ?? utilPct;
     const productiveTimeStr = st.productive_time_str ?? formatTime(activeSec);
-    const awayPctNew = st.away_pct ?? (coreWindowSec > 0 ? Math.round(awayCh / coreWindowSec * 100) : 0);
-    const lockedPctNew = st.locked_pct ?? (coreWindowSec > 0 ? Math.round(lockedCh / coreWindowSec * 100) : 0);
-    const idlePct = st.idle_pct ?? 0;
+    const totalInactiveSec = awayCh + lockedCh + idleSec;
+    const awayPctNew = st.away_pct ?? (totalInactiveSec > 0 ? Math.round(awayCh / totalInactiveSec * 100) : 0);
+    const lockedPctNew = st.locked_pct ?? (totalInactiveSec > 0 ? Math.round(lockedCh / totalInactiveSec * 100) : 0);
+    const idlePct = st.idle_pct ?? (totalInactiveSec > 0 ? Math.round(idleSec / totalInactiveSec * 100) : 0);
     const awayTimeStr = st.away_time_str ?? formatTime(awayCh);
     const lockedTimeStr = st.locked_time_str ?? formatTime(lockedCh);
     const idleTimeStr = st.idle_time_str ?? formatTime(idleSec);
@@ -1107,13 +1182,17 @@ function renderFlipCards(st, stateEvents) {
     const eaAway = document.getElementById('ea-away-stat');
     const eaLocked = document.getElementById('ea-locked-stat');
     const eaIdle = document.getElementById('ea-idle-stat');
+    const eaInOffice = document.getElementById('ea-in-office-stat');
+    const eaOutOffice = document.getElementById('ea-out-office-stat');
 
     if (eaTime) eaTime.textContent = productiveTimeStr;
     if (eaBar) eaBar.style.width = productivePct + '%';
     if (eaCaption) eaCaption.textContent = `${productivePct}% of standard shift was active.`;
     if (eaAway) eaAway.textContent = `${awayTimeStr} (${awayPctNew}%)`;
-    if (eaLocked) eaLocked.textContent = `${lockedTimeStr} (${lockedPctNew}%)`;
+    if (eaLocked) eaLocked.textContent = lockedTimeStr || '--';
     if (eaIdle) eaIdle.textContent = `${idleTimeStr} (${idlePct}%)`;
+    if (eaInOffice) eaInOffice.textContent = st.in_office_time_str || '--';
+    if (eaOutOffice) eaOutOffice.textContent = st.out_of_office_time_str || '--';
     const eaShiftLabel = document.getElementById('ea-shift-target-label');
     if (eaShiftLabel && st.shift_target_label) eaShiftLabel.textContent = '/ ' + st.shift_target_label;
 
@@ -1167,8 +1246,8 @@ function renderTimeline(containerId, stateEvents, filterStates, coreStart, coreE
     const [csh] = coreStart.split(':').map(Number);
     const [ceh] = coreEnd.split(':').map(Number);
     const coreStartSec = csh * 3600;
-    const coreEndSec   = ceh * 3600;
-    const coreLeft  = (coreStartSec / DAY_SEC * 100).toFixed(3);
+    const coreEndSec = ceh * 3600;
+    const coreLeft = (coreStartSec / DAY_SEC * 100).toFixed(3);
     const coreWidth = ((coreEndSec - coreStartSec) / DAY_SEC * 100).toFixed(3);
 
     function spanStartSec(isoStr) {
@@ -1189,10 +1268,10 @@ function renderTimeline(containerId, stateEvents, filterStates, coreStart, coreE
             const sign = m[1] === '+' ? 1 : -1;
             const offMs = sign * (parseInt(m[2]) * 3600 + parseInt(m[3]) * 60) * 1000;
             const d = new Date(new Date(isoStr).getTime() + offMs);
-            return `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+            return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
         }
         const d = new Date(isoStr);
-        return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     }
 
     // ── Root ──────────────────────────────────────────────────────────────────
@@ -1226,7 +1305,7 @@ function renderTimeline(containerId, stateEvents, filterStates, coreStart, coreE
     for (let h = 1; h < 24; h++) {
         const tick = document.createElement('div');
         const inCore = h >= csh && h <= ceh;
-        tick.style.cssText = `position:absolute;top:0;bottom:0;left:${(h/24*100).toFixed(3)}%;width:1px;background:${inCore ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'};`;
+        tick.style.cssText = `position:absolute;top:0;bottom:0;left:${(h / 24 * 100).toFixed(3)}%;width:1px;background:${inCore ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'};`;
         bar.appendChild(tick);
     }
     barArea.appendChild(bar);
@@ -1246,7 +1325,7 @@ function renderTimeline(containerId, stateEvents, filterStates, coreStart, coreE
         const pos = (h / 24 * 100).toFixed(3);
         const inCore = h >= csh && h <= ceh;
         let transform = 'translateX(-50%)';
-        if (h === 0)  transform = 'translateX(0)';
+        if (h === 0) transform = 'translateX(0)';
         if (h === 24) transform = 'translateX(-100%)';
 
         const item = document.createElement('div');

@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import logging
 import time
+import threading
+import uuid
 
 from .idle import IdleDetector
 from .window import WindowTracker
@@ -45,6 +47,15 @@ def validate_duration(value, default=0, max_value=86400, context="duration"):
     except (ValueError, TypeError):
         logger.error(f"[VALIDATION] {context} non-numeric: {value}, using {default}s")
         return default
+
+
+def _local_date():
+    """Get current calendar date in local timezone (Asia/Kolkata)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    except Exception:
+        return (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).date()
 
 
 class DataCollector:
@@ -104,20 +115,23 @@ class DataCollector:
             self._last_idle_state = "active"
             self._last_foreground_app = None
 
-            # Enhanced: Session tracking
+            # Enhanced: Session tracking (UTC timestamp, local calendar day)
             self._session_start = datetime.now(UTC)
             self._heartbeat_count = 0
-
-            # Track current date for midnight detection
+            self._current_local_date = _local_date()
             self._current_date = datetime.now(UTC).date()
 
             self.window_tracking_failures = 0
+            self._state_lock = threading.Lock()
             logger.info("[INIT] [OK] Initialization complete")
 
             # Load persisted state
             logger.info("[INIT] Loading persisted state...")
             self._load_state()
             logger.info("[INIT] [OK] State loaded")
+
+            # Ensure restored or newly generated session_start is committed
+            self._save_state()
 
             # Apply initial config
             logger.info("[INIT] Applying config...")
@@ -151,46 +165,82 @@ class DataCollector:
         self.history_tracker.update_settings(self.config.capture_full_urls)
 
     def _load_state(self):
-        """Load persisted state"""
-        try:
-            if self.config.state_file.exists():
-                with open(self.config.state_file, "r") as f:
-                    state = json.load(f)
-                    self.sequence_number = state.get("sequence_number", 0)
-                    self.last_inventory_time = state.get("last_inventory_time")
+        """Load persisted state (thread-safe)"""
+        with self._state_lock:
+            try:
+                if self.config.state_file.exists():
+                    with open(self.config.state_file, "r") as f:
+                        state = json.load(f)
+                        self.sequence_number = state.get("sequence_number", 0)
+                        self.last_inventory_time = state.get("last_inventory_time")
 
-                    # Restore domain tracker states
-                    if "active_domain_state" in state:
-                        self.active_domain_tracker.set_state(
-                            state["active_domain_state"]
-                        )
-                    if "history_state" in state:
-                        self.history_tracker.set_state(state["history_state"])
-                    # Legacy compatibility
-                    elif "domain_state" in state:
-                        self.history_tracker.set_state(state["domain_state"])
+                        # Restore domain tracker states
+                        if "active_domain_state" in state:
+                            self.active_domain_tracker.set_state(
+                                state["active_domain_state"]
+                            )
+                        if "history_state" in state:
+                            self.history_tracker.set_state(state["history_state"])
+                        # Legacy compatibility
+                        elif "domain_state" in state:
+                            self.history_tracker.set_state(state["domain_state"])
 
-        except Exception as e:
-            logger.warning(f"Failed to load state: {e}")
+                        # Restore daily session start if on the same local calendar date
+                        saved_session_start = state.get("daily_session_start")
+                        saved_session_date = state.get("daily_session_date")
+                        today_str = str(self._current_local_date)
+                        if saved_session_start and saved_session_date == today_str:
+                            try:
+                                self._session_start = datetime.fromisoformat(saved_session_start)
+                                logger.info(
+                                    f"[COLLECTOR] Restored daily session start from {saved_session_date}: {self._session_start.isoformat()}"
+                                )
+                            except Exception as e:
+                                logger.warning(f"[COLLECTOR] Failed to parse saved session_start: {e}")
+
+            except Exception as e:
+                logger.warning(f"Failed to load state: {e}")
 
     def _save_state(self):
-        """Save state to disk"""
-        try:
-            state = {
-                "sequence_number": self.sequence_number,
-                "last_inventory_time": self.last_inventory_time,
-                "active_domain_state": self.active_domain_tracker.get_state(),
-                "history_state": self.history_tracker.get_state(),
-            }
+        """Save state to disk (thread-safe, collision-free)"""
+        with self._state_lock:
+            temp_file = None
+            try:
+                state = {
+                    "sequence_number": self.sequence_number,
+                    "last_inventory_time": self.last_inventory_time,
+                    "active_domain_state": self.active_domain_tracker.get_state(),
+                    "history_state": self.history_tracker.get_state(),
+                    "daily_session_start": self._session_start.isoformat() if self._session_start else None,
+                    "daily_session_date": str(self._current_local_date),
+                }
 
-            # Atomic write
-            temp_file = self.config.state_file.with_suffix(".tmp")
-            with open(temp_file, "w") as f:
-                json.dump(state, f, indent=2)
-            temp_file.replace(self.config.state_file)
+                # Collision-free per-write temp file (prevents WinError 32 on thread contention)
+                unique_suffix = f"_{uuid.uuid4().hex[:8]}.tmp"
+                temp_file = self.config.state_file.with_name(f"{self.config.state_file.stem}{unique_suffix}")
+                
+                with open(temp_file, "w") as f:
+                    json.dump(state, f, indent=2)
 
-        except Exception as e:
-            logger.error(f"Failed to save state: {e}")
+                for attempt in range(5):
+                    try:
+                        temp_file.replace(self.config.state_file)
+                        break
+                    except OSError as rename_err:
+                        if attempt < 4:
+                            time.sleep(0.05 * (attempt + 1))
+                        else:
+                            raise rename_err
+
+            except Exception as e:
+                logger.error(f"Failed to save state: {e}")
+            finally:
+                if temp_file is not None:
+                    try:
+                        if temp_file.exists():
+                            temp_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
 
     def get_system_state(self) -> str:
         """Standardized FIX 3: Force locked state reporting"""
@@ -218,11 +268,11 @@ class DataCollector:
         self.sequence_number += 1
         self._heartbeat_count += 1
 
-        # Check for midnight crossing (new day)
-        current_date = now.date()
-        if current_date != self._current_date:
+        # Check for midnight crossing (new day in local time)
+        current_local_date = _local_date()
+        if current_local_date != self._current_local_date:
             logger.info(
-                f"[COLLECTOR] Day changed (UTC): {self._current_date} -> {current_date}"
+                f"[COLLECTOR] Day changed (local): {self._current_local_date} -> {current_local_date}"
             )
 
             # NOTE: Do NOT reset state machine counters here.
@@ -230,12 +280,14 @@ class DataCollector:
             # midnight resets using LOCAL time (not UTC).
             # Resetting here caused triple-reset bugs (see PLAN-screentime-reset.md).
 
-            # Update current date
-            self._current_date = current_date
+            # Update current local date and start new daily session
+            self._current_local_date = current_local_date
+            self._current_date = now.date()
             self._session_start = now
             self._heartbeat_count = 0
+            self._save_state()
 
-            logger.info("[COLLECTOR] Day changed, counters managed by state machine")
+            logger.info("[COLLECTOR] Day changed, new daily session started and persisted")
 
             # FIX: Reset WindowTracker timestamp to prevent overnight duration overflow
             if self.window_tracker:

@@ -1,6 +1,7 @@
 {% extends "dashboard/base.html" %}
+{% from "components/icons.html" import icon %}
 
-{% block title %}Overview - SentinelEdge Dashboard{% endblock %}
+{% block title %}OverviewED - SentinelEdge Dashboard{% endblock %}
 {% block content %}
 {% if current_user.role == 'admin' %}
 <div class="px-5 py-4 space-y-4">
@@ -8,8 +9,7 @@
     <!-- Header -->
     <div class="flex items-center justify-between">
         <div>
-            <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                <img src="{{ url_for('static', filename='dashboard.png') }}" class="w-7 h-7 mr-1" />
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2.5">
                 Dashboard Overview
             </h1>
             <p class="text-gray-600 dark:text-gray-400 text-sm">
@@ -26,11 +26,14 @@
         </div>
     </div>
 
-    <!-- Fleet Summary Cards (4 KPIs) -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <!-- Fleet Summary Cards (3 KPIs) -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <!-- Total Agents -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 flex items-center gap-3">
-            <img src="{{ url_for('static', filename='agents.png') }}" class="w-8 h-8" />
+        <div
+            class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 flex items-center gap-3.5">
+            <div class="p-2.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                {{ icon('agents', 'w-6 h-6') }}
+            </div>
             <div>
                 <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Agents</div>
                 <p id="total-agents" class="text-3xl font-bold leading-tight">-</p>
@@ -38,31 +41,27 @@
         </div>
 
         <!-- Online Now (green accent) -->
-        <div class="bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-700 border-l-4 border-l-green-400 p-5 flex items-center gap-3">
-            <img src="{{ url_for('static', filename='online.png') }}" class="w-8 h-8" />
+        <div
+            class="bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-700 border-l-4 border-l-green-400 p-5 flex items-center gap-3.5">
+            <div class="p-2.5 rounded-lg bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 flex items-center justify-center">
+                {{ icon('online', 'w-6 h-6') }}
+            </div>
             <div>
-                <div class="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Online Now</div>
+                <div class="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Online Now
+                </div>
                 <p id="active-agents" class="text-3xl font-bold leading-tight text-green-600 dark:text-green-400">-</p>
             </div>
         </div>
 
         <!-- Offline (red accent) -->
-        <div class="bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-700 border-l-4 border-l-red-400 p-5 flex items-center gap-3">
-            <img src="{{ url_for('static', filename='no.png') }}" class="w-8 h-8" />
+        <div
+            class="bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-700 border-l-4 border-l-red-400 p-5 flex items-center gap-3.5">
+            <div class="p-2.5 rounded-lg bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 flex items-center justify-center">
+                {{ icon('offline', 'w-6 h-6') }}
+            </div>
             <div>
                 <div class="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Offline</div>
                 <p id="offline-agents" class="text-3xl font-bold leading-tight text-red-600 dark:text-red-400">-</p>
-            </div>
-        </div>
-
-        <!-- Avg Productivity (with SVG icon) -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 flex items-center gap-3">
-            <svg class="w-8 h-8 text-warning-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-            </svg>
-            <div>
-                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Avg Productivity</div>
-                <p id="avg-productivity" class="text-3xl font-bold leading-tight">-</p>
             </div>
         </div>
     </div>
@@ -71,7 +70,8 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Agent Status (donut) -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
-            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+            <div
+                class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
                 <h3 class="text-sm font-semibold">Agent Status</h3>
             </div>
             <div class="p-4 flex-1 flex items-center justify-center">
@@ -83,7 +83,8 @@
 
         <!-- Fleet Screen Time (100%-stacked bar) -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
-            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+            <div
+                class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
                 <h3 class="text-sm font-semibold">Team Screen Time</h3>
             </div>
             <!-- One 100%-stacked bar: segments sum to the day's total screen time,
@@ -92,31 +93,41 @@
             <div class="p-4 flex-1 flex flex-col justify-center gap-4">
                 <div class="flex justify-between items-baseline">
                     <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Team day split</h4>
-                    <span class="text-xs text-gray-500">Total <span id="fleet-total-time" class="font-semibold text-gray-700 dark:text-gray-200">0h 0m</span></span>
+                    <span class="text-xs text-gray-500">Total <span id="fleet-total-time"
+                            class="font-semibold text-gray-700 dark:text-gray-200">0h 0m</span></span>
                 </div>
-                <div id="fleet-stack" class="flex w-full h-5 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-700 gap-[2px]"
-                     role="img" aria-label="Team screen-time split by state">
-                    <div id="fleet-active-seg" class="h-full" style="width:0%; background:#10b981"></div>
-                    <div id="fleet-idle-seg"   class="h-full" style="width:0%; background:#d97706"></div>
-                    <div id="fleet-locked-seg" class="h-full" style="width:0%; background:#6b7280"></div>
-                    <div id="fleet-away-seg"   class="h-full" style="width:0%; background:#7c3aed"></div>
+                <div id="fleet-stack"
+                    class="flex w-full h-5 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-700 gap-[2px]"
+                    role="img" aria-label="Team screen-time split by state">
+                    <div id="fleet-active-seg" class="h-full" style="width:0%; background: var(--success);"></div>
+                    <div id="fleet-idle-seg" class="h-full" style="width:0%; background: var(--warning-dark, var(--warning));"></div>
+                    <div id="fleet-locked-seg" class="h-full" style="width:0%; background: var(--state-locked);"></div>
+                    <div id="fleet-away-seg" class="h-full" style="width:0%; background: var(--brand-secondary);"></div>
                 </div>
                 <!-- Legend: swatch + label + value, so identity is never colour-alone -->
                 <div class="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
                     <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#10b981"></span><span class="text-gray-600 dark:text-gray-400">Active</span></span>
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full"
+                                style="background: var(--success);"></span><span
+                                class="text-gray-600 dark:text-gray-400">Active</span></span>
                         <span id="fleet-active-time" class="font-medium tabular-nums">0h 0m</span>
                     </div>
                     <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#d97706"></span><span class="text-gray-600 dark:text-gray-400">Idle</span></span>
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full"
+                                style="background: var(--warning-dark, var(--warning));"></span><span
+                                class="text-gray-600 dark:text-gray-400">Idle</span></span>
                         <span id="fleet-idle-time" class="font-medium tabular-nums">0h 0m</span>
                     </div>
                     <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#6b7280"></span><span class="text-gray-600 dark:text-gray-400">Locked</span></span>
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full"
+                                style="background: var(--state-locked);"></span><span
+                                class="text-gray-600 dark:text-gray-400">Locked</span></span>
                         <span id="fleet-locked-time" class="font-medium tabular-nums">0h 0m</span>
                     </div>
                     <div id="fleet-away-legend" class="flex items-center justify-between" style="display:none;">
-                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:#7c3aed"></span><span class="text-gray-600 dark:text-gray-400">Away</span></span>
+                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full"
+                                style="background: var(--brand-secondary);"></span><span
+                                class="text-gray-600 dark:text-gray-400">Away</span></span>
                         <span id="fleet-away-time" class="font-medium tabular-nums">0h 0m</span>
                     </div>
                 </div>
@@ -125,9 +136,12 @@
 
         <!-- Fleet Lifecycle Risk (donut) -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
-            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl flex justify-between items-center">
+            <div
+                class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl flex justify-between items-center">
                 <h3 class="text-sm font-semibold">Device Lifecycle Risk</h3>
-                <span class="text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-600 dark:text-gray-200 px-2 py-0.5 rounded-full font-bold inline-flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>LIVE</span>
+                <span
+                    class="text-[10px] bg-gray-100 text-gray-600 dark:bg-gray-600 dark:text-gray-200 px-2 py-0.5 rounded-full font-bold inline-flex items-center gap-1"><span
+                        class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>LIVE</span>
             </div>
             <div class="p-4 flex flex-col flex-1 items-center justify-center">
                 <div class="relative w-full" style="height: 180px;">
@@ -151,36 +165,37 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- App Usage by Category -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
-            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+            <div
+                class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
                 <h3 class="text-sm font-semibold">App Usage by Category</h3>
             </div>
             <div class="p-4 relative" style="height: 260px;">
                 <canvas id="appCategoryChart"></canvas>
                 <div id="appCategoryEmpty"
-                     class="hidden absolute inset-0 flex items-center justify-center text-xs text-gray-400">
+                    class="hidden absolute inset-0 flex items-center justify-center text-xs text-gray-400">
                     No app usage recorded for this day
                 </div>
             </div>
             <!-- Manual HTML Legend (sibling, not inside) -->
             <div class="flex justify-center flex-wrap gap-3 text-xs pt-1 px-3 pb-3">
                 <div class="flex items-center gap-1">
-                    <span class="w-2 h-2 rounded-full bg-[#2a78d6]"></span>
+                    <span class="w-2 h-2 rounded-full" style="background: var(--cat-productivity);"></span>
                     <span class="text-gray-600 dark:text-gray-400">Productivity</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <span class="w-2 h-2 rounded-full bg-[#008300]"></span>
+                    <span class="w-2 h-2 rounded-full" style="background: var(--cat-communication);"></span>
                     <span class="text-gray-600 dark:text-gray-400">Communication</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <span class="w-2 h-2 rounded-full bg-[#e87ba4]"></span>
+                    <span class="w-2 h-2 rounded-full" style="background: var(--cat-browsing);"></span>
                     <span class="text-gray-600 dark:text-gray-400">Browsing</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <span class="w-2 h-2 rounded-full bg-[#eda100]"></span>
+                    <span class="w-2 h-2 rounded-full" style="background: var(--cat-development);"></span>
                     <span class="text-gray-600 dark:text-gray-400">Development</span>
                 </div>
                 <div class="flex items-center gap-1">
-                    <span class="w-2 h-2 rounded-full bg-[#9ca3af]"></span>
+                    <span class="w-2 h-2 rounded-full" style="background: var(--cat-other);"></span>
                     <span class="text-gray-600 dark:text-gray-400">Other</span>
                 </div>
             </div>
@@ -188,47 +203,77 @@
 
         <!-- Top Apps & Domains (merged with tabs) -->
         <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
-            <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
-                <div class="flex items-center justify-between mb-2">
+            <div
+                class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                     <div class="flex items-center gap-2">
-                        <img src="{{ url_for('static', filename='throphy.png') }}" class="w-3 h-3" />
                         <h3 class="text-sm font-semibold">Top 10 by screen time</h3>
                     </div>
-                    <div class="flex gap-1" id="top-range" role="group" aria-label="Top range">
-                        <button type="button" data-days="1" class="top-range-btn px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">Today</button>
-                        <button type="button" data-days="7" class="top-range-btn px-2 py-0.5 text-xs font-medium rounded bg-indigo-600 text-white">7d</button>
-                        <button type="button" data-days="30" class="top-range-btn px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300">30d</button>
-                    </div>
-                </div>
-                <div class="flex gap-1">
-                    <button type="button" onclick="switchTopTab('apps')" id="tab-apps" class="flex-1 px-3 py-1 text-xs font-medium bg-indigo-600 text-white rounded transition-colors">Apps</button>
-                    <button type="button" onclick="switchTopTab('domains')" id="tab-domains" class="flex-1 px-3 py-1 text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors">Domains</button>
-                </div>
-            </div>
-            <!-- Ranked horizontal bars: bar length encodes duration (magnitude),
-                 name is the direct label, value is a direct label at the end.
-                 Single hue — length carries the measure, not colour. -->
-            <div class="overflow-y-auto flex-1" style="max-height: 260px;">
-                <div id="top-apps-table">
-                    <div id="top-apps-list" class="py-1">
-                        <div class="px-2 py-2 text-center text-gray-500 text-xs">Loading...</div>
-                    </div>
-                </div>
-                <div id="top-domains-table" class="hidden">
-                    <div id="top-domains-list" class="py-1">
-                        <div class="px-2 py-2 text-center text-gray-500 text-xs">Loading...</div>
+                    <div class="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
+                        <!-- Apps | Domains segmented control -->
+                        <div class="se-segmented" id="top-type-tabs" role="group" aria-label="Content type">
+                            <button type="button" onclick="switchTopTab('apps')" id="tab-apps"
+                                class="se-segmented-btn se-segmented-btn--active" data-tab="apps">Apps</button>
+                            <button type="button" onclick="switchTopTab('domains')" id="tab-domains"
+                                class="se-segmented-btn" data-tab="domains">Domains</button>
+                        </div>
+                        <!-- Today | 7d | 30d segmented control -->
+                        <div class="se-segmented" id="top-range" role="group" aria-label="Time range">
+                            <button type="button" data-days="1"
+                                class="se-segmented-btn">Today</button>
+                            <button type="button" data-days="7"
+                                class="se-segmented-btn se-segmented-btn--active">7d</button>
+                            <button type="button" data-days="30"
+                                class="se-segmented-btn">30d</button>
+                        </div>
                     </div>
                 </div>
             </div>
-            <a href="/dashboard/reports" class="block px-3 py-2 text-xs text-indigo-600 dark:text-indigo-400 border-t border-gray-100 dark:border-gray-700 hover:underline shrink-0">View all in Reports →</a>
+            <!-- Segmented Ring Chart + Ranked List container -->
+            <div class="p-3 sm:p-4 flex-1 flex flex-col justify-center min-h-[260px]">
+                <!-- Loading State -->
+                <div id="top-screentime-loading" class="flex items-center justify-center py-12 text-gray-400 text-xs">
+                    <div class="w-4 h-4 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin mr-2"></div>
+                    Loading screen time...
+                </div>
+
+                <!-- Empty State -->
+                <div id="top-screentime-empty" class="hidden flex flex-col items-center justify-center py-12 text-gray-400 dark:text-gray-500 text-xs text-center">
+                    <span class="text-2xl mb-1">⏱️</span>
+                    No screen time recorded for this range
+                </div>
+
+                <!-- Content Container: Segmented Ring (left) + Ranked List (right) -->
+                <div id="top-screentime-content" class="hidden flex flex-col sm:flex-row items-center sm:items-stretch gap-4">
+                    <!-- Left: Ring Chart Container -->
+                    <div class="top-ring-container">
+                        <canvas id="top-screentime-chart" class="w-full h-full"></canvas>
+                        <!-- Ring Center Metric Overlay -->
+                        <div id="top-ring-center" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-2 select-none">
+                            <span id="top-ring-center-label" class="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 truncate max-w-[110px]" title="Total screen time">Total screen time</span>
+                            <span id="top-ring-center-value" class="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums mt-0.5 tracking-tight leading-none">0h 0m</span>
+                        </div>
+                    </div>
+
+                    <!-- Right: Ranked Screen-Time List -->
+                    <div class="flex-1 min-w-0 w-full flex flex-col justify-center">
+                        <div id="top-screentime-list" class="top-screentime-scroll-list space-y-1 se-screentime-scrollbar" role="list" aria-label="Top screen time ranking">
+                            <!-- Ranked rows rendered dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <a href="/dashboard/reports"
+                class="block px-3 py-2 text-xs text-indigo-600 dark:text-indigo-400 border-t border-gray-100 dark:border-gray-700 hover:underline shrink-0">View
+                all in Reports →</a>
         </div>
     </div>
 
     <!-- Row 3: Top Performance (full-width leaderboards) -->
     <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col">
-        <div class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
+        <div
+            class="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 rounded-t-xl">
             <h3 class="text-sm font-semibold flex items-center gap-2">
-                <img src="{{ url_for('static', filename='throphy.png') }}" class="w-3 h-3" />
                 Top Performance
             </h3>
         </div>
@@ -266,301 +311,535 @@
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/overview.js') }}"></script>
 {# eol-dashboard.js is already loaded for every page by base.html. Loading it
-   again here ran its DOMContentLoaded handler twice, so the two fetches it
-   makes (alerts banner + risk chart) became four calls to
-   /api/lifecycle/fleet-summary on every overview load. #}
+again here ran its DOMContentLoaded handler twice, so the two fetches it
+makes (alerts banner + risk chart) became four calls to
+/api/lifecycle/fleet-summary on every overview load. #}
 <script nonce="{{ csp_nonce() }}">
-// Categorical palette for App Usage by Category.
-// CVD-validated (--pairs all) on both the light (#fcfcfb) and dark (#1f2937)
-// surfaces, with a separate step per theme. Deliberately drawn from hues
-// distinct from the reserved status colours (Active green / Idle amber /
-// Locked gray) so a category bar never impersonates a screen-time state.
-// Slot order is fixed and never cycled; "other" is the neutral gray.
-function categoryColors() {
-    const dark = document.documentElement.classList.contains('dark');
-    return dark
-        ? { productivity: '#3987e5', communication: '#008300', browsing: '#d55181', development: '#c98500', other: '#9ca3af' }
-        : { productivity: '#2a78d6', communication: '#008300', browsing: '#e87ba4', development: '#eda100', other: '#9ca3af' };
-}
-
-// Initialize new analytics charts.
-// overview.js refreshes the KPI block every 30s, but these analytics charts
-// and tables only ever loaded once, so the lower half of the page went stale
-// while the top half kept updating. Refresh them on the same cadence, and
-// pause while the tab is hidden so a backgrounded dashboard stops polling.
-const ANALYTICS_REFRESH_MS = 30000;
-let analyticsRefreshTimer = null;
-
-function loadAnalytics() {
-    loadAnalyticsCharts();
-    loadAnalyticsTables();
-}
-
-function startAnalyticsRefresh() {
-    stopAnalyticsRefresh();
-    analyticsRefreshTimer = setInterval(loadAnalytics, ANALYTICS_REFRESH_MS);
-}
-
-function stopAnalyticsRefresh() {
-    if (analyticsRefreshTimer) {
-        clearInterval(analyticsRefreshTimer);
-        analyticsRefreshTimer = null;
+    // Categorical palette for App Usage by Category.
+    // CVD-validated (--pairs all) on both the light (#fcfcfb) and dark (#1f2937)
+    // surfaces, with a separate step per theme. Deliberately drawn from hues
+    // distinct from the reserved status colours (Active green / Idle amber /
+    // Locked gray) so a category bar never impersonates a screen-time state.
+    // Slot order is fixed and never cycled; "other" is the neutral gray.
+    function categoryColors() {
+        if (typeof window.getCategoryColors === 'function') {
+            return window.getCategoryColors();
+        }
+        const dark = document.documentElement.classList.contains('dark');
+        return dark
+            ? { productivity: '#3987e5', communication: '#10b981', browsing: '#f472b6', development: '#fbbf24', other: '#94a3b8' }
+            : { productivity: '#2a78d6', communication: '#008300', browsing: '#e87ba4', development: '#eda100', other: '#94a3af' };
     }
-}
 
-document.addEventListener('DOMContentLoaded', function () {
-    loadAnalytics();
-    startAnalyticsRefresh();
-});
+    // Initialize new analytics charts.
+    // overview.js refreshes the KPI block every 30s, but these analytics charts
+    // and tables only ever loaded once, so the lower half of the page went stale
+    // while the top half kept updating. Refresh them on the same cadence, and
+    // pause while the tab is hidden so a backgrounded dashboard stops polling.
+    const ANALYTICS_REFRESH_MS = 30000;
+    let analyticsRefreshTimer = null;
 
-document.addEventListener('visibilitychange', function () {
-    if (document.hidden) {
+    function loadAnalytics() {
+        loadAnalyticsCharts();
+        loadAnalyticsTables();
+    }
+
+    function startAnalyticsRefresh() {
         stopAnalyticsRefresh();
-    } else {
+        analyticsRefreshTimer = setInterval(loadAnalytics, ANALYTICS_REFRESH_MS);
+    }
+
+    function stopAnalyticsRefresh() {
+        if (analyticsRefreshTimer) {
+            clearInterval(analyticsRefreshTimer);
+            analyticsRefreshTimer = null;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
         loadAnalytics();
         startAnalyticsRefresh();
-    }
-});
+    });
 
-// Store chart instances for resize handling
-const chartInstances = {};
-
-// Tab switching for merged Top Apps/Domains
-window.switchTopTab = function(tab) {
-    const appsTable = document.getElementById('top-apps-table');
-    const domainsTable = document.getElementById('top-domains-table');
-    const tabApps = document.getElementById('tab-apps');
-    const tabDomains = document.getElementById('tab-domains');
-    
-    if (tab === 'apps') {
-        appsTable.classList.remove('hidden');
-        domainsTable.classList.add('hidden');
-        tabApps.className = 'flex-1 px-3 py-1 text-xs font-medium bg-indigo-600 text-white rounded transition-colors';
-        tabDomains.className = 'flex-1 px-3 py-1 text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors';
-    } else {
-        appsTable.classList.add('hidden');
-        domainsTable.classList.remove('hidden');
-        tabApps.className = 'flex-1 px-3 py-1 text-xs font-medium bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors';
-        tabDomains.className = 'flex-1 px-3 py-1 text-xs font-medium bg-indigo-600 text-white rounded transition-colors';
-    }
-};
-
-async function loadAnalyticsCharts() {
-    try {
-        // Load productivity metrics for Avg Productivity KPI
-        const prodResp = await fetch('/dashboard/api/overview/productivity-metrics?days=7');
-        const prodData = await prodResp.json();
-        if (prodData.summary) {
-            document.getElementById('avg-productivity').textContent = 
-                (prodData.summary.fleet_avg_score || 0).toFixed(1) + '%';
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            stopAnalyticsRefresh();
+        } else {
+            loadAnalytics();
+            startAnalyticsRefresh();
         }
+    });
 
-        // App Usage by Category - real data from /api/overview/category-breakdown.
-        // This chart previously rendered hardcoded sample values
-        // (Mon-Fri / [120,140,130,150,160]), so it showed the same invented
-        // numbers on every install regardless of what the agents reported.
-        const ctx1 = document.getElementById('appCategoryChart');
-        if (ctx1) {
-            // getSelectedDate() is defined in overview.js and reads the navbar
-            // date picker, so this chart follows the same day as the KPIs.
-            const catResp = await fetch(
-                `/dashboard/api/overview/category-breakdown?date=${getSelectedDate()}`
-            );
-            const cat = await catResp.json();
-            if (cat.error) throw new Error(cat.error);
+    // Store chart instances for resize handling
+    const chartInstances = {};
 
-            // Endpoint returns whole minutes per category for the selected day.
-            const order = ['productivity', 'communication', 'browsing', 'development', 'other'];
-            const values = order.map(k => cat[k] || 0);
-            const hasData = values.some(v => v > 0);
+    // Top 10 Screen Time State
+    let currentTopTab = 'apps';
+    let cachedTopApps = [];
+    let cachedTopDomains = [];
+    let currentTopItems = [];
+    let currentTopNameKey = 'app';
+    let currentTopTotalSeconds = 0;
 
-            const empty = document.getElementById('appCategoryEmpty');
-            if (empty) empty.classList.toggle('hidden', hasData);
-            ctx1.classList.toggle('hidden', !hasData);
+    // Tab switching for merged Top Apps/Domains
+    window.switchTopTab = function (tab) {
+        currentTopTab = tab;
+        const tabApps = document.getElementById('tab-apps');
+        const tabDomains = document.getElementById('tab-domains');
+        if (tabApps && tabDomains) {
+            if (tab === 'apps') {
+                tabApps.className = 'se-segmented-btn se-segmented-btn--active';
+                tabDomains.className = 'se-segmented-btn';
+            } else {
+                tabApps.className = 'se-segmented-btn';
+                tabDomains.className = 'se-segmented-btn se-segmented-btn--active';
+            }
+        }
+        renderCurrentTopData();
+    };
 
-            if (hasData && chartInstances.appCategory) {
-                // Update in place — destroy()+recreate blanked the canvas for a
-                // frame on every 30s auto-refresh, which read as a visible flicker.
-                chartInstances.appCategory.data.labels = order.map(k => k.charAt(0).toUpperCase() + k.slice(1));
-                chartInstances.appCategory.data.datasets[0].data = values;
-                chartInstances.appCategory.update();
-            } else if (hasData) {
-                const catColors = categoryColors();
-                const catAxis = trendAxisColors();  // hoisted; shared recessive grid/tick steps
-                chartInstances.appCategory = new Chart(ctx1, {
-                    type: 'bar',
-                    data: {
-                        labels: order.map(k => k.charAt(0).toUpperCase() + k.slice(1)),
-                        datasets: [{
-                            label: 'Minutes',
-                            data: values,
-                            backgroundColor: order.map(k => catColors[k])
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        scales: {
-                            x: {
-                                grid: { color: catAxis.grid, drawBorder: false },
-                                ticks: { color: catAxis.tick, font: { size: 10 } }
-                            },
-                            y: {
-                                beginAtZero: true,
-                                grid: { color: catAxis.grid, drawBorder: false },
-                                ticks: {
-                                    color: catAxis.tick,
-                                    font: { size: 10 },
-                                    callback: v => v >= 60
-                                        ? `${Math.floor(v / 60)}h${v % 60 ? ' ' + (v % 60) + 'm' : ''}`
-                                        : `${v}m`
-                                }
-                            }
+    async function loadAnalyticsCharts() {
+        try {
+            // App Usage by Category - real data from /api/overview/category-breakdown.
+            // This chart previously rendered hardcoded sample values
+            // (Mon-Fri / [120,140,130,150,160]), so it showed the same invented
+            // numbers on every install regardless of what the agents reported.
+            const ctx1 = document.getElementById('appCategoryChart');
+            if (ctx1) {
+                // getSelectedDate() is defined in overview.js and reads the navbar
+                // date picker, so this chart follows the same day as the KPIs.
+                const catResp = await fetch(
+                    `/dashboard/api/overview/category-breakdown?date=${getSelectedDate()}`
+                );
+                const cat = await catResp.json();
+                if (cat.error) throw new Error(cat.error);
+
+                // Endpoint returns whole minutes per category for the selected day.
+                const order = ['productivity', 'communication', 'browsing', 'development', 'other'];
+                const values = order.map(k => cat[k] || 0);
+                const hasData = values.some(v => v > 0);
+
+                const empty = document.getElementById('appCategoryEmpty');
+                if (empty) empty.classList.toggle('hidden', hasData);
+                ctx1.classList.toggle('hidden', !hasData);
+
+                if (hasData && chartInstances.appCategory) {
+                    // Update in place — destroy()+recreate blanked the canvas for a
+                    // frame on every 30s auto-refresh, which read as a visible flicker.
+                    chartInstances.appCategory.data.labels = order.map(k => k.charAt(0).toUpperCase() + k.slice(1));
+                    chartInstances.appCategory.data.datasets[0].data = values;
+                    chartInstances.appCategory.update();
+                } else if (hasData) {
+                    const catColors = categoryColors();
+                    const catAxis = trendAxisColors();  // hoisted; shared recessive grid/tick steps
+                    chartInstances.appCategory = new Chart(ctx1, {
+                        type: 'bar',
+                        data: {
+                            labels: order.map(k => k.charAt(0).toUpperCase() + k.slice(1)),
+                            datasets: [{
+                                label: 'Minutes',
+                                data: values,
+                                backgroundColor: order.map(k => catColors[k])
+                            }]
                         },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                callbacks: {
-                                    label: c => {
-                                        const m = c.parsed.y || 0;
-                                        const h = Math.floor(m / 60);
-                                        return h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                x: {
+                                    grid: { color: catAxis.grid, drawBorder: false },
+                                    ticks: { color: catAxis.tick, font: { size: 10 } }
+                                },
+                                y: {
+                                    beginAtZero: true,
+                                    grid: { color: catAxis.grid, drawBorder: false },
+                                    ticks: {
+                                        color: catAxis.tick,
+                                        font: { size: 10 },
+                                        callback: v => v >= 60
+                                            ? `${Math.floor(v / 60)}h${v % 60 ? ' ' + (v % 60) + 'm' : ''}`
+                                            : `${v}m`
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    callbacks: {
+                                        label: c => {
+                                            const m = c.parsed.y || 0;
+                                            const h = Math.floor(m / 60);
+                                            return h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                });
+                    });
+                }
             }
-        }
 
-        // Setup ResizeObserver for zoom responsiveness.
-        // The function lives in overview.js and is named setupResponsiveCharts;
-        // calling the old name threw a ReferenceError that aborted this
-        // function every run (caught below, so it only showed in the console).
-        if (typeof setupResponsiveCharts === 'function') {
-            setupResponsiveCharts();
+            // Setup ResizeObserver for zoom responsiveness.
+            // The function lives in overview.js and is named setupResponsiveCharts;
+            // calling the old name threw a ReferenceError that aborted this
+            // function every run (caught below, so it only showed in the console).
+            if (typeof setupResponsiveCharts === 'function') {
+                setupResponsiveCharts();
+            }
+        } catch (error) {
+            console.error('Analytics charts error:', error);
         }
-    } catch (error) {
-        console.error('Analytics charts error:', error);
     }
-}
 
-let topRangeDays = 7;
+    let topRangeDays = 7;
 
-function trendAxisColors() {
-    // Recessive grid/ticks, stepped for the current theme against its surface.
-    const dark = document.documentElement.classList.contains('dark');
-    return {
-        grid: dark ? 'rgba(255,255,255,0.08)' : 'rgba(17,24,39,0.06)',
-        tick: dark ? '#9ca3af' : '#6b7280',
-    };
-}
+    function trendAxisColors() {
+        if (typeof window.getChartColors === 'function') {
+            const cc = window.getChartColors();
+            return {
+                grid: cc.grid,
+                tick: cc.textSecondary
+            };
+        }
+        const dark = document.documentElement.classList.contains('dark');
+        return {
+            grid: dark ? 'rgba(255,255,255,0.08)' : 'rgba(17,24,39,0.06)',
+            tick: dark ? '#9ca3af' : '#6b7280',
+        };
+    }
 
-// Top 10 range filter (Today / 7d / 30d) — repaints button state and reloads.
-document.addEventListener('DOMContentLoaded', function () {
-    const topGroup = document.getElementById('top-range');
-    if (!topGroup) return;
-    topGroup.querySelectorAll('.top-range-btn').forEach(btn => {
-        btn.addEventListener('click', function () {
-            topRangeDays = parseInt(this.dataset.days, 10) || 7;
-            topGroup.querySelectorAll('.top-range-btn').forEach(b => {
-                const on = b === this;
-                b.className = 'top-range-btn px-2 py-0.5 text-xs font-medium rounded ' +
-                    (on ? 'bg-indigo-600 text-white'
-                        : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300');
+    // Top 10 range filter (Today / 7d / 30d) — repaints button state and reloads.
+    document.addEventListener('DOMContentLoaded', function () {
+        const topGroup = document.getElementById('top-range');
+        if (!topGroup) return;
+        topGroup.querySelectorAll('.se-segmented-btn').forEach(btn => {
+            btn.addEventListener('click', function () {
+                topRangeDays = parseInt(this.dataset.days, 10) || 7;
+                topGroup.querySelectorAll('.se-segmented-btn').forEach(b => {
+                    const on = b === this;
+                    b.className = 'se-segmented-btn' + (on ? ' se-segmented-btn--active' : '');
+                });
+                loadAnalyticsTables();
             });
-            loadAnalyticsTables();
         });
     });
-});
 
-// Render a ranked horizontal-bar list. Bar width is the item's duration as a
-// share of the top item (magnitude), name + value are direct labels, and the
-// fill is a single validated hue (blue slot-1) — length carries the measure.
-function renderTopBars(listEl, items, nameKey) {
-    if (!listEl) return;
-    if (!Array.isArray(items) || items.length === 0) {
-        listEl.innerHTML = '<div class="px-2 py-3 text-center text-gray-500 text-xs">No data for this range</div>';
-        return;
+    // Render the currently active tab (Apps or Domains)
+    function renderCurrentTopData() {
+        if (currentTopTab === 'apps') {
+            renderTopScreenTime(cachedTopApps, 'app');
+        } else {
+            renderTopScreenTime(cachedTopDomains, 'domain');
+        }
     }
-    const dark = document.documentElement.classList.contains('dark');
-    const bar = dark ? '#3987e5' : '#2a78d6';
-    const track = dark ? 'rgba(255,255,255,0.06)' : 'rgba(17,24,39,0.05)';
-    const esc = s => String(s == null ? '—' : s).replace(/[&<>"]/g,
-        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const fmt = s => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h > 0 ? `${h}h ${m}m` : `${m}m`; };
-    const max = Math.max(...items.map(x => x.total_duration_seconds || 0), 1);
 
-    listEl.innerHTML = items.map((x, i) => {
-        const secs = x.total_duration_seconds || 0;
-        const w = Math.max(2, (secs / max) * 100);   // floor so tiny bars stay visible
-        const name = esc(x[nameKey]);
-        return `<div class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded" title="${name} · ${fmt(secs)}">
-            <span class="text-[10px] text-gray-400 w-4 text-right tabular-nums shrink-0">${i + 1}</span>
-            <div class="flex-1 min-w-0">
-                <div class="flex justify-between items-baseline gap-2 mb-0.5">
-                    <span class="text-xs text-gray-900 dark:text-gray-100 truncate">${name}</span>
-                    <span class="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums shrink-0">${fmt(secs)}</span>
-                </div>
-                <div class="h-1.5 w-full rounded-full overflow-hidden" style="background:${track}">
-                    <div class="h-full rounded-full" style="width:${w.toFixed(1)}%;background:${bar}"></div>
-                </div>
-            </div>
-        </div>`;
-    }).join('');
-}
-
-async function loadAnalyticsTables() {
-    try {
-        // Top Apps — ranked bars (top 10 by screen time)
-        const appsResp = await fetch(`/dashboard/api/overview/top-apps?limit=10&days=${topRangeDays}`);
-        const apps = await appsResp.json();
-        renderTopBars(document.getElementById('top-apps-list'), Array.isArray(apps) ? apps : [], 'app');
-
-        // Top Domains — ranked bars (top 10 by screen time)
-        const domsResp = await fetch(`/dashboard/api/overview/top-domains?limit=10&days=${topRangeDays}`);
-        const doms = await domsResp.json();
-        renderTopBars(document.getElementById('top-domains-list'), Array.isArray(doms) ? doms : [], 'domain');
-
-    } catch (error) {
-        console.error('Analytics tables error:', error);
+    // Controlled palette for ring segments derived from SentinelEdge design system
+    function getTopScreenTimeColors(dark) {
+        return dark ? [
+            '#818cf8', // Brand primary indigo
+            '#a78bfa', // Violet 400
+            '#60a5fa', // Blue 400
+            '#38bdf8', // Sky 400
+            '#34d399', // Emerald 400
+            '#fbbf24', // Amber 400
+            '#f472b6', // Rose 400
+            '#94a3b8', // Slate 400
+            '#64748b', // Slate 500
+            '#475569'  // Slate 600
+        ] : [
+            '#4f46e5', // Brand primary indigo
+            '#7c3aed', // Violet 600
+            '#2563eb', // Blue 600
+            '#0284c7', // Sky 600
+            '#059669', // Emerald 600
+            '#d97706', // Amber 600
+            '#db2777', // Rose 600
+            '#475569', // Slate 600
+            '#64748b', // Slate 500
+            '#94a3b8'  // Slate 400
+        ];
     }
-}
 
-// Override renderCharts to populate the 100%-stacked Fleet Screen Time bar.
-// Each segment's width is its share of the day's total, so a longer segment
-// always means more time — the states are directly comparable.
-const _origRenderCharts = window.renderCharts;
-window.renderCharts = function(data) {
-    if (_origRenderCharts) _origRenderCharts(data);
-    if (!data || !data.screen_time) return;
-    const st = data.screen_time;
-    const fmt = s => `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
-    const active = st.active||0, idle = st.idle||0, locked = st.locked||0, away = st.away||0;
-    const total = active + idle + locked + away;
-    const pct = v => total ? Math.min(100, Math.max(0, v/total*100)).toFixed(2)+'%' : '0%';
+    // Exact screen-time formatter: e.g. 12h 0m or 45m
+    function formatScreenTime(seconds) {
+        const s = Math.max(0, Math.floor(seconds || 0));
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        if (h > 0) return `${h}h ${m}m`;
+        if (m > 0) return `${m}m`;
+        return s > 0 ? '<1m' : '0m';
+    }
 
-    const setW = (id, v) => { const el = document.getElementById(id); if (el) el.style.width = pct(v); };
-    setW('fleet-active-seg', active);
-    setW('fleet-idle-seg', idle);
-    setW('fleet-locked-seg', locked);
-    setW('fleet-away-seg', away);
+    // Synchronize hover state between ranked list rows, center metric, and ring segments
+    function setActiveTopItem(idx, fromChart) {
+        const listEl = document.getElementById('top-screentime-list');
+        if (listEl) {
+            const rows = listEl.querySelectorAll('.top-ranked-item');
+            rows.forEach((r, i) => {
+                if (i === idx) {
+                    r.classList.add('is-active');
+                    if (fromChart) {
+                        try {
+                            r.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                        } catch (e) {}
+                    }
+                } else {
+                    r.classList.remove('is-active');
+                }
+            });
+        }
 
-    const setT = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
-    setT('fleet-active-time', active);
-    setT('fleet-idle-time', idle);
-    setT('fleet-locked-time', locked);
-    setT('fleet-away-time', away);
-    setT('fleet-total-time', total);
+        const labelEl = document.getElementById('top-ring-center-label');
+        const valEl = document.getElementById('top-ring-center-value');
+        if (!labelEl || !valEl) return;
 
-    // Away is usually zero; only surface its legend row when there is time to show.
-    const awayRow = document.getElementById('fleet-away-legend');
-    if (awayRow) awayRow.style.display = away > 0 ? '' : 'none';
+        if (idx >= 0 && currentTopItems && currentTopItems[idx]) {
+            const item = currentTopItems[idx];
+            const name = item[currentTopNameKey] || '—';
+            labelEl.textContent = name;
+            labelEl.title = name;
+            valEl.textContent = formatScreenTime(item.total_duration_seconds || 0);
 
-    // Update screentime summary
-    const summary = document.getElementById('screentime-summary');
-    if (summary) summary.textContent = `Active: ${Math.floor(active/3600)}h`;
-};
+            if (!fromChart && chartInstances.topScreenTime && chartInstances.topScreenTime.data.datasets.length > 0) {
+                try {
+                    chartInstances.topScreenTime.setActiveElements([{ datasetIndex: 0, index: idx }]);
+                    chartInstances.topScreenTime.update('none');
+                } catch (e) {}
+            }
+        } else {
+            labelEl.textContent = 'Total screen time';
+            labelEl.title = 'Total screen time';
+            valEl.textContent = formatScreenTime(currentTopTotalSeconds || 0);
+
+            if (!fromChart && chartInstances.topScreenTime && chartInstances.topScreenTime.data.datasets.length > 0) {
+                try {
+                    chartInstances.topScreenTime.setActiveElements([]);
+                    chartInstances.topScreenTime.update('none');
+                } catch (e) {}
+            }
+        }
+    }
+
+    // Render Segmented Ring Chart + Ranked List for the given dataset and property key
+    function renderTopScreenTime(items, nameKey) {
+        const loadingEl = document.getElementById('top-screentime-loading');
+        const emptyEl = document.getElementById('top-screentime-empty');
+        const contentEl = document.getElementById('top-screentime-content');
+        const listEl = document.getElementById('top-screentime-list');
+        const canvas = document.getElementById('top-screentime-chart');
+
+        if (loadingEl) loadingEl.classList.add('hidden');
+
+        // Filter valid items with positive screen time
+        const rawItems = Array.isArray(items) ? items : [];
+        const validItems = rawItems.filter(x => (x.total_duration_seconds || 0) > 0);
+
+        if (validItems.length === 0) {
+            if (chartInstances.topScreenTime) {
+                chartInstances.topScreenTime.destroy();
+                chartInstances.topScreenTime = null;
+            }
+            if (emptyEl) emptyEl.classList.remove('hidden');
+            if (contentEl) contentEl.classList.add('hidden');
+            currentTopItems = [];
+            currentTopTotalSeconds = 0;
+            return;
+        }
+
+        if (emptyEl) emptyEl.classList.add('hidden');
+        if (contentEl) contentEl.classList.remove('hidden');
+
+        currentTopItems = validItems;
+        currentTopNameKey = nameKey;
+        const totalSecs = validItems.reduce((acc, x) => acc + (x.total_duration_seconds || 0), 0);
+        currentTopTotalSeconds = totalSecs;
+
+        const dark = document.documentElement.classList.contains('dark');
+        const palette = getTopScreenTimeColors(dark);
+        const segmentColors = validItems.map((_, i) => palette[i % palette.length]);
+
+        const esc = s => String(s == null ? '—' : s).replace(/[&<>"]/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+        // 1. Render Ranked List (supports 6-8 items visible, up to 10 scrollable)
+        if (listEl) {
+            listEl.innerHTML = validItems.map((x, i) => {
+                const secs = x.total_duration_seconds || 0;
+                const name = esc(x[nameKey]);
+                const rankNum = String(i + 1).padStart(2, '0');
+                const timeStr = formatScreenTime(secs);
+                const color = segmentColors[i];
+                return `<div class="top-ranked-item" data-index="${i}" title="${name} · ${timeStr}">
+                    <span class="top-rank-badge">${rankNum}</span>
+                    <span class="top-rank-dot" style="background-color: ${color};"></span>
+                    <span class="top-rank-name">${name}</span>
+                    <span class="top-rank-time">${timeStr}</span>
+                </div>`;
+            }).join('');
+
+            listEl.querySelectorAll('.top-ranked-item').forEach(el => {
+                const idx = parseInt(el.getAttribute('data-index'), 10);
+                el.addEventListener('mouseenter', () => setActiveTopItem(idx, false));
+                el.addEventListener('mouseleave', () => setActiveTopItem(-1, false));
+            });
+        }
+
+        // Set default center text
+        setActiveTopItem(-1, false);
+
+        // 2. Render or Update Segmented Ring Chart via Chart.js 4.4.1
+        if (!canvas) return;
+
+        const labels = validItems.map(x => String(x[nameKey] || '—'));
+        const values = validItems.map(x => x.total_duration_seconds || 0);
+
+        if (chartInstances.topScreenTime) {
+            // Update in place to avoid flicker and maintain chart lifecycle
+            chartInstances.topScreenTime.data.labels = labels;
+            chartInstances.topScreenTime.data.datasets[0].data = values;
+            chartInstances.topScreenTime.data.datasets[0].backgroundColor = segmentColors;
+            chartInstances.topScreenTime.data.datasets[0].borderRadius = validItems.length === 1 ? 0 : 6;
+            chartInstances.topScreenTime.data.datasets[0].spacing = validItems.length === 1 ? 0 : 3;
+            if (chartInstances.topScreenTime.options.plugins && chartInstances.topScreenTime.options.plugins.tooltip) {
+                chartInstances.topScreenTime.options.plugins.tooltip.backgroundColor = dark ? '#0f172a' : '#1e293b';
+                chartInstances.topScreenTime.options.plugins.tooltip.borderColor = dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+            }
+            chartInstances.topScreenTime.update();
+        } else {
+            chartInstances.topScreenTime = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: segmentColors,
+                        borderWidth: 0,
+                        borderRadius: validItems.length === 1 ? 0 : 6,
+                        spacing: validItems.length === 1 ? 0 : 3,
+                        hoverOffset: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '74%',
+                    animation: {
+                        duration: 400,
+                        easing: 'easeOutQuart'
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            enabled: true,
+                            backgroundColor: dark ? '#0f172a' : '#1e293b',
+                            titleColor: '#f8fafc',
+                            bodyColor: '#cbd5e1',
+                            borderColor: dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                            borderWidth: 1,
+                            padding: { x: 10, y: 8 },
+                            cornerRadius: 6,
+                            callbacks: {
+                                label: function (ctx) {
+                                    const val = ctx.raw || 0;
+                                    const pct = totalSecs > 0 ? ((val / totalSecs) * 100).toFixed(1) : 0;
+                                    return ` ${formatScreenTime(val)} (${pct}%)`;
+                                }
+                            }
+                        }
+                    },
+                    onHover: function (event, activeElements) {
+                        if (activeElements && activeElements.length > 0) {
+                            const idx = activeElements[0].index;
+                            setActiveTopItem(idx, true);
+                        } else {
+                            setActiveTopItem(-1, true);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    // Listen for theme change to update charts and tables
+    window.addEventListener('themechange', function () {
+        if (chartInstances.appCategory) {
+            const catColors = categoryColors();
+            const catAxis = trendAxisColors();
+            const order = ['productivity', 'communication', 'browsing', 'development', 'other'];
+            chartInstances.appCategory.data.datasets[0].backgroundColor = order.map(k => catColors[k]);
+            if (chartInstances.appCategory.options.scales) {
+                if (chartInstances.appCategory.options.scales.x) {
+                    chartInstances.appCategory.options.scales.x.grid.color = catAxis.grid;
+                    chartInstances.appCategory.options.scales.x.ticks.color = catAxis.tick;
+                }
+                if (chartInstances.appCategory.options.scales.y) {
+                    chartInstances.appCategory.options.scales.y.grid.color = catAxis.grid;
+                    chartInstances.appCategory.options.scales.y.ticks.color = catAxis.tick;
+                }
+            }
+            chartInstances.appCategory.update('none');
+        }
+        renderCurrentTopData();
+    });
+
+    async function loadAnalyticsTables() {
+        try {
+            const loadingEl = document.getElementById('top-screentime-loading');
+            if (loadingEl && (!cachedTopApps || cachedTopApps.length === 0) && (!cachedTopDomains || cachedTopDomains.length === 0)) {
+                loadingEl.classList.remove('hidden');
+            }
+
+            const [appsResp, domsResp] = await Promise.all([
+                fetch(`/dashboard/api/overview/top-apps?limit=10&days=${topRangeDays}`),
+                fetch(`/dashboard/api/overview/top-domains?limit=10&days=${topRangeDays}`)
+            ]);
+            const apps = await appsResp.json();
+            const doms = await domsResp.json();
+
+            cachedTopApps = Array.isArray(apps) ? apps : [];
+            cachedTopDomains = Array.isArray(doms) ? doms : [];
+
+            renderCurrentTopData();
+        } catch (error) {
+            console.error('Analytics tables error:', error);
+            const loadingEl = document.getElementById('top-screentime-loading');
+            if (loadingEl) loadingEl.classList.add('hidden');
+        }
+    }
+
+    // Override renderCharts to populate the 100%-stacked Fleet Screen Time bar.
+    // Each segment's width is its share of the day's total, so a longer segment
+    // always means more time — the states are directly comparable.
+    const _origRenderCharts = window.renderCharts;
+    window.renderCharts = function (data) {
+        if (_origRenderCharts) _origRenderCharts(data);
+        if (!data || !data.screen_time) return;
+        const st = data.screen_time;
+        const fmt = s => `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+        const active = st.active || 0, idle = st.idle || 0, locked = st.locked || 0, away = st.away || 0;
+        const total = active + idle + locked + away;
+        const pct = v => total ? Math.min(100, Math.max(0, v / total * 100)).toFixed(2) + '%' : '0%';
+
+        const setW = (id, v) => { const el = document.getElementById(id); if (el) el.style.width = pct(v); };
+        setW('fleet-active-seg', active);
+        setW('fleet-idle-seg', idle);
+        setW('fleet-locked-seg', locked);
+        setW('fleet-away-seg', away);
+
+        const setT = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmt(v); };
+        setT('fleet-active-time', active);
+        setT('fleet-idle-time', idle);
+        setT('fleet-locked-time', locked);
+        setT('fleet-away-time', away);
+        setT('fleet-total-time', total);
+
+        // Away is usually zero; only surface its legend row when there is time to show.
+        const awayRow = document.getElementById('fleet-away-legend');
+        if (awayRow) awayRow.style.display = away > 0 ? '' : 'none';
+
+        // Update screentime summary
+        const summary = document.getElementById('screentime-summary');
+        if (summary) summary.textContent = `Active: ${Math.floor(active / 3600)}h`;
+    };
 </script>
 {% endblock %}

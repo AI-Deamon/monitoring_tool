@@ -1,6 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Theme Initialization: must run before CSS to prevent flash of wrong theme -->
+    <script nonce="{{ csp_nonce() }}">
+        (function () {
+            try {
+                var saved = localStorage.getItem('sentinel-theme') || localStorage.getItem('theme');
+                var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var theme = (saved === 'dark' || saved === 'light') ? saved : (prefersDark ? 'dark' : 'light');
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    document.documentElement.setAttribute('data-theme', 'light');
+                }
+            } catch (e) {}
+        })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Weekly Activity Report - {{ username }}</title>
@@ -292,16 +309,51 @@
             font-size: 11px;
             color: #888;
             border-top: 1px solid #eee;
+            transition: background-color 0.2s, color 0.2s, border-color 0.2s;
         }
+
+        /* ── Dark Mode Overrides ──────────────────────────────────────────── */
+        html.dark body { color: #e2e8f0; background: #0f172a; transition: background-color 0.2s, color 0.2s; }
+        html.dark .container { background: #1e293b; box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
+        html.dark h2 { color: #818cf8; border-bottom-color: #334155; }
+        html.dark .summary-card { background: #334155; }
+        html.dark .summary-card.primary { background: linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(99,102,241,0.1) 100%); }
+        html.dark .summary-card .value { color: #818cf8; }
+        html.dark .summary-card .label { color: #94a3b8; }
+        html.dark .time-item { background: #334155; }
+        html.dark .time-item .value { color: #f1f5f9; }
+        html.dark .time-item .label { color: #94a3b8; }
+        html.dark .bar-value { color: #94a3b8; }
+        html.dark .day-label { color: #94a3b8; }
+        html.dark th { background: #334155; color: #94a3b8; }
+        html.dark td { border-bottom-color: #334155; color: #e2e8f0; }
+        html.dark tr:hover { background: #334155; }
+        html.dark .rank { color: #94a3b8; }
+        html.dark .observation-card { background: #334155; }
+        html.dark .observation-card .label { color: #94a3b8; }
+        html.dark .observation-card .value { color: #f1f5f9; }
+        html.dark .change-item { background: #334155; }
+        html.dark footer { background: #1e293b; color: #64748b; border-top-color: #334155; }
+        html.dark .category-Development { background: rgba(21,101,192,0.25); color: #93c5fd; }
+        html.dark .category-Communication { background: rgba(46,125,50,0.25); color: #86efac; }
+        html.dark .category-Browsers { background: rgba(239,108,0,0.25); color: #fdba74; }
+        html.dark .category-Productivity { background: rgba(123,31,162,0.25); color: #d8b4fe; }
+        html.dark .category-Terminal { background: rgba(69,90,100,0.25); color: #94a3b8; }
+        html.dark .category-Media { background: rgba(194,24,91,0.25); color: #f9a8d4; }
+        html.dark .category-Database { background: rgba(0,131,143,0.25); color: #67e8f9; }
+        html.dark .category-Other { background: rgba(97,97,97,0.25); color: #9ca3af; }
         
         @media print {
-            body {
-                background: white;
+            /* Force light mode output for print/PDF regardless of screen theme */
+            html, body {
+                background: white !important;
+                color: #333 !important;
                 padding: 0;
             }
             
             .container {
-                box-shadow: none;
+                box-shadow: none !important;
+                background: white !important;
             }
             
             header {
@@ -309,12 +361,19 @@
                 -webkit-print-color-adjust: exact;
                 print-color-adjust: exact;
             }
+
+            h2 { color: #1a73e8 !important; border-bottom-color: #e0e0e0 !important; }
+            th { background: #f8f9fa !important; color: #555 !important; }
+            td { border-bottom-color: #eee !important; color: #333 !important; }
+            tr:hover { background: transparent !important; }
             
             .summary-card, .time-item, .observation-card {
                 background: #f8f9fa !important;
                 -webkit-print-color-adjust: exact;
                 print-color-adjust: exact;
             }
+            .summary-card .value { color: #1a73e8 !important; }
+            footer { background: #f8f9fa !important; color: #888 !important; border-top-color: #eee !important; }
         }
         
         @page {

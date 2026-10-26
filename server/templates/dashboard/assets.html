@@ -1,18 +1,13 @@
 {% extends "dashboard/base.html" %}
+{% from "components/icons.html" import icon %}
 
 {% block title %}Assets Dashboard - SentinelEdge{% endblock %}
 
 {% block extra_head %}
 <style nonce="{{ csp_nonce() }}">
     .asset-card {
-        transition: all 0.2s ease-in-out;
+        transition: all var(--transition-base);
     }
-
-    .asset-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    }
-
     .status-badge {
         font-size: 0.7rem;
         padding: 0.125rem 0.5rem;
@@ -28,37 +23,28 @@
     <!-- Header -->
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-            <h1 class="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-                <span
-                    class="p-2 bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-lg">
-                    <img src="{{ url_for('static', filename='inventory.png') }}" class="w-6 h-6" />
-                </span>
+            <h1 class="text-2xl font-bold flex items-center gap-3" style="color: var(--text-primary);">
                 Asset Management
             </h1>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Comprehensive view of hardware and system inventory
-                across the fleet</p>
+            <p class="text-sm mt-1" style="color: var(--text-secondary);">Comprehensive view of hardware and system inventory across the fleet</p>
         </div>
 
         <div class="flex items-center gap-3">
-            <div class="relative">
-                <input type="text" id="asset-search-header" placeholder="Search assets..."
-                    class="pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 w-64 transition-all">
-                <span class="absolute left-3 top-2.5 text-gray-400">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24"
-                        stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+            <div class="se-search-wrapper w-64">
+                <span class="se-search-icon" aria-hidden="true">
+                    {{ icon('search', class='w-4 h-4') }}
                 </span>
+                <input type="text" id="asset-search-header" placeholder="Search assets..."
+                    class="se-search-input asset-search-input w-full"
+                    autocomplete="off"
+                    spellcheck="false"
+                    role="searchbox"
+                    aria-label="Search assets in fleet">
             </div>
             <button id="refresh-assets"
-                class="p-2 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 transition-colors"
-                title="Refresh Data">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24"
-                    stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
+                class="btn btn-icon btn-ghost"
+                aria-label="Refresh Data">
+                {{ icon('refresh', 'w-5 h-5') }}
             </button>
         </div>
     </div>
@@ -66,220 +52,254 @@
     <!-- Security Compliance Summary Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <!-- Total Assets Card -->
-        <div class="stat-card p-6 bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+        <div class="asset-stat-card p-6 flex flex-col justify-between">
             <div class="flex items-center justify-between mb-4">
-                <div class="p-3 bg-blue-500/10 rounded-lg text-blue-400">
-                    <i class="fas fa-laptop-code text-2xl"></i>
+                <div class="asset-icon-box asset-icon-box--blue">
+                    {{ icon('desktop', 'w-6 h-6') }}
                 </div>
-                <span id="total-assets-count" class="text-3xl font-bold text-white">0</span>
+                <span id="total-assets-count" class="text-3xl font-bold asset-card-value">0</span>
             </div>
-            <h3 class="text-slate-400 font-medium">Total Assets</h3>
-            <p class="text-slate-500 text-sm mt-1">Monitored Endpoints</p>
+            <div>
+                <h3 class="asset-card-title">Total Assets</h3>
+                <p class="asset-card-subtext">Monitored Endpoints</p>
+            </div>
         </div>
 
         <!-- BitLocker Compliance Card -->
-        <div class="stat-card p-6 bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+        <div class="asset-stat-card p-6 flex flex-col justify-between">
             <div class="flex items-center justify-between mb-4">
-                <div class="p-3 bg-green-500/10 rounded-lg text-green-400">
-                    <i class="fas fa-lock text-2xl"></i>
+                <div class="asset-icon-box asset-icon-box--green">
+                    {{ icon('lock', 'w-6 h-6') }}
                 </div>
-                <span id="bitlocker-compliant-count" class="text-3xl font-bold text-white">0</span>
+                <span id="bitlocker-compliant-count" class="text-3xl font-bold asset-card-value">0</span>
             </div>
-            <h3 class="text-slate-400 font-medium">BitLocker Active</h3>
-            <p id="bitlocker-risk-subtext" class="text-slate-500 text-sm mt-1">Evaluating compliance...</p>
+            <div>
+                <h3 class="asset-card-title">BitLocker Active</h3>
+                <p id="bitlocker-risk-subtext" class="asset-card-subtext">Evaluating compliance...</p>
+            </div>
         </div>
 
         <!-- Antivirus Status Card -->
-        <div class="stat-card p-6 bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+        <div class="asset-stat-card p-6 flex flex-col justify-between">
             <div class="flex items-center justify-between mb-4">
-                <div class="p-3 bg-purple-500/10 rounded-lg text-purple-400">
-                    <i class="fas fa-shield-alt text-2xl"></i>
+                <div class="asset-icon-box asset-icon-box--purple">
+                    {{ icon('shield', 'w-6 h-6') }}
                 </div>
-                <span id="av-missing-count" class="text-3xl font-bold text-white">0</span>
+                <span id="av-missing-count" class="text-3xl font-bold asset-card-value">0</span>
             </div>
-            <h3 class="text-slate-400 font-medium">Antivirus Missing</h3>
-            <p id="av-risk-subtext" class="text-slate-500 text-sm mt-1">Scanning security agents...</p>
+            <div>
+                <h3 class="asset-card-title">Antivirus Missing</h3>
+                <p id="av-risk-subtext" class="asset-card-subtext">Scanning security agents...</p>
+            </div>
         </div>
 
         <!-- Disk Warning Card -->
-        <div class="stat-card p-6 bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+        <div class="asset-stat-card p-6 flex flex-col justify-between">
             <div class="flex items-center justify-between mb-4">
-                <div class="p-3 bg-orange-500/10 rounded-lg text-orange-400">
-                    <i class="fas fa-hdd text-2xl"></i>
+                <div class="asset-icon-box asset-icon-box--orange">
+                    {{ icon('disk', 'w-6 h-6') }}
                 </div>
-                <span id="low-disk-count" class="text-3xl font-bold text-white">0</span>
+                <span id="low-disk-count" class="text-3xl font-bold asset-card-value">0</span>
             </div>
-            <h3 class="text-slate-400 font-medium">Low Disk Space</h3>
-            <p class="text-slate-500 text-sm mt-1">
-                < 20% Free capacity</p>
+            <div>
+                <h3 class="asset-card-title">Low Disk Space</h3>
+                <p class="asset-card-subtext">&lt; 20% Free capacity</p>
+            </div>
         </div>
     </div>
 
     <!-- Lifecycle Risk Overview -->
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8 items-stretch">
         <!-- Summary Cards -->
         <div class="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6">
             <!-- EOL Systems -->
-            <div class="stat-card p-6 bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+            <div class="asset-stat-card p-6 flex flex-col justify-between">
                 <div class="flex items-center justify-between mb-4">
-                    <div class="p-3 bg-red-500/10 rounded-lg text-red-400">
-                        <i class="fas fa-calendar-times text-2xl"></i>
+                    <div class="asset-icon-box asset-icon-box--red">
+                        {{ icon('calendar', 'w-6 h-6') }}
                     </div>
-                    <span id="eol-systems-count" class="text-3xl font-bold text-white">—</span>
+                    <span id="eol-systems-count" class="text-3xl font-bold asset-card-value">—</span>
                 </div>
-                <h3 class="text-slate-400 font-medium">EOL Systems</h3>
-                <p id="eol-subtext" class="text-slate-500 text-sm mt-1">Unsupported OS/Apps</p>
+                <div>
+                    <h3 class="asset-card-title">EOL Systems</h3>
+                    <p id="eol-subtext" class="asset-card-subtext">Unsupported OS/Apps</p>
+                </div>
             </div>
 
             <!-- Outdated Software -->
-            <div class="stat-card p-6 bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+            <div class="asset-stat-card p-6 flex flex-col justify-between">
                 <div class="flex items-center justify-between mb-4">
-                    <div class="p-3 bg-yellow-500/10 rounded-lg text-yellow-400">
-                        <i class="fas fa-clock text-2xl"></i>
+                    <div class="asset-icon-box asset-icon-box--orange">
+                        {{ icon('clock', 'w-6 h-6') }}
                     </div>
-                    <span id="outdated-software-count" class="text-3xl font-bold text-white">—</span>
+                    <span id="outdated-software-count" class="text-3xl font-bold asset-card-value">—</span>
                 </div>
-                <h3 class="text-slate-400 font-medium">Outdated Software</h3>
-                <p class="text-slate-500 text-sm mt-1">Supported but not latest</p>
+                <div>
+                    <h3 class="asset-card-title">Outdated Software</h3>
+                    <p class="asset-card-subtext">Supported but not latest</p>
+                </div>
             </div>
 
             <!-- Healthy Assets -->
-            <div class="stat-card p-6 bg-slate-800 rounded-xl border border-slate-700 shadow-lg">
+            <div class="asset-stat-card p-6 flex flex-col justify-between">
                 <div class="flex items-center justify-between mb-4">
-                    <div class="p-3 bg-emerald-500/10 rounded-lg text-emerald-400">
-                        <i class="fas fa-check-shield text-2xl"></i>
+                    <div class="asset-icon-box asset-icon-box--green">
+                        {{ icon('shield-check', 'w-6 h-6') }}
                     </div>
-                    <span id="healthy-assets-count" class="text-3xl font-bold text-white">—</span>
+                    <span id="healthy-assets-count" class="text-3xl font-bold asset-card-value">—</span>
                 </div>
-                <h3 class="text-slate-400 font-medium">Healthy Assets</h3>
-                <p class="text-slate-500 text-sm mt-1">Fully supported fleet</p>
+                <div>
+                    <h3 class="asset-card-title">Healthy Assets</h3>
+                    <p class="asset-card-subtext">Fully supported fleet</p>
+                </div>
             </div>
         </div>
 
         <!-- Lifecycle Distribution Chart -->
-        <div
-            class="bg-slate-800 rounded-xl border border-slate-700 p-4 shadow-lg flex flex-col items-center justify-center">
-            <h3 class="text-slate-400 text-xs font-bold uppercase mb-4 self-start">Risk Distribution</h3>
-            <div class="relative w-full aspect-square max-h-[160px]">
-                <canvas id="lifecycle-pie-chart"></canvas>
+        <div class="asset-risk-card p-6 flex flex-col justify-between">
+            <h3 class="asset-overview-label mb-2">Risk Distribution</h3>
+            <div class="flex-1 flex flex-col items-center justify-center relative min-h-[140px] w-full">
+                <!-- Loading State -->
+                <div id="lifecycle-loading-state" class="flex flex-col items-center justify-center py-4">
+                    <div class="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span class="text-xs mt-2" style="color: var(--text-tertiary);">Loading distribution...</span>
+                </div>
+                <!-- Chart Wrapper -->
+                <div id="lifecycle-chart-wrapper" class="hidden relative w-full aspect-square max-h-[140px] flex items-center justify-center">
+                    <canvas id="lifecycle-pie-chart"></canvas>
+                </div>
+                <!-- Empty State -->
+                <div id="lifecycle-empty-state" class="hidden flex flex-col items-center justify-center text-center py-2 px-2">
+                    <div class="p-2 rounded-full mb-1.5" style="background: var(--bg-secondary); color: var(--text-tertiary);">
+                        {{ icon('shield-check', 'w-6 h-6') }}
+                    </div>
+                    <p class="text-xs font-semibold" style="color: var(--text-secondary);">No Risk Data Evaluated</p>
+                    <p class="text-[11px] mt-0.5" style="color: var(--text-tertiary);">Click "Re-scan Fleet" to analyze</p>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Filter Bar -->
     <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div class="flex items-center bg-slate-800/50 rounded-lg p-1 border border-slate-700">
-            <button onclick="filterByRisk('all')"
-                class="risk-filter-btn px-4 py-2 rounded-md text-sm font-medium transition-all active-risk-filter"
-                id="filter-all">All</button>
-            <button onclick="filterByRisk('eol')"
-                class="risk-filter-btn px-4 py-2 rounded-md text-sm font-medium text-slate-400 hover:text-white transition-all"
-                id="filter-eol">EOL</button>
-            <button onclick="filterByRisk('outdated')"
-                class="risk-filter-btn px-4 py-2 rounded-md text-sm font-medium text-slate-400 hover:text-white transition-all"
-                id="filter-outdated">Outdated</button>
-            <button onclick="filterByRisk('healthy')"
-                class="risk-filter-btn px-4 py-2 rounded-md text-sm font-medium text-slate-400 hover:text-white transition-all"
-                id="filter-healthy">Healthy</button>
+        <div class="asset-filter-tabs" role="tablist" aria-label="Filter assets by risk">
+            <button type="button" onclick="filterByRisk('all')"
+                class="asset-filter-tab active"
+                id="filter-all"
+                role="tab"
+                aria-selected="true"
+                tabindex="0">All</button>
+            <button type="button" onclick="filterByRisk('eol')"
+                class="asset-filter-tab"
+                id="filter-eol"
+                role="tab"
+                aria-selected="false"
+                tabindex="-1">EOL</button>
+            <button type="button" onclick="filterByRisk('outdated')"
+                class="asset-filter-tab"
+                id="filter-outdated"
+                role="tab"
+                aria-selected="false"
+                tabindex="-1">Outdated</button>
+            <button type="button" onclick="filterByRisk('healthy')"
+                class="asset-filter-tab"
+                id="filter-healthy"
+                role="tab"
+                aria-selected="false"
+                tabindex="-1">Healthy</button>
         </div>
 
-        <div class="flex gap-4">
-            <div class="relative">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+        <div class="flex items-center gap-3">
+            <div class="se-search-wrapper w-64">
+                <span class="se-search-icon" aria-hidden="true">
+                    {{ icon('search', class='w-4 h-4') }}
+                </span>
                 <input type="text" id="asset-search" placeholder="Search product or host..."
-                    class="bg-slate-900 border border-slate-700 rounded-lg py-2 pl-9 pr-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all w-64">
+                    class="se-search-input asset-search-input w-full"
+                    autocomplete="off"
+                    spellcheck="false"
+                    role="searchbox"
+                    aria-label="Search product or host">
             </div>
-            <button onclick="evaluateFleet()"
-                class="bg-primary-600 hover:bg-primary-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2">
-                <i class="fas fa-sync-alt"></i> Re-scan Fleet
+            <button onclick="evaluateFleet(event)"
+                id="rescan-fleet-btn"
+                class="btn btn-primary flex items-center gap-2">
+                {{ icon('refresh', class='w-4 h-4') }}
+                <span>Re-scan Fleet</span>
             </button>
         </div>
     </div>
 
     <!-- Stats Overview -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="asset-overview-card">
             <div class="flex items-center justify-between mb-2">
-                <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total
-                    Assets</span>
-                <span class="p-1.5 bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-lg">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path
-                            d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
-                    </svg>
+                <span class="asset-overview-label">Total Assets</span>
+                <span class="p-1.5 rounded-lg flex items-center justify-center" style="background: rgba(59, 130, 246, 0.12); color: #2563eb;">
+                    {{ icon('inventory', 'w-4 h-4', variant='solid') }}
                 </span>
             </div>
-            <div class="text-2xl font-bold" id="stat-total-assets">0</div>
+            <div class="asset-overview-value" id="stat-total-assets">0</div>
         </div>
-        <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="asset-overview-card">
             <div class="flex items-center justify-between mb-2">
-                <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Windows
-                    11</span>
-                <span class="p-1.5 bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 rounded-lg">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd"
-                            d="M3 5a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-2.22l.123.489.804.804A1 1 0 0113 18H7a1 1 0 01-.707-1.707l.804-.804L7.22 15H5a2 2 0 01-2-2V5zm5.722 9.707l1.001-1.001L8.722 14h2.556l-1.001 1.001A1 1 0 0011 17h-2a1 1 0 00-1 .293z"
-                            clip-rule="evenodd" />
-                    </svg>
+                <span class="asset-overview-label">Windows 11</span>
+                <span class="p-1.5 rounded-lg flex items-center justify-center" style="background: rgba(139, 92, 246, 0.12); color: #7c3aed;">
+                    {{ icon('monitor', 'w-4 h-4', variant='solid') }}
                 </span>
             </div>
-            <div class="text-2xl font-bold" id="stat-win11">0</div>
+            <div class="asset-overview-value" id="stat-win11">0</div>
         </div>
-        <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="asset-overview-card">
             <div class="flex items-center justify-between mb-2">
-                <span class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">High RAM
-                    (>16GB)</span>
-                <span class="p-1.5 bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 rounded-lg">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd"
-                            d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm9 4a1 1 0 10-2 0v6a1 1 0 102 0V7zm-3 2a1 1 0 10-2 0v4a1 1 0 102 0V9zm-3 3a1 1 0 10-2 0v1a1 1 0 102 0v-1z"
-                            clip-rule="evenodd" />
-                    </svg>
+                <span class="asset-overview-label">High RAM (&gt;16GB)</span>
+                <span class="p-1.5 rounded-lg flex items-center justify-center" style="background: rgba(16, 185, 129, 0.12); color: #059669;">
+                    {{ icon('cpu', 'w-4 h-4', variant='solid') }}
                 </span>
             </div>
-            <div class="text-2xl font-bold" id="stat-high-ram">0</div>
+            <div class="asset-overview-value" id="stat-high-ram">0</div>
         </div>
-        <div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div class="asset-overview-card">
             <div class="flex items-center justify-between mb-2">
-                <span
-                    class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Manufacturers</span>
-                <span class="p-1.5 bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400 rounded-lg">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd"
-                            d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3a1 1 0 01-1-1v-2a1 1 0 00-1-1H9a1 1 0 00-1 1v2a1 1 0 01-1 1H4a1 1 0 110-2h12V4H4z"
-                            clip-rule="evenodd" />
-                    </svg>
+                <span class="asset-overview-label">Manufacturers</span>
+                <span class="p-1.5 rounded-lg flex items-center justify-center" style="background: rgba(245, 158, 11, 0.12); color: #d97706;">
+                    {{ icon('hardware', 'w-4 h-4', variant='solid') }}
                 </span>
             </div>
-            <div class="text-2xl font-bold" id="stat-manufacturers">0</div>
+            <div class="asset-overview-value" id="stat-manufacturers">0</div>
         </div>
     </div>
 
     <!-- Assets Table -->
-    <div
-        class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden min-h-[500px]">
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
+    <div class="asset-table-surface">
+        <div class="se-table-container">
+            <table class="se-table" id="assets-table">
+                <colgroup>
+                    <col class="col-asset-host">
+                    <col class="col-asset-model">
+                    <col class="col-asset-os">
+                    <col class="col-asset-risk">
+                    <col class="col-asset-specs">
+                    <col class="col-asset-ip">
+                    <col class="col-asset-sync">
+                </colgroup>
                 <thead>
-                    <tr
-                        class="bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 text-xs font-semibold uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
-                        <th class="px-6 py-4">Hostname / User</th>
-                        <th class="px-6 py-4">Manufacturer / Model</th>
-                        <th class="px-6 py-4">Operating System</th>
-                        <th class="px-6 py-4">Lifecycle Risk</th>
-                        <th class="px-6 py-4">Version</th>
-                        <th class="px-6 py-4">IP Address</th>
-                        <th class="px-6 py-4 text-right">Last Sync</th>
+                    <tr>
+                        <th class="col-asset-host">Hostname / User</th>
+                        <th class="col-asset-model">Manufacturer / Model</th>
+                        <th class="col-asset-os">Operating System</th>
+                        <th class="col-asset-risk se-align-center">Lifecycle Risk</th>
+                        <th class="col-asset-specs">Specs</th>
+                        <th class="col-asset-ip">IP Address</th>
+                        <th class="col-asset-sync se-align-right">Last Sync</th>
                     </tr>
                 </thead>
-                <tbody id="assets-table-body" class="divide-y divide-gray-100 dark:divide-gray-700">
+                <tbody id="assets-table-body">
                     <!-- Loading state -->
                     <tr id="loading-row">
-                        <td colspan="7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400">
+                        <td colspan="7" class="px-6 py-12 text-center" style="color: var(--text-tertiary);">
                             <div class="flex flex-col items-center gap-2">
-                                <div
-                                    class="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin">
-                                </div>
+                                <div class="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
                                 <span>Loading asset inventory...</span>
                             </div>
                         </td>
@@ -289,16 +309,11 @@
         </div>
 
         <!-- Empty State (Hidden) -->
-        <div id="no-results" class="hidden py-12 text-center text-gray-500 dark:text-gray-400">
+        <div id="no-results" class="hidden py-12 text-center" style="color: var(--text-tertiary);">
             <div class="flex flex-col items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-gray-300 dark:text-gray-600" fill="none"
-                    viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M9.172 9.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p class="text-lg font-medium">No assets found matching your criteria</p>
-                <button id="clear-search" class="text-primary-600 dark:text-primary-400 hover:underline">Clear
-                    search</button>
+                {{ icon('inventory', 'w-12 h-12', attrs='style="color: var(--text-tertiary);"') }}
+                <p class="text-lg font-medium" style="color: var(--text-primary);">No assets found matching your criteria</p>
+                <button id="clear-search" class="text-primary-600 dark:text-primary-400 hover:underline">Clear search</button>
             </div>
         </div>
     </div>
@@ -310,12 +325,23 @@
 <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
 
 <script nonce="{{ csp_nonce() }}">
+    const HEROICON_ERROR_WARNING = `{{ icon('warning', class='h-8 w-8 text-red-500') | safe }}`;
     let fleetAssets = [];
     let currentRiskFilter = 'all';
+    let lifecycleChart = null;
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
 
     async function loadAssets() {
         const tbody = document.getElementById('assets-table-body');
-        const loadingRow = document.getElementById('loading-row');
 
         try {
             const response = await fetch('/dashboard/api/assets');
@@ -329,65 +355,108 @@
 
         } catch (error) {
             console.error('Failed to load assets:', error);
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="px-6 py-12 text-center text-red-500 dark:text-red-400">
-                        <div class="flex flex-col items-center gap-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                            <span>Error loading assets: ${error.message}</span>
-                            <button onclick="loadAssets()" class="mt-2 px-4 py-2 bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300 rounded-lg font-medium hover:bg-primary-200 transition-colors">Try Again</button>
-                        </div>
-                    </td>
-                </tr>
-            `;
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="px-6 py-12 text-center" style="color: var(--danger);">
+                            <div class="flex flex-col items-center gap-2">
+                                ${HEROICON_ERROR_WARNING}
+                                <span>Error loading assets: ${escapeHtml(error.message)}</span>
+                                <button onclick="loadAssets()" class="btn btn-secondary mt-2">Try Again</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
         }
     }
 
     async function loadLifecycleData() {
+        const loadingEl = document.getElementById('lifecycle-loading-state');
+
         try {
             const response = await fetch('/dashboard/api/lifecycle/fleet-summary');
             const data = await response.json();
 
+            if (loadingEl) loadingEl.classList.add('hidden');
+
             if (data.error) {
                 console.warn('Lifecycle data not available:', data.error);
+                showLifecycleEmpty();
                 return;
             }
 
             // Update Cards
-            document.getElementById('eol-systems-count').textContent = data.eol_count || 0;
-            document.getElementById('outdated-software-count').textContent = data.outdated_count || 0;
-            document.getElementById('healthy-assets-count').textContent = data.supported_count || 0;
+            const eolCount = data.eol_count || 0;
+            const outdatedCount = data.outdated_count || 0;
+            const healthyCount = data.supported_count || 0;
+
+            document.getElementById('eol-systems-count').textContent = eolCount;
+            document.getElementById('outdated-software-count').textContent = outdatedCount;
+            document.getElementById('healthy-assets-count').textContent = healthyCount;
 
             const eolSub = document.getElementById('eol-subtext');
-            if (data.eol_count > 0) {
-                eolSub.textContent = `${data.eol_count} system(s) at high risk`;
-                eolSub.className = 'text-red-400 text-sm mt-1';
+            if (eolCount > 0) {
+                eolSub.textContent = `${eolCount} system(s) at high risk`;
+                eolSub.className = 'asset-card-subtext';
+                eolSub.style.color = 'var(--danger)';
+            } else {
+                eolSub.textContent = 'Unsupported OS/Apps';
+                eolSub.className = 'asset-card-subtext';
+                eolSub.style.color = '';
             }
 
-            // Render Distribution Chart
-            renderLifecycleChart(data);
+            // Render Distribution Chart if there are evaluated records
+            const total = eolCount + outdatedCount + healthyCount;
+            if (total > 0) {
+                renderLifecycleChart({ eol_count: eolCount, outdated_count: outdatedCount, supported_count: healthyCount });
+            } else {
+                showLifecycleEmpty();
+            }
         } catch (error) {
             console.warn('Lifecycle API error:', error);
+            if (loadingEl) loadingEl.classList.add('hidden');
+            showLifecycleEmpty();
         }
     }
 
-    function renderLifecycleChart(data) {
-        const ctx = document.getElementById('lifecycle-pie-chart').getContext('2d');
+    function showLifecycleEmpty() {
+        const emptyEl = document.getElementById('lifecycle-empty-state');
+        const chartWrapper = document.getElementById('lifecycle-chart-wrapper');
+        if (lifecycleChart) {
+            lifecycleChart.destroy();
+            lifecycleChart = null;
+        }
+        if (chartWrapper) chartWrapper.classList.add('hidden');
+        if (emptyEl) emptyEl.classList.remove('hidden');
+    }
 
-        if (window.lifecycleChart) {
-            window.lifecycleChart.destroy();
+    function renderLifecycleChart(data) {
+        const canvas = document.getElementById('lifecycle-pie-chart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const emptyEl = document.getElementById('lifecycle-empty-state');
+        const chartWrapper = document.getElementById('lifecycle-chart-wrapper');
+
+        if (emptyEl) emptyEl.classList.add('hidden');
+        if (chartWrapper) chartWrapper.classList.remove('hidden');
+
+        if (lifecycleChart) {
+            lifecycleChart.destroy();
+            lifecycleChart = null;
         }
 
-        window.lifecycleChart = new Chart(ctx, {
+        const isDark = document.documentElement.classList.contains('dark') || document.documentElement.getAttribute('data-theme') === 'dark';
+
+        lifecycleChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
                 labels: ['EOL', 'Outdated', 'Healthy'],
                 datasets: [{
                     data: [data.eol_count, data.outdated_count, data.supported_count],
                     backgroundColor: ['#ef4444', '#f59e0b', '#10b981'],
-                    borderWidth: 0,
+                    borderColor: isDark ? '#1e293b' : '#ffffff',
+                    borderWidth: 2,
                     hoverOffset: 4
                 }]
             },
@@ -399,11 +468,16 @@
                     legend: { display: false },
                     tooltip: {
                         enabled: true,
+                        backgroundColor: isDark ? '#334155' : '#0f172a',
+                        titleColor: '#ffffff',
+                        bodyColor: '#ffffff',
+                        padding: 8,
+                        cornerRadius: 6,
                         callbacks: {
                             label: (context) => {
                                 const total = context.dataset.data.reduce((a, b) => a + b, 0);
                                 const percentage = total > 0 ? ((context.raw / total) * 100).toFixed(1) : 0;
-                                return `${context.label}: ${context.raw} (${percentage}%)`;
+                                return ` ${context.label}: ${context.raw} (${percentage}%)`;
                             }
                         }
                     }
@@ -415,28 +489,31 @@
     function filterByRisk(risk) {
         currentRiskFilter = risk;
 
-        // Update UI buttons
-        document.querySelectorAll('.risk-filter-btn').forEach(btn => {
-            btn.classList.remove('bg-primary-600', 'text-white', 'active-risk-filter');
-            btn.classList.add('text-slate-400');
+        const tabs = ['all', 'eol', 'outdated', 'healthy'];
+        tabs.forEach(t => {
+            const btn = document.getElementById(`filter-${t}`);
+            if (!btn) return;
+            const isActive = (t === risk);
+            btn.classList.toggle('active', isActive);
+            btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            btn.setAttribute('tabindex', isActive ? '0' : '-1');
         });
-
-        const activeBtn = document.getElementById(`filter-${risk}`);
-        activeBtn.classList.remove('text-slate-400');
-        activeBtn.classList.add('bg-primary-600', 'text-white', 'active-risk-filter');
 
         renderAssetsTable();
     }
 
     function renderAssetsTable() {
         const tbody = document.getElementById('assets-table-body');
+        if (!tbody) return;
+
         const searchInput = document.getElementById('asset-search');
-        const searchTerm = searchInput.value.toLowerCase();
+        const searchTerm = (searchInput ? searchInput.value : '').toLowerCase().trim();
         const noResults = document.getElementById('no-results');
 
         // Filter logic
         let filtered = fleetAssets.filter(asset => {
-            const matchesSearch = (asset.hostname || '').toLowerCase().includes(searchTerm) ||
+            const matchesSearch = !searchTerm ||
+                (asset.hostname || '').toLowerCase().includes(searchTerm) ||
                 (asset.username || '').toLowerCase().includes(searchTerm) ||
                 (asset.manufacturer || '').toLowerCase().includes(searchTerm) ||
                 (asset.model || '').toLowerCase().includes(searchTerm) ||
@@ -444,7 +521,6 @@
                 (asset.primary_ip || '').toLowerCase().includes(searchTerm) ||
                 (asset.os_name || '').toLowerCase().includes(searchTerm);
 
-            // Use actual lifecycle_risk from API
             const risk = asset.lifecycle_risk || 'healthy';
 
             if (currentRiskFilter === 'all') return matchesSearch;
@@ -453,50 +529,59 @@
 
         if (filtered.length === 0) {
             tbody.innerHTML = '';
-            noResults.classList.remove('hidden');
+            if (noResults) noResults.classList.remove('hidden');
             return;
         }
 
-        noResults.classList.add('hidden');
+        if (noResults) noResults.classList.add('hidden');
         tbody.innerHTML = filtered.map(asset => {
             const risk = asset.lifecycle_risk || 'healthy';
 
-            const riskPill = risk === 'eol' ? '<span class="px-2 py-1 bg-red-500/10 text-red-500 text-[10px] font-bold rounded uppercase">🔴 EOL</span>' :
-                risk === 'outdated' ? '<span class="px-2 py-1 bg-yellow-500/10 text-yellow-500 text-[10px] font-bold rounded uppercase">🟡 Outdated</span>' :
-                    '<span class="px-2 py-1 bg-emerald-500/10 text-emerald-500 text-[10px] font-bold rounded uppercase">🟢 Healthy</span>';
+            const riskPill = risk === 'eol'
+                ? '<span class="asset-risk-pill asset-risk-pill--eol" title="Lifecycle Risk: EOL">EOL</span>'
+                : risk === 'outdated'
+                    ? '<span class="asset-risk-pill asset-risk-pill--outdated" title="Lifecycle Risk: Outdated">OUTDATED</span>'
+                    : '<span class="asset-risk-pill asset-risk-pill--healthy" title="Lifecycle Risk: Healthy">HEALTHY</span>';
+
+            const osVersion = (asset.os_version || '').split(' ')[0] || '-';
+            const ramText = asset.ram_total_gb ? Math.round(asset.ram_total_gb) + ' GB' : 'N/A';
+            const ramTooltip = ramText + (asset.ram_total_gb ? ` (${asset.ram_total_gb.toFixed(1)} GB)` : '');
+            const syncDateFormatted = DateFmt.formatDate(asset.last_collected) || '';
+            const syncTimeFormatted = DateFmt.formatTime ? DateFmt.formatTime(asset.last_collected) : '';
+            const syncFullTooltip = (syncDateFormatted && syncTimeFormatted) ? `${syncDateFormatted} ${syncTimeFormatted}` : (syncDateFormatted || 'No sync recorded');
 
             return `
-                <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer" onclick="window.location.assign('/dashboard/assets/${safeAgentId(asset.agent_id)}')">
-                    <td class="px-6 py-4">
-                        <div class="font-medium text-gray-900 dark:text-white">${asset.hostname || 'Unknown'}</div>
-                        <div class="text-xs text-gray-500 dark:text-gray-400">${asset.username}</div>
+                <tr class="cursor-pointer" onclick="window.location.assign('/dashboard/assets/${safeAgentId(asset.agent_id)}')">
+                    <td class="col-asset-host">
+                        <div class="se-cell-truncate font-medium text-sm" style="color: var(--text-primary);" title="${escapeHtml(asset.hostname || 'Unknown')}">${escapeHtml(asset.hostname || 'Unknown')}</div>
+                        <div class="se-cell-truncate text-xs mt-0.5" style="color: var(--text-secondary);" title="${escapeHtml(asset.username || '')}">${escapeHtml(asset.username || '-')}</div>
                     </td>
-                    <td class="px-6 py-4">
-                        <div class="text-sm font-medium text-gray-700 dark:text-gray-200">${asset.manufacturer || 'Unknown'}</div>
-                        <div class="text-xs text-gray-500 dark:text-gray-400 capitalize">${(asset.model || '').toLowerCase()}</div>
+                    <td class="col-asset-model">
+                        <div class="se-cell-truncate text-sm font-medium" style="color: var(--text-primary);" title="${escapeHtml(asset.manufacturer || 'Unknown')}">${escapeHtml(asset.manufacturer || 'Unknown')}</div>
+                        <div class="se-cell-truncate text-xs capitalize mt-0.5" style="color: var(--text-secondary);" title="${escapeHtml(asset.model || '')}">${escapeHtml((asset.model || '').toLowerCase())}</div>
                     </td>
-                    <td class="px-6 py-4">
-                        <div class="text-sm text-gray-600 dark:text-gray-300">${asset.os_name || 'Unknown'}</div>
-                        <div class="text-[0.65rem] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-full font-mono">
-                            ${(asset.os_version || '').split(' ')[0]}
+                    <td class="col-asset-os">
+                        <div class="se-cell-truncate text-sm font-medium" style="color: var(--text-primary);" title="${escapeHtml(asset.os_name || 'Unknown')}">${escapeHtml(asset.os_name || 'Unknown')}</div>
+                        <div class="text-[0.6875rem] px-2 py-0.5 rounded-full font-mono inline-block mt-0.5 font-medium leading-normal" style="background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border);" title="${escapeHtml(asset.os_version || osVersion)}">
+                            ${escapeHtml(osVersion)}
                         </div>
                     </td>
-                    <td class="px-6 py-4">${riskPill}</td>
-                    <td class="px-6 py-4">
-                        <div class="text-xs text-gray-600 dark:text-gray-300 line-clamp-1 truncate max-w-[200px]" title="${asset.cpu_name}">
-                            ${asset.cpu_name || 'Unknown CPU'}
+                    <td class="col-asset-risk se-align-center">${riskPill}</td>
+                    <td class="col-asset-specs">
+                        <div class="se-cell-truncate text-xs font-medium" style="color: var(--text-primary);" title="${escapeHtml(asset.cpu_name || 'Unknown CPU')}">
+                            ${escapeHtml(asset.cpu_name || 'Unknown CPU')}
                         </div>
-                        <span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs font-mono">
-                            ${asset.ram_total_gb ? Math.round(asset.ram_total_gb) + ' GB' : 'N/A'}
+                        <span class="px-2 py-0.5 rounded text-[0.6875rem] font-mono inline-block mt-0.5 font-medium leading-normal" style="background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border);" title="${escapeHtml(ramTooltip)}">
+                            ${escapeHtml(ramText)}
                         </span>
                     </td>
-                    <td class="px-6 py-4">
-                        <span class="text-xs font-mono text-gray-600 dark:text-gray-400">${asset.primary_ip || 'N/A'}</span>
-                        <div class="text-[10px] text-gray-500">${asset.primary_mac || ''}</div>
+                    <td class="col-asset-ip">
+                        <div class="se-cell-truncate text-xs font-mono font-medium" style="color: var(--text-primary);" title="${escapeHtml(asset.primary_ip || 'N/A')}">${escapeHtml(asset.primary_ip || 'N/A')}</div>
+                        <div class="se-cell-truncate text-[11px] font-mono mt-0.5" style="color: var(--text-secondary);" title="${escapeHtml(asset.primary_mac || '')}">${escapeHtml(asset.primary_mac || '-')}</div>
                     </td>
-                    <td class="px-6 py-4 text-right">
-                        <div class="text-xs font-medium text-gray-700 dark:text-gray-300">${formatRelativeTime(asset.last_collected)}</div>
-                        <div class="text-[10px] text-gray-500 dark:text-gray-500 uppercase">${DateFmt.formatDate(asset.last_collected)}</div>
+                    <td class="col-asset-sync se-align-right">
+                        <div class="text-xs font-medium" style="color: var(--text-primary);" title="${escapeHtml(syncFullTooltip)}">${formatRelativeTime(asset.last_collected)}</div>
+                        <div class="text-[11px] uppercase mt-0.5" style="color: var(--text-secondary);" title="${escapeHtml(syncFullTooltip)}">${syncDateFormatted}</div>
                     </td>
                 </tr>
             `;
@@ -512,13 +597,31 @@
         const bitlockerCompliant = fleetAssets.filter(a => a.bitlocker_status === 'Encrypted').length;
         document.getElementById('bitlocker-compliant-count').textContent = bitlockerCompliant;
         const bitlockerRate = fleetAssets.length ? Math.round((bitlockerCompliant / fleetAssets.length) * 100) : 0;
-        document.getElementById('bitlocker-risk-subtext').textContent = `${bitlockerRate}% Compliance Rate`;
-        document.getElementById('bitlocker-risk-subtext').className = bitlockerRate < 80 ? 'text-red-400 text-sm mt-1' : 'text-slate-500 text-sm mt-1';
+        const bitlockerSub = document.getElementById('bitlocker-risk-subtext');
+        if (bitlockerSub) {
+            bitlockerSub.textContent = `${bitlockerRate}% Compliance Rate`;
+            if (bitlockerRate < 80) {
+                bitlockerSub.className = 'asset-card-subtext';
+                bitlockerSub.style.color = 'var(--danger)';
+            } else {
+                bitlockerSub.className = 'asset-card-subtext';
+                bitlockerSub.style.color = '';
+            }
+        }
 
         const avMissing = fleetAssets.filter(a => !a.antivirus_installed || a.antivirus_installed.length === 0).length;
         document.getElementById('av-missing-count').textContent = avMissing;
-        document.getElementById('av-risk-subtext').textContent = avMissing > 0 ? `${avMissing} Devices at Risk` : 'All devices protected';
-        document.getElementById('av-risk-subtext').className = avMissing > 0 ? 'text-red-400 text-sm mt-1' : 'text-slate-500 text-sm mt-1';
+        const avSub = document.getElementById('av-risk-subtext');
+        if (avSub) {
+            avSub.textContent = avMissing > 0 ? `${avMissing} Devices at Risk` : 'All devices protected';
+            if (avMissing > 0) {
+                avSub.className = 'asset-card-subtext';
+                avSub.style.color = 'var(--danger)';
+            } else {
+                avSub.className = 'asset-card-subtext';
+                avSub.style.color = '';
+            }
+        }
 
         // Infrastructure Stats
         const win11Count = fleetAssets.filter(a => (a.os_name || '').includes('11')).length;
@@ -543,29 +646,96 @@
         return `${Math.floor(diffSeconds / 86400)}d ago`;
     }
 
-    // Search functionality
-    document.getElementById('asset-search').addEventListener('input', (e) => {
-        renderAssetsTable();
-    });
+    // Search functionality with two-way sync between header & filter bar
+    const searchInput = document.getElementById('asset-search');
+    const headerSearchInput = document.getElementById('asset-search-header');
 
-    document.getElementById('clear-search').addEventListener('click', () => {
-        const searchInput = document.getElementById('asset-search');
-        searchInput.value = '';
-        renderAssetsTable();
-    });
-
-    document.getElementById('refresh-assets').addEventListener('click', () => {
-        const icon = document.querySelector('#refresh-assets svg');
-        icon.classList.add('animate-spin');
-        loadAssets().finally(() => {
-            setTimeout(() => icon.classList.remove('animate-spin'), 500);
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            if (headerSearchInput) headerSearchInput.value = e.target.value;
+            renderAssetsTable();
         });
+    }
+
+    if (headerSearchInput) {
+        headerSearchInput.addEventListener('input', (e) => {
+            if (searchInput) searchInput.value = e.target.value;
+            renderAssetsTable();
+        });
+    }
+
+    const clearSearchBtn = document.getElementById('clear-search');
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', () => {
+            if (searchInput) searchInput.value = '';
+            if (headerSearchInput) headerSearchInput.value = '';
+            renderAssetsTable();
+        });
+    }
+
+    // Keyboard support for ARIA segmented tabs
+    const filterTabsContainer = document.querySelector('.asset-filter-tabs');
+    if (filterTabsContainer) {
+        const tabs = Array.from(filterTabsContainer.querySelectorAll('[role="tab"]'));
+        filterTabsContainer.addEventListener('keydown', (e) => {
+            const currentTab = document.activeElement;
+            const currentIndex = tabs.indexOf(currentTab);
+            if (currentIndex === -1) return;
+
+            let nextIndex = null;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                nextIndex = (currentIndex + 1) % tabs.length;
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                nextIndex = 0;
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                nextIndex = tabs.length - 1;
+            }
+
+            if (nextIndex !== null) {
+                const nextTab = tabs[nextIndex];
+                nextTab.focus();
+                nextTab.click();
+            }
+        });
+    }
+
+    // Refresh assets button
+    const refreshBtn = document.getElementById('refresh-assets');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => {
+            const icon = refreshBtn.querySelector('svg');
+            if (icon) icon.classList.add('animate-spin');
+            loadAssets().finally(() => {
+                setTimeout(() => {
+                    if (icon) icon.classList.remove('animate-spin');
+                }, 500);
+            });
+        });
+    }
+
+    // Synchronize chart colors when switching themes without reload
+    window.addEventListener('themechange', () => {
+        if (lifecycleChart) {
+            const isDark = document.documentElement.classList.contains('dark') || document.documentElement.getAttribute('data-theme') === 'dark';
+            lifecycleChart.data.datasets[0].borderColor = isDark ? '#1e293b' : '#ffffff';
+            if (lifecycleChart.options.plugins && lifecycleChart.options.plugins.tooltip) {
+                lifecycleChart.options.plugins.tooltip.backgroundColor = isDark ? '#334155' : '#0f172a';
+            }
+            lifecycleChart.update();
+        }
     });
 
-    async function evaluateFleet() {
-        const btn = event.currentTarget;
-        const original = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
+    async function evaluateFleet(event) {
+        const btn = event ? event.currentTarget : document.getElementById('rescan-fleet-btn');
+        if (!btn) return;
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = `{{ icon('refresh', class='w-4 h-4 animate-spin') | safe }} <span>Scanning...</span>`;
         btn.disabled = true;
 
         try {
@@ -575,7 +745,7 @@
         } catch (error) {
             console.error('Fleet evaluation failed:', error);
         } finally {
-            btn.innerHTML = original;
+            btn.innerHTML = originalHtml;
             btn.disabled = false;
         }
     }
@@ -586,19 +756,4 @@
         loadLifecycleData();
     });
 </script>
-
-<style nonce="{{ csp_nonce() }}">
-    .stat-card {
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .stat-card:hover {
-        transform: translateY(-4px);
-        border-color: #3b82f6;
-    }
-
-    .active-risk-filter {
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-    }
-</style>
 {% endblock %}

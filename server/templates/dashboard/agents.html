@@ -1,17 +1,48 @@
 {% extends "dashboard/base.html" %}
+{% from "components/icons.html" import icon %}
 
 {% block title %}Registered Agents - SentinelEdge Dashboard{% endblock %}
+
+{% block extra_head %}
+<style nonce="{{ csp_nonce() }}">
+    .badge-status-active {
+        background-color: #DCFCE7 !important;
+        color: #15803D !important;
+        border-color: transparent !important;
+    }
+
+    .badge-status-idle {
+        background-color: #FEF3C7 !important;
+        color: #B45309 !important;
+        border-color: transparent !important;
+    }
+
+    .badge-status-offline {
+        background-color: #FEE2E2 !important;
+        color: #DC2626 !important;
+        border-color: transparent !important;
+    }
+
+    .badge-status-outdated {
+        background-color: #E5E7EB !important;
+        color: #4B5563 !important;
+        border-color: transparent !important;
+    }
+
+    .badge-status-update_failed,
+    .badge-status-failed {
+        background-color: #FCE7F3 !important;
+        color: #BE185D !important;
+        border-color: transparent !important;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
 <!-- Header -->
 <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8">
     <div>
         <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
-                </path>
-            </svg>
             Registered Agents
         </h1>
         <p class="text-gray-600 dark:text-gray-400 mt-1">
@@ -22,17 +53,23 @@
     <!-- Search & Filter -->
     <div class="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
         <label for="agent-search" class="sr-only">Search agents</label>
-        <input type="text" id="agent-search" placeholder="Search hostname, user, or ID..."
-            class="w-full sm:w-64 px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        <div class="se-search-wrapper w-full sm:w-64">
+            <span class="se-search-icon" aria-hidden="true">
+                {{ icon('search', class='w-4 h-4') }}
+            </span>
+            <input type="text" id="agent-search" placeholder="Search hostname, user, or ID..."
+                class="se-search-input w-full" autocomplete="off" spellcheck="false" role="searchbox"
+                aria-label="Search agents">
+        </div>
         <label for="status-filter" class="sr-only">Status filter</label>
-        <select id="status-filter"
-            class="w-full sm:w-44 px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        <select id="status-filter" class="form-select se-dropdown-164 se-dropdown-align-right"
+            style="width: 164px; min-width: 164px; max-width: 164px;">
             <option value="all">All Agents</option>
-            <option value="active">Active Now</option>
+            <option value="active">Active</option>
             <option value="idle">Idle</option>
             <option value="offline">Offline</option>
-            <option value="outdated">⬆ Outdated</option>
-            <option value="update_failed">❌ Failed Updates</option>
+            <option value="outdated">Outdated</option>
+            <option value="update_failed">Failed Updates</option>
         </select>
     </div>
 </div>
@@ -42,17 +79,11 @@
     class="hidden mb-6 p-4 rounded-xl border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
     <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
-            <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" stroke="currentColor"
-                viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                </path>
-            </svg>
+            {{ icon('refresh', class='w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0') }}
             <span id="update-alert-text" class="text-sm font-medium text-amber-800 dark:text-amber-200"></span>
         </div>
         <div class="flex gap-2">
-            <button onclick="openUpdatePanel()"
-                class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors">
+            <button onclick="openUpdatePanel()" class="btn btn-sm btn-warning">
                 Manage Updates
             </button>
         </div>
@@ -64,18 +95,12 @@
     class="hidden mb-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
     <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                </path>
-            </svg>
+            {{ icon('refresh', class='w-5 h-5 text-blue-600') }}
             Agent Update Control
         </h2>
         <button onclick="closeUpdatePanel()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             aria-label="Close update panel">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-            </svg>
+            {{ icon('close', class='w-5 h-5') }}
         </button>
     </div>
 
@@ -93,9 +118,8 @@
             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-2">Set Target Version</p>
             <div class="flex gap-2">
                 <input type="text" id="target-version-input" placeholder="e.g. 2.5.0"
-                    class="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-primary-500">
-                <button onclick="setTargetAll()"
-                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors whitespace-nowrap">
+                    class="form-control flex-1 text-sm py-1.5">
+                <button onclick="setTargetAll()" class="btn btn-sm btn-primary whitespace-nowrap">
                     Update All
                 </button>
             </div>
@@ -106,67 +130,65 @@
 <!-- Table Container -->
 <div
     class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden mb-5">
-    <div class="relative overflow-x-auto">
-        <table class="min-w-[1200px] w-full divide-y divide-gray-200 dark:divide-gray-600" id="agents-table">
+    <div class="se-table-container-fleet">
+        <table class="se-table" id="agents-table">
+            <colgroup>
+                <col class="col-agent-host">
+                <col class="col-agent-user">
+                <col class="col-agent-status">
+                <col class="col-agent-activity">
+                <col class="col-agent-time">
+                <col class="col-agent-topapp">
+                <col class="col-agent-ver">
+                <col class="col-agent-seen">
+                <col class="col-agent-actions">
+            </colgroup>
 
             <!-- Table Head -->
-            <thead class="bg-gray-50 dark:bg-gray-700">
+            <thead>
                 <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase cursor-pointer">
+                    <th class="col-agent-host text-left cursor-pointer">
                         Hostname & ID
                     </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase cursor-pointer">
+                    <th class="col-agent-user text-left cursor-pointer">
                         User
                     </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase cursor-pointer">
+                    <th class="col-agent-status se-align-center cursor-pointer">
                         Status
                     </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase cursor-pointer">
-                        Current Activity
+                    <th class="col-agent-activity text-left cursor-pointer">
+                        live
                     </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase cursor-pointer">
+                    <th class="col-agent-time se-align-right cursor-pointer">
                         Screen Time
                     </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase hidden lg:table-cell">
+                    <th class="col-agent-topapp text-left">
                         Top App
                     </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase hidden lg:table-cell">
-                        Apps
-                    </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase hidden xl:table-cell">
-                        Domains
-                    </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase hidden xl:table-cell">
-                        Inventory
-                    </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase">
+                    <th class="col-agent-ver se-align-center">
                         Version
                     </th>
-                    <th class="px-6 py-3 text-left text-xs font-medium uppercase hidden md:table-cell">
+                    <th class="col-agent-seen text-left">
                         Last Seen
                     </th>
-                    <th class="px-6 py-3 text-right text-xs font-medium uppercase">
+                    <th class="col-agent-actions se-align-right">
                         Actions
                     </th>
                 </tr>
             </thead>
 
             <!-- Table Body -->
-            <tbody id="agents-body" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-600">
+            <tbody id="agents-body">
 
                 <!-- Loading State -->
                 <tr>
-                    <td colspan="12" class="px-6 py-12 text-center">
-                        <div
-                            class="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4">
-                        </div>
+                    <td colspan="9" class="px-6 py-12 text-center">
+                        <div class="spinner spinner-md mx-auto mb-4"></div>
                         <p class="text-gray-500 dark:text-gray-400">
                             Loading fleet data...
                         </p>
                     </td>
                 </tr>
-
-
 
             </tbody>
         </table>
@@ -177,6 +199,19 @@
 
 {% block extra_js %}
 <script nonce="{{ csp_nonce() }}">
+    const HEROICON_SEARCH_EMPTY = `{{ icon('search', class='w-12 h-12 mx-auto text-gray-400') | safe }}`;
+    const HEROICON_STATUS_STALE = `{{ icon('warning', class='w-3.5 h-3.5 mr-1') | safe }}`;
+    const HEROICON_STATUS_ONLINE = `{{ icon('online', class='w-3.5 h-3.5 mr-1') | safe }}`;
+    const HEROICON_STATUS_OFFLINE = `{{ icon('offline', class='w-3.5 h-3.5 mr-1') | safe }}`;
+    const HEROICON_ACTION_RETRY = `{{ icon('refresh', class='w-3.5 h-3.5') | safe }}`;
+    const HEROICON_ACTION_TRASH = `{{ icon('trash', class='w-3.5 h-3.5') | safe }}`;
+    const HEROICON_STATE_ACTIVE = `{{ icon('bolt', class='w-3.5 h-3.5 mr-1 inline-block text-emerald-500') | safe }}`;
+    const HEROICON_STATE_IDLE = `{{ icon('clock', class='w-3.5 h-3.5 mr-1 inline-block text-amber-500') | safe }}`;
+    const HEROICON_STATE_LOCKED = `{{ icon('key', class='w-3.5 h-3.5 mr-1 inline-block text-slate-400') | safe }}`;
+    const HEROICON_BADGE_FAILED = `{{ icon('offline', class='w-3 h-3 ml-1 inline-block') | safe }}`;
+    const HEROICON_BADGE_DOWNLOADING = `{{ icon('download', class='w-3 h-3 ml-1 inline-block') | safe }}`;
+    const HEROICON_BADGE_INSTALLING = `{{ icon('settings', class='w-3 h-3 ml-1 inline-block animate-spin') | safe }}`;
+
     // Helper functions
     function debounce(func, wait) {
         let timeout;
@@ -262,31 +297,31 @@
 
         // Status-based badge
         if (status === 'failed' || status === 'rolled_back') {
-            return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300" title="Update failed: ${status}">
-                v${version} ❌
+            return `<span class="badge badge-danger text-xs" title="Update failed: ${status}" tabindex="0">
+                v${version} ${HEROICON_BADGE_FAILED}
             </span>`;
         }
 
         if (status === 'downloading') {
-            return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 animate-pulse" title="Downloading update...">
-                v${version} ⬇️
+            return `<span class="badge badge-info text-xs animate-pulse" title="Downloading update to ${target || 'latest'}" tabindex="0">
+                v${version} ${HEROICON_BADGE_DOWNLOADING}
             </span>`;
         }
 
         if (status === 'installing') {
-            return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-300 animate-pulse" title="Installing update...">
-                v${version} ⚙️
+            return `<span class="badge badge-primary text-xs animate-pulse" title="Installing update ${version} → ${target || 'latest'}" tabindex="0">
+                v${version} ${HEROICON_BADGE_INSTALLING}
             </span>`;
         }
 
         if (status === 'pending' && target) {
-            return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300" title="Update pending: ${version} → ${target}">
+            return `<span class="badge badge-warning text-xs" title="Update pending: ${version} → ${target}" tabindex="0">
                 v${version} → ${target}
             </span>`;
         }
 
         // Up to date
-        return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300" title="Up to date">
+        return `<span class="badge badge-success text-xs" title="Up to date: v${version}" tabindex="0">
             v${version}
         </span>`;
     }
@@ -364,7 +399,15 @@
             return;
         }
 
-        if (!confirm(`Set target version to ${version} for ALL agents?`)) return;
+        const confirmed = await SentinelConfirm.show({
+            title: 'Set Fleet Target Version',
+            message: `Set target version to ${version} for ALL agents?`,
+            confirmText: 'Set Target',
+            cancelText: 'Cancel',
+            variant: 'primary',
+            icon: 'refresh'
+        });
+        if (!confirmed) return;
 
         try {
             const resp = await fetch('/dashboard/api/updates/set-target', {
@@ -459,11 +502,9 @@
         if (filtered.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="12" class="px-6 py-12 text-center">
-                        <div class="text-4xl mb-4">
-                            <svg class="w-12 h-12 mx-auto text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                            </svg>
+                    <td colspan="9" class="px-6 py-12 text-center">
+                        <div class="mb-4">
+                            ${HEROICON_SEARCH_EMPTY}
                         </div>
                         <p class="text-lg font-semibold text-gray-600 dark:text-gray-300">No agents matching your criteria</p>
                         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Try adjusting your search or filter</p>
@@ -475,37 +516,56 @@
         filtered.forEach(agent => {
             const tr = document.createElement('tr');
 
-            // Status Badge with telemetry stale warning
-            let statusHtml;
-            if (agent.telemetry_stale) {
-                statusHtml = '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800" title="⚠️ Agent is online but not sending data!">⚠️ Stale</span>';
-            } else if (agent.is_online) {
-                statusHtml = `
-<span class="inline-flex items-center pr-5 pl-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-  <img src="{{ url_for('static', filename='online.png') }}" class="w-4 h-4 mr-1" />
-  Online
-</span>`;
+            // Status Badge (text-only, no icons, consistent color mappings)
+            let statusLabel = 'Active';
+            let statusBg = '#DCFCE7';
+            let statusColor = '#15803D';
+            let statusKey = 'active';
 
+            if (agent.update_status === 'failed' || agent.update_status === 'rolled_back') {
+                statusLabel = 'Failed Updates';
+                statusBg = '#FCE7F3';
+                statusColor = '#BE185D';
+                statusKey = 'update_failed';
+            } else if (agent.update_status === 'pending') {
+                statusLabel = 'Outdated';
+                statusBg = '#E5E7EB';
+                statusColor = '#4B5563';
+                statusKey = 'outdated';
+            } else if (!agent.is_online || agent.current_state === 'offline') {
+                statusLabel = 'Offline';
+                statusBg = '#FEE2E2';
+                statusColor = '#DC2626';
+                statusKey = 'offline';
+            } else if (agent.current_state === 'idle') {
+                statusLabel = 'Idle';
+                statusBg = '#FEF3C7';
+                statusColor = '#B45309';
+                statusKey = 'idle';
             } else {
-                statusHtml = `
-<span class="inline-flex items-center pr-5 pl-1 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-  <img src="{{ url_for('static', filename='no.png') }}" class="w-4 h-4 mr-1" />
-  Offline
-</span>`;
-
+                statusLabel = 'Active';
+                statusBg = '#DCFCE7';
+                statusColor = '#15803D';
+                statusKey = 'active';
             }
 
-            // Add operational status indicator
+            let statusTitle = '';
             if (agent.operational_status === 'DEGRADED') {
-                statusHtml += '<br><small class="text-yellow-600">⚠️ Degraded</small>';
+                statusTitle = ' title="Operational Status: Degraded"';
+            } else if (agent.telemetry_stale) {
+                statusTitle = ' title="Agent is online but not sending data!"';
             }
 
-            // Current activity with state icon
-            let currentActivity = '<span class="text-gray-500">-</span>';
+            const statusHtml = `<span class="badge badge-status-${statusKey} text-xs" style="background-color: ${statusBg}; color: ${statusColor}; border-color: transparent;"${statusTitle} tabindex="0">${statusLabel}</span>`;
+
+            // Live indicator with application/website name (Compound Capsule)
+            let currentActivity = '<span class="text-gray-500 dark:text-gray-400">-</span>';
             if (agent.current_app) {
-                const stateIcon = agent.current_state === 'active' ? '🎯' :
-                    agent.current_state === 'idle' ? '💤' : '🔒';
-                currentActivity = `<span class="text-gray-900 dark:text-gray-100">${stateIcon} ${agent.current_app}</span>`;
+                const appNameEscaped = AgentFmt.escapeHtml(agent.current_app);
+                currentActivity = `<span class="se-live-indicator" title="${appNameEscaped}">` +
+                    `<span class="se-live-dot"></span>` +
+                    `<span class="se-live-text">${appNameEscaped}</span>` +
+                    `</span>`;
             }
 
             // Relative time (IST)
@@ -521,78 +581,140 @@
             const versionBadge = getVersionBadge(agent);
 
             // Action buttons
-            let actionHtml = `<a href="/dashboard/agent/${agent.agent_id}" class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 transition-colors">View</a>`;
+            let actionHtml = `<div class="inline-flex items-center justify-end gap-1.5 flex-nowrap w-full">
+                <a href="/dashboard/agent/${agent.agent_id}" class="btn btn-sm btn-primary py-0.5 px-2.5 h-[26px]">View</a>`;
 
             // Add update action if failed
             if (agent.update_status === 'failed' || agent.update_status === 'rolled_back') {
-                actionHtml += ` <button onclick="retryUpdate('${agent.agent_id}')" class="inline-flex items-center px-1.5 py-1 text-xs font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 transition-colors" title="Retry update" aria-label="Retry update">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                    </svg>
+                actionHtml += `<button onclick="retryUpdate('${agent.agent_id}')" class="btn btn-sm btn-warning py-0.5 px-1.5 h-[26px]" aria-label="Retry update" title="Retry Update">
+                    ${HEROICON_ACTION_RETRY}
                 </button>`;
             }
 
-            actionHtml += ` <button onclick="deleteAgent('${agent.agent_id}', '${agent.hostname || agent.agent_id}')" class="inline-flex items-center px-2 py-1.5 text-xs font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 dark:text-red-300 dark:bg-red-900/30 dark:hover:bg-red-900/50 transition-colors" title="Delete agent" aria-label="Delete agent">
-                <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                </svg>
-                Delete
-            </button>`;
+            actionHtml += `<button onclick="deleteAgent('${agent.agent_id}', '${agent.hostname || agent.agent_id}')" class="btn btn-sm btn-destructive py-0.5 px-2 h-[26px]" aria-label="Delete agent" title="Delete Agent">
+                ${HEROICON_ACTION_TRASH}
+            </button></div>`;
 
-            // Device model, e.g. "HP Laptop 15-bs1xx". Collected already and shown
-            // on the asset views, but the agents list identified a machine only by
-            // hostname, so you could not tell what kind of device a row was without
-            // opening it. Vendors often repeat their own name in the model string
-            // ("HP" + "HP Laptop 15-bs1xx"), so the manufacturer is only prepended
-            // when the model does not already start with it.
-            let modelHtml = '';
+            // Device model, e.g. "HP Laptop 15-bs1xx"
+            let modelLabel = '';
             if (agent.model) {
                 const mfr = (agent.manufacturer || '').trim();
                 const model = String(agent.model).trim();
-                const label = (mfr && !model.toLowerCase().startsWith(mfr.toLowerCase()))
+                modelLabel = (mfr && !model.toLowerCase().startsWith(mfr.toLowerCase()))
                     ? `${mfr} ${model}`
                     : model;
-                modelHtml = `<br><small class="text-gray-500 dark:text-gray-400 text-xs" title="${AgentFmt.escapeHtml(label)}">${AgentFmt.escapeHtml(label)}</small>`;
             }
+            const hostDisplay = AgentFmt.escapeHtml(agent.hostname || 'Unknown');
+            const modelDisplay = modelLabel ? AgentFmt.escapeHtml(modelLabel) : '—';
 
             tr.innerHTML = `
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <a href="/dashboard/agent/${agent.agent_id}" class="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-medium">
-                        <strong>${agent.hostname || 'Unknown'}</strong>
-                    </a>
-                    ${modelHtml}
-                    <br><small class="text-gray-500 dark:text-gray-400 font-mono text-xs" title="${agent.agent_id}" tabindex="0">${agent.agent_id.slice(0, 12)}…</small>
+                <td class="col-agent-host" data-no-tooltip="true">
+                    <div class="agent-host-cell flex flex-col justify-center min-w-0 h-[44px] overflow-hidden leading-tight">
+                        <a href="/dashboard/agent/${agent.agent_id}" class="agent-host-link text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 font-semibold text-xs sm:text-sm truncate block leading-snug" data-full-text="${hostDisplay}">
+                            ${hostDisplay}
+                        </a>
+                        <span class="agent-model-text text-xs text-gray-500 dark:text-gray-400 font-normal truncate block leading-tight mt-0.5" data-full-text="${AgentFmt.escapeHtml(modelLabel)}">
+                            ${modelDisplay}
+                        </span>
+                    </div>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.username || '-'}</td>
-                <td class="px-6 py-4 whitespace-nowrap">${statusHtml}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm">${currentActivity}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                    <span title="${screenTimeTitle}">${screenTime}</span>
+                <td class="col-agent-user text-sm text-gray-900 dark:text-gray-100" data-no-tooltip="true">
+                    <span class="agent-user-value font-medium whitespace-nowrap" data-no-tooltip="true">${AgentFmt.escapeHtml(agent.username || '-')}</span>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.top_app || '-'}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.total_apps_used || 0}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.domains_visited || 0}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">${agent.installed_apps || 0}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm">${versionBadge}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400"><span title="${agent.last_seen || ''}">${lastSeenText}</span></td>
-                <td class="px-6 py-4 whitespace-nowrap text-right text-sm">${actionHtml}</td>
+                <td class="col-agent-status se-align-center" data-no-tooltip="true">
+                    <div class="se-badge-wrap">${statusHtml}</div>
+                </td>
+                <td class="col-agent-activity text-sm">
+                    <span class="se-cell-truncate block" data-full-text="${AgentFmt.escapeHtml(agent.current_app || '')}">${currentActivity}</span>
+                </td>
+                <td class="col-agent-time se-align-right text-sm text-gray-900 dark:text-gray-100 se-cell-mono" data-no-tooltip="true">
+                    <span>${screenTime}</span>
+                </td>
+                <td class="col-agent-topapp text-sm text-gray-900 dark:text-gray-100">
+                    <span class="se-cell-truncate block" data-full-text="${AgentFmt.escapeHtml(agent.top_app || '')}">${AgentFmt.escapeHtml(agent.top_app || '-')}</span>
+                </td>
+                <td class="col-agent-ver se-align-center text-sm" data-no-tooltip="true">
+                    <div class="se-badge-wrap">${versionBadge}</div>
+                </td>
+                <td class="col-agent-seen text-left text-xs text-gray-500 dark:text-gray-400" data-no-tooltip="true">
+                    <span class="whitespace-nowrap">${lastSeenText}</span>
+                </td>
+                <td class="col-agent-actions se-align-right text-sm" data-no-tooltip="true">${actionHtml}</td>
             `;
             tbody.appendChild(tr);
         });
     }
 
+    // Registered Agents Table Tooltip Management:
+    // 1. Tooltip is required ONLY for content that is actually rendered with ellipsis (...).
+    // 2. Fully visible text must have no tooltip.
+    // 3. Username must never receive an ellipsis tooltip.
+    // 4. Tooltip must show the complete original value.
+    (function initAgentsTableTooltips() {
+        const table = document.getElementById('agents-table');
+        if (!table) return;
+
+        function checkAgentsTooltip(e) {
+            const userCell = e.target.closest('.col-agent-user');
+            const seenCell = e.target.closest('.col-agent-seen');
+            const tipEl = document.getElementById('se-global-tooltip');
+
+            // Username and Last Seen never receive an ellipsis tooltip
+            if (userCell || seenCell) {
+                if (tipEl) {
+                    tipEl.classList.remove('se-tooltip-visible');
+                    tipEl.setAttribute('aria-hidden', 'true');
+                }
+                return;
+            }
+
+            // Check if hovered element is a text element that could be truncated
+            const truncateEl = e.target.closest('.agent-model-text, .agent-host-link, .col-agent-activity .se-cell-truncate, .col-agent-topapp .se-cell-truncate');
+            if (truncateEl) {
+                const isTrunc = truncateEl.scrollWidth > truncateEl.clientWidth + 1;
+                if (!isTrunc && tipEl) {
+                    // Fully visible text must have NO tooltip
+                    tipEl.classList.remove('se-tooltip-visible');
+                    tipEl.setAttribute('aria-hidden', 'true');
+                }
+            } else if (e.target.closest('td') && !e.target.closest('button, a, [title], [data-se-tooltip]')) {
+                // If hovering on cell background or non-tooltip element
+                if (tipEl) {
+                    tipEl.classList.remove('se-tooltip-visible');
+                    tipEl.setAttribute('aria-hidden', 'true');
+                }
+            }
+        }
+
+        table.addEventListener('mouseover', checkAgentsTooltip);
+        table.addEventListener('focusin', checkAgentsTooltip);
+    })();
+
     // Event Listeners
     document.getElementById('agent-search').addEventListener('input', debounce(renderAgents, 300));
     document.getElementById('status-filter').addEventListener('change', renderAgents);
 
-    // Initial Load
-    document.addEventListener('DOMContentLoaded', loadAgents);
+    // Initial Load & Custom Controls Initialization
+    document.addEventListener('DOMContentLoaded', () => {
+        loadAgents();
+        if (window.SeCustomSelect) {
+            document.querySelectorAll('select').forEach(sel => new window.SeCustomSelect(sel, { align: 'right' }));
+        }
+    });
 
     // Auto-refresh every 60 seconds
     setInterval(loadAgents, 60000);
 
     async function deleteAgent(agentId, hostname) {
-        if (!confirm(`Delete agent "${hostname}"?\n\nThis will permanently remove all historical data (screen time, apps, domains, inventory, etc.) for this agent. This cannot be undone.`)) {
+        const confirmed = await SentinelConfirm.show({
+            title: `Delete Agent "${hostname}"`,
+            message: `This will permanently remove all historical data (screen time, apps, domains, inventory, etc.) for this agent.\n\nThis cannot be undone.`,
+            confirmText: 'Delete Agent',
+            cancelText: 'Cancel',
+            variant: 'danger',
+            icon: 'trash'
+        });
+        if (!confirmed) {
             return;
         }
 

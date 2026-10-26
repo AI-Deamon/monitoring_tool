@@ -328,7 +328,7 @@
             <h1>Weekly Activity Report</h1>
             <div class="subtitle">{{ username }}</div>
             <div class="report-meta">
-                <span>📅 {{ start_date.strftime('%B %d, %Y') }} - {{ end_date.strftime('%B %d, %Y') }}</span>
+                <span>📅 {{ start_date | fmt_date }} - {{ end_date | fmt_date }}</span>
                 <span>💻 {{ agent_info.hostname or 'N/A' }}</span>
                 <span>🖥️ {{ agent_info.os or 'N/A' }}</span>
             </div>
@@ -447,13 +447,13 @@
                 {% if highest_day %}
                 <div class="observation-card">
                     <div class="label">Most Productive Day</div>
-                    <div class="value">{{ highest_day.date.strftime('%A, %B %d') }} ({{ highest_day.active_seconds | format_duration }})</div>
+                    <div class="value">{{ highest_day.date.strftime('%A') }}, {{ highest_day.date | fmt_date }} ({{ highest_day.active_seconds | format_duration }})</div>
                 </div>
                 {% endif %}
                 {% if lowest_day %}
                 <div class="observation-card">
                     <div class="label">Least Active Day</div>
-                    <div class="value">{{ lowest_day.date.strftime('%A, %B %d') }} ({{ lowest_day.active_seconds | format_duration }})</div>
+                    <div class="value">{{ lowest_day.date.strftime('%A') }}, {{ lowest_day.date | fmt_date }} ({{ lowest_day.active_seconds | format_duration }})</div>
                 </div>
                 {% endif %}
                 <div class="observation-card">
@@ -494,7 +494,7 @@
         </div>
         
         <footer>
-            Generated on {{ generated_at.strftime('%Y-%m-%d at %H:%M') }} | SentinelEdge Monitoring System
+            Generated on {{ generated_at | fmt_datetime_seconds_tz }} | SentinelEdge Monitoring System
         </footer>
     </div>
 </body>

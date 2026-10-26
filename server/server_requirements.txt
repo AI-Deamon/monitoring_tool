@@ -46,3 +46,6 @@ openpyxl>=3.1.0
 
 # request module
 requests==2.33.0
+
+#report module
+weasyprint==70.0

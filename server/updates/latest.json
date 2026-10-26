@@ -1,0 +1,11 @@
+{
+  "version": "4.2.9",
+  "release_date": "2026-09-23T11:38:00.437358+00:00",
+  "min_agent_version": "2.0.0",
+  "package_sha256": "52f660dfdc7025d4944c0bac88166271d24b37f6e010b1e2c9e0ecc5e8f2d804",
+  "package_size": 32941483,
+  "changelog": "Agent version 4.2.9",
+  "mandatory": false,
+  "artifact_type": "exe_bundle",
+  "signature": "GyJ/EuhCFTvumbn5Vw0FJkXZkMBgViuJ1CP766tsGv4="
+}

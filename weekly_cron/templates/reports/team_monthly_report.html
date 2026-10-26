@@ -296,7 +296,7 @@
             <h1>Team Monthly Activity Report</h1>
             <div class="subtitle">Organization Overview</div>
             <div class="report-meta">
-                <span>📅 {{ start_date.strftime('%B %d, %Y') }} - {{ end_date.strftime('%B %d, %Y') }}</span>
+                <span>📅 {{ start_date | fmt_date }} - {{ end_date | fmt_date }}</span>
                 <span>👥 {{ active_members }} Active Members</span>
             </div>
         </header>
@@ -428,7 +428,7 @@
         </div>
         
         <footer>
-            Generated on {{ generated_at.strftime('%Y-%m-%d at %H:%M') }} | SentinelEdge Monitoring System
+            Generated on {{ generated_at | fmt_datetime_seconds_tz }} | SentinelEdge Monitoring System
         </footer>
     </div>
 </body>

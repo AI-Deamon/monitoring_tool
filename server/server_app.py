@@ -58,6 +58,10 @@ def create_app():
     app.jinja_env.filters['fmt_datetime'] = _fmt_datetime
     from utils.datetime_format import format_datetime_labelled as _fmt_dt_lbl
     app.jinja_env.filters['fmt_datetime_tz'] = _fmt_dt_lbl
+    from utils.datetime_format import format_datetime_seconds as _fmt_dt_s
+    app.jinja_env.filters['fmt_datetime_seconds'] = _fmt_dt_s
+    from utils.datetime_format import format_datetime_seconds_labelled as _fmt_dt_s_lbl
+    app.jinja_env.filters['fmt_datetime_seconds_tz'] = _fmt_dt_s_lbl
     
     # H-17 FIX: Add Content-Security-Policy header for defense-in-depth
     @app.before_request
@@ -108,9 +112,11 @@ def create_app():
         # re-renders a dashboard page from cache — the page is stale and the
         # session is dead, but a bystander still sees monitored employee data.
         #
-        # Applied only to authenticated responses: static assets are cacheable
-        # and making them no-store would discard that for no benefit.
-        if 'user_id' in session:
+        # Also applied to all auth blueprint pages (login, password reset, etc.)
+        # so unauthenticated forms with CSRF tokens never survive in browser cache.
+        # Static assets remain cacheable.
+        is_auth_route = request.path.startswith('/auth') and not request.path.startswith('/static')
+        if 'user_id' in session or is_auth_route:
             response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
@@ -355,9 +361,16 @@ def create_app():
         # Compatibility route to the canonical OpenAPI spec.
         return openapi_spec()
 
-    # Start background scheduler (only in main process, not in testing)
-    if not app.config.get('TESTING'):
+    # Start background scheduler (only in main process, not in testing).
+    # gunicorn's on_starting hook builds an app in the *master* just to run DB
+    # setup; a scheduler thread + advisory-lock connection there would be
+    # inherited by every forked worker, so it opts out via this env var.
+    if not app.config.get('TESTING') and not os.environ.get('SENTINELEDGE_NO_SCHEDULER'):
         try:
+            # Import report_engine on this thread before any background thread
+            # exists. Lazy first-imports from the scheduler/sync threads can
+            # leave the module half-initialised in sys.modules.
+            import engines.report_engine  # noqa: F401
             from background_tasks import start_background_tasks
             app.background_scheduler = start_background_tasks(app)
         except Exception as e:

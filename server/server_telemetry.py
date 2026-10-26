@@ -466,12 +466,26 @@ def telemetry_screentime():
                     )
             if resolved_day is None:
                 from datetime import timedelta
-                resolved_day = (ts_naive - timedelta(days=1)).date()
+                try:
+                    local_date = datetime.fromisoformat(ts_str.replace('Z', '+00:00')).date()
+                except Exception:
+                    local_date = ts_naive.date()
+                resolved_day = local_date - timedelta(days=1)
             day = resolved_day
             ts_naive = datetime.combine(day, ts_naive.time())
             logger.info(f"[{short_id}] [DIAG] Final day data -> storing in date={day}")
         else:
-            day = ts_naive.date()
+            try:
+                # Extract local day directly from the timezone-aware timestamp string sent by the agent
+                # ts_str example: '2026-09-16T00:00:30.093665+05:30' -> 2026-09-16
+                day = datetime.fromisoformat(ts_str.replace('Z', '+00:00')).date()
+            except Exception:
+                # Fallback to UTC date if parsing fails
+                day = ts_naive.date()
+                
+            # Align the naive timestamp's date with the extracted local day so the database
+            # stored procedure (which casts timestamp to date) uses the correct bucket
+            ts_naive = datetime.combine(day, ts_naive.time())
 
         # Anomaly diagnostics only: detect strong regressions and overshoots from incoming totals.
         existing = server_models.ScreenTime.query.filter_by(agent_id=agent_id, date=day).first()
@@ -901,7 +915,12 @@ def telemetry_app_switch():
         timestamp_naive = parse_agent_timestamp(ts_str, agent_id)
         start_naive = parse_agent_timestamp(start_str, agent_id)
         end_naive = parse_agent_timestamp(end_str, agent_id)
-        
+        # Extract local date
+        try:
+            day = datetime.fromisoformat(start_str.replace('Z', '+00:00')).date()
+        except Exception:
+            day = start_naive.date()
+            
         # ================================================================
         # Call stored procedure for ATOMIC processing with AUDIT
         # ================================================================
@@ -910,7 +929,7 @@ def telemetry_app_switch():
         result = db.session.execute(text("""
             SELECT * FROM process_app_switch_event(
                 :agent_id, :timestamp, :app, :friendly_name, :category,
-                :window_title, :session_start, :session_end, :total_seconds
+                :window_title, :session_start, :session_end, :total_seconds, :date
             )
         """), {
             'agent_id': agent_id,
@@ -921,7 +940,8 @@ def telemetry_app_switch():
             'window_title': window_title,
             'session_start': start_naive,
             'session_end': end_naive,
-            'total_seconds': total_seconds
+            'total_seconds': total_seconds,
+            'date': day
         })
         
         row = result.fetchone()
@@ -1025,6 +1045,12 @@ def telemetry_domain_switch():
         start_naive = parse_agent_timestamp(start_str, agent_id)
         end_naive = parse_agent_timestamp(end_str, agent_id)
         
+        # Extract local date
+        try:
+            day = datetime.fromisoformat(start_str.replace('Z', '+00:00')).date()
+        except Exception:
+            day = start_naive.date()
+        
         # ================================================================
         # Call stored procedure for ATOMIC processing with AUDIT
         # ================================================================
@@ -1037,19 +1063,20 @@ def telemetry_domain_switch():
         result = db.session.execute(text("""
             SELECT * FROM process_domain_switch_event(
                 :agent_id, :username, :domain, :raw_title, :raw_url, :browser,
-                :session_start, :session_end, :duration_seconds, :idempotency_key
+                :session_start, :session_end, :duration_seconds, :idempotency_key, :date
             )
         """), {
             'agent_id': agent_id,
             'username': username,
             'domain': domain,
-            'raw_title': None,  # Not provided in domain-switch event
+            'raw_title': data.get('window_title', ''),
             'raw_url': url,
             'browser': browser,
             'session_start': start_naive,
             'session_end': end_naive,
-            'duration_seconds': int(total_seconds),  # Procedure expects integer
-            'idempotency_key': None
+            'duration_seconds': int(total_seconds),
+            'idempotency_key': None,
+            'date': day
         })
         
         row = result.fetchone()

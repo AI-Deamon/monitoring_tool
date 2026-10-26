@@ -1,4 +1,5 @@
 {% extends "dashboard/base.html" %}
+{% from "components/icons.html" import icon %}
 
 {% block title %}{{ agent.hostname }} - SentinelEdge Dashboard{% endblock %}
 
@@ -50,9 +51,8 @@
                  w-52 h-52 rounded-full
                  bg-gradient-to-br from-blue-100 to-blue-200
                  dark:from-blue-900/30 dark:to-blue-800/20
-                 shadow-inner">
-                        <img src="{{ url_for('static', filename='dashboard.png') }}" class="w-28 h-28 opacity-90"
-                            alt="Dashboard Illustration" />
+                 shadow-inner text-blue-600 dark:text-blue-400">
+                        {{ icon('computer-desktop', class='w-28 h-28 opacity-90') }}
                     </div>
                 </div>
 
@@ -67,44 +67,38 @@
             {% if session.role == 'admin' %}
             <a href="{{ url_for('dashboard.dashboard_home') }}"
                 class="inline-flex items-center text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 mb-3">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path d="M19 12H5m7 7l-7-7 7-7" />
-                </svg>
+                {{ icon('arrow-left', class='w-5 h-5 mr-2') }}
                 Back to Overview
             </a>
             {% endif %}
 
             <div class="flex items-center gap-4">
-                <h1 id="agent-title" class="text-2xl font-bold text-gray-900 dark:text-gray-100"><img
-                        src="{{ url_for('static', filename='user-setting.png') }}"
-                        class="w-8 h-8 mr-2 inline-block" />{{ agent.hostname or agent.agent_id|string }}</h1>
+                <h1 id="agent-title" class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center">
+                    <!-- {{ icon('user-circle', class='w-8 h-8 mr-2 text-blue-600 dark:text-blue-400') }} -->
+                    <span>{{ agent.hostname or agent.agent_id|string }}</span>
+                </h1>
                 <div id="status-badge-container"></div>
             </div>
-            <p id="agent-subtitle" class="text-gray-600 dark:text-gray-300 font-medium mt-1">
-                <span id="agent-device"><img src="{{ url_for('static', filename='monitor.png') }}"
-                        class="w-4 h-4 mr-1 inline-block" />{{ agent.hostname or agent.agent_id|string }}</span>
+            <p id="agent-subtitle" class="text-gray-600 dark:text-gray-300 font-medium mt-1 flex items-center gap-1">
+                <span id="agent-device" class="inline-flex items-center">
+                    <!-- {{ icon('monitor', class='w-4 h-4 mr-1') }} -->
+                    {{ agent.hostname or agent.agent_id|string }}
+                </span>
                 <span class="text-gray-400 dark:text-gray-500"> • </span>
                 <span id="agent-os">{{ agent.os }}</span>
             </p>
         </div>
         <div class="flex items-center gap-3">
-            <div class="text-right">
-                <div class="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Current Activity
-                </div>
-                <span id="current-activity"
-                    class="inline-block px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-full font-semibold text-sm max-w-48 truncate">Loading...</span>
+            <div id="current-activity" class="flex items-center">
+                <span class="text-xs text-gray-400 dark:text-gray-500">Loading...</span>
             </div>
             {% if session.role == 'admin' %}
-            <a href="{{ url_for('dashboard.agent_report', agent_id=agent.agent_id) }}"
-                class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
-                <img src="{{ url_for('static', filename='report.png') }}" class="w-4 h-4 mr-2" /> Report
+            <a href="{{ url_for('dashboard.agent_report', agent_id=agent.agent_id) }}" class="btn btn-primary">
+                {{ icon('report', class='w-4 h-4 mr-2') }} Report
             </a>
             <button onclick="deleteAgent('{{ agent.agent_id }}', '{{ agent.hostname or agent.agent_id }}')"
-                class="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                </svg>
-                Delete
+                class="btn btn-danger">
+                {{ icon('trash', class='w-4 h-4 mr-2') }} Delete
             </button>
             {% endif%}
         </div>
@@ -112,7 +106,7 @@
 </div>
 
 <!-- Live Status Banner -->
-<div id="live-status-banner"
+<!-- <div id="live-status-banner"
     class="hidden bg-gradient-to-r from-blue-500 via-purple-600 to-purple-700 rounded-xl p-4 mb-6 text-white shadow-lg">
     <div class="flex items-center justify-between gap-6">
         <div class="flex items-center gap-3">
@@ -127,45 +121,45 @@
         </div>
         <div id="live-duration" class="font-mono font-bold text-lg bg-white/20 px-3 py-2 rounded-lg"></div>
     </div>
-</div>
+</div> -->
 
 <!-- Tab Navigation -->
 <div class="mb-6">
     <div class="flex bg-white dark:bg-gray-800 rounded-lg p-1 border border-gray-200 dark:border-gray-700 shadow-sm">
         <button
-            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-md"
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-md inline-flex items-center justify-center"
             data-tab="overview">
-            <img src="{{ url_for('static', filename='report.png') }}" class="w-4 h-4 inline mr-2" /> Overview
+            {{ icon('report', class='w-4 h-4 mr-2') }} Overview
         </button>
         <button
-            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 inline-flex items-center justify-center"
             data-tab="activity">
-            <img src="{{ url_for('static', filename='app.png') }}" class="w-4 h-4 inline mr-2" /> Activity
+            {{ icon('app', class='w-4 h-4 mr-2') }} Activity
         </button>
         <button
-            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 inline-flex items-center justify-center"
             data-tab="web">
-            <img src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 inline mr-2" /> Web
+            {{ icon('globe', class='w-4 h-4 mr-2') }} Web
         </button>
         <button
-            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 inline-flex items-center justify-center"
             data-tab="inventory">
-            <img src="{{ url_for('static', filename='inventory.png') }}" class="w-5 h-5 mr-2 inline-block" /> Inventory
+            {{ icon('inventory', class='w-4 h-4 mr-2') }} Inventory
         </button>
         <button
-            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 inline-flex items-center justify-center"
             data-tab="hardware">
-            🖥️ Hardware
+            {{ icon('cpu', class='w-4 h-4 mr-2') }} Hardware
         </button>
         <button
-            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 inline-flex items-center justify-center"
             data-tab="extended">
-            🔧 Extended
+            {{ icon('tools', class='w-4 h-4 mr-2') }} Extended
         </button>
         <button
-            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700"
+            class="tab-btn flex-1 px-4 py-2 text-sm font-medium rounded-md transition-all text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 inline-flex items-center justify-center"
             data-tab="security">
-            🛡️ Security
+            {{ icon('shield', class='w-4 h-4 mr-2') }} Security
         </button>
     </div>
 </div>
@@ -176,157 +170,180 @@
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
-                        src="{{ url_for('static', filename='id.png') }}" class="w-4 h-4 mr-1 inline-block" /> Agent ID
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center">
+                    {{ icon('id', class='w-4 h-4 mr-1') }} Agent ID
                 </div>
                 <div class="flex items-center gap-2 font-mono">
-                    <code class="text-sm text-gray-900 dark:text-gray-100">{{ (agent.agent_id|string)[:12] }}...</code>
+                    <code
+                        class="text-sm text-gray-900 dark:text-gray-100 break-all select-all">{{ agent.agent_id }}</code>
                     <button onclick="copyAgentId()"
-                        class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded p-1 transition-colors"
+                        class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded p-1 transition-colors shrink-0"
                         title="Copy full Agent ID" aria-label="Copy full Agent ID">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                            xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z">
-                            </path>
-                        </svg>
+                        {{ icon('copy', class='w-4 h-4') }}
                     </button>
                     <input type="hidden" id="agent-id-full" value="{{ agent.agent_id }}">
                 </div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
-                        src="{{ url_for('static', filename='monitor.png') }}" class="w-4 h-4 mr-1 inline-block" /> OS
-                    Platform</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center">
+                    {{ icon('monitor', class='w-4 h-4 mr-1') }} OS Platform
+                </div>
                 <div class="font-semibold text-gray-900 dark:text-gray-100">{{ agent.os }}</div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
-                        src="{{ url_for('static', filename='calender.png') }}" class="w-4 h-4 mr-1 inline-block" />
-                    Registered</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center">
+                    {{ icon('calendar', class='w-4 h-4 mr-1') }} Registered
+                </div>
                 <div id="registered-at" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
-                        src="{{ url_for('static', filename='seen1.png') }}" class="w-4 h-4 mr-1 inline-block" /> First
-                    Seen</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center">
+                    {{ icon('clock', class='w-4 h-4 mr-1') }} First Seen
+                </div>
                 <div id="first-seen-today" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
-                        src="{{ url_for('static', filename='seen.png') }}" class="w-4 h-4 mr-1 inline-block" /> Last
-                    Seen</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center">
+                    {{ icon('clock', class='w-4 h-4 mr-1') }} Last Seen
+                </div>
                 <div id="last-seen-today" class="font-semibold text-gray-900 dark:text-gray-100">-</div>
             </div>
             <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1"><img
-                        src="{{ url_for('static', filename='thunder.png') }}" class="w-4 h-4 mr-1 inline-block" />
-                    Current State</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center">
+                    {{ icon('bolt', class='w-4 h-4 mr-1') }} Current State
+                </div>
                 <span id="current-state"
                     class="inline-block px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full">Loading...</span>
             </div>
         </div>
     </div>
     <!-- Endpoint Availability -->
-    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4"><img
-            src="{{ url_for('static', filename='bar-chart.png') }}" class="w-6 h-6 mr-2 inline-block" /> Endpoint Availability
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
+        Endpoint Availability
     </h3>
-    <div id="availability-card" class="mb-6 rounded-xl overflow-hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm" style="display:grid;grid-template-columns:5fr 3fr;min-height:148px;">
+    <div id="availability-card" class="ea-card">
 
         <!-- Left 5/8: Productive Time Hero -->
-        <div style="padding:20px 24px;border-right:1px solid;" class="border-gray-200 dark:border-gray-700">
-            <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-3">Productive Time</div>
-            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:14px;">
-                <span id="ea-productive-time" class="text-gray-900 dark:text-gray-100" style="font-size:2rem;font-weight:700;line-height:1;">--</span>
-                <span id="ea-shift-target-label" class="text-gray-400 dark:text-gray-500" style="font-size:0.9rem;font-weight:500;">/ 8h 00m</span>
+        <div class="ea-hero-section">
+            <div class="ea-hero-title">Productive Time</div>
+            <div class="ea-time-display">
+                <span id="ea-productive-time" class="ea-time-value">--</span>
+                <!-- <span id="ea-shift-target-label" class="ea-time-target">/ 8h 00m</span> -->
             </div>
             <!-- Progress bar -->
-            <div style="height:8px;border-radius:4px;overflow:hidden;margin-bottom:10px;" class="bg-gray-100 dark:bg-gray-900">
-                <div id="ea-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#10b981,#059669);border-radius:4px;transition:width 0.6s ease;"></div>
+            <div class="ea-progress-track">
+                <div id="ea-progress-bar" class="ea-progress-fill"></div>
             </div>
-            <div id="ea-caption" class="text-xs text-gray-400 dark:text-gray-500">0% of standard shift was active.</div>
+            <!-- <div id="ea-caption" class="ea-caption">0% of standard shift was active.</div> -->
         </div>
 
         <!-- Right 3/8: Inactive Breakdown -->
-        <div style="padding:20px 24px;">
-            <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-3">Inactive Breakdown</div>
-            <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="ea-breakdown-section">
+            <!-- <div class="ea-breakdown-title" style="margin-top:10px;">Inactive Breakdown</div> -->
+            <div class="ea-hero-title">Inactive Breakdown</div>
+            <div class="ea-breakdown-list">
                 <!-- Away -->
-                <div style="display:flex;align-items:center;justify-content:space-between;">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;flex-shrink:0;display:inline-block;"></span>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">Away (Extended Absence)</span>
+                <!-- <div class="ea-breakdown-row">
+                    <div class="ea-breakdown-label">
+                        <span class="ea-breakdown-dot ea-dot-away"></span>
+                        <span>Away (Extended Absence)</span>
                     </div>
-                    <span id="ea-away-stat" class="text-xs font-medium text-gray-700 dark:text-gray-300" style="white-space:nowrap;">-- (0%)</span>
-                </div>
+                    <span id="ea-away-stat" class="ea-breakdown-val">-- (0%)</span>
+                </div> -->
                 <!-- Locked -->
-                <div style="display:flex;align-items:center;justify-content:space-between;">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <span style="width:8px;height:8px;border-radius:50%;background:#94a3b8;flex-shrink:0;display:inline-block;"></span>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">Screen Locked / Lid Closed</span>
+                <div class="ea-breakdown-row">
+                    <div class="ea-breakdown-label">
+                        <span class="ea-breakdown-dot ea-dot-locked"></span>
+                        <span>Screen Locked</span>
                     </div>
-                    <span id="ea-locked-stat" class="text-xs font-medium text-gray-700 dark:text-gray-300" style="white-space:nowrap;">-- (0%)</span>
+                    <span id="ea-locked-stat" class="ea-breakdown-val">--</span>
                 </div>
+
                 <!-- Idle -->
-                <div style="display:flex;align-items:center;justify-content:space-between;">
+                <!-- <div style="display:flex;align-items:center;justify-content:space-between;">
                     <div style="display:flex;align-items:center;gap:8px;">
                         <span style="width:8px;height:8px;border-radius:50%;background:#eab308;flex-shrink:0;display:inline-block;"></span>
                         <span class="text-xs text-gray-500 dark:text-gray-400">System Idle</span>
                     </div>
                     <span id="ea-idle-stat" class="text-xs font-medium text-gray-700 dark:text-gray-300" style="white-space:nowrap;">-- (0%)</span>
-                </div>
+                </div> -->
+                <!-- In office -->
+                <!-- <div class="ea-breakdown-row">
+                    <div class="ea-breakdown-label">
+                        <span class="ea-breakdown-dot" style="background: #08ea1b;"></span>
+                        <span>In Office</span> -->
+                <!-- </div> -->
+                <!-- <span id="ea-in-office-stat" class="ea-breakdown-val">--</span>
+                </div> -->
+                <!-- Out of office -->
+                <!-- <div class="ea-breakdown-row">
+                    <div class="ea-breakdown-label">
+                        <span class="ea-breakdown-dot" style="background: #ea4c08;"></span>
+                        <span>Out of Office</span> -->
+                <!-- </div>
+                    <span id="ea-out-office-stat" class="ea-breakdown-val">--</span>
+                </div> -->
             </div>
         </div>
 
     </div>
 
     <!-- 24h Timeline + Quick Stats -->
-    <div class="mb-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm rounded-lg p-4 flex gap-4">
+    <div class="ea-timeline-card">
         <!-- Timeline 70% -->
-        <div style="flex:7;min-width:0;">
-            <div class="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">24h Timeline — all states</div>
+        <div class="ea-timeline-pane">
+            <div class="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">24h Timeline</div>
             <div id="timeline-combined"></div>
         </div>
         <!-- Quick Stats 30% -->
-        <div style="flex:3;min-width:0;border-left:1px solid;padding-left:1rem;" class="border-gray-200 dark:border-gray-700">
-            <div class="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-3 uppercase tracking-wide">Quick Stats</div>
+        <div class="ea-quickstats-pane">
+            <div class="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-3 uppercase tracking-wide">Quick Stats
+            </div>
             <div class="flex flex-col gap-3">
                 <div class="flex items-center gap-2">
-                    <img src="{{ url_for('static', filename='app.png') }}" class="w-4 h-4 flex-shrink-0" />
+                    {{ icon('app', class='w-4 h-4 flex-shrink-0 text-blue-500') }}
                     <div>
                         <div id="quick-apps-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
                         <div class="text-xs text-gray-500 dark:text-gray-400">Apps Used</div>
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <img src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 flex-shrink-0" />
+                    {{ icon('globe', class='w-4 h-4 flex-shrink-0 text-purple-500') }}
                     <div>
-                        <div id="quick-domains-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+                        <div id="quick-domains-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--
+                        </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400">Domains Visited</div>
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <img src="{{ url_for('static', filename='session.png') }}" class="w-4 h-4 flex-shrink-0" />
+                    {{ icon('clock', class='w-4 h-4 flex-shrink-0 text-indigo-500') }}
                     <div>
-                        <div id="quick-sessions-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--</div>
+                        <div id="quick-sessions-count" class="text-xl font-bold text-gray-900 dark:text-gray-100">--
+                        </div>
                         <div class="text-xs text-gray-500 dark:text-gray-400">App Sessions</div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-        <!-- hidden stubs so JS doesn't throw on missing IDs -->
-        <div style="display:none">
-            <div id="quick-screen-time"></div>
-            <div id="fc-avail-pct"></div><div id="fc-avail-time"></div><div id="fc-avail-sub"></div>
-            <div id="fc-locked-pct"></div><div id="fc-locked-time"></div>
-            <div id="fc-away-pct"></div><div id="fc-away-time"></div><div id="fc-away-front"></div>
-            <div id="availability-frame"></div>
-        </div>
+    <!-- hidden stubs so JS doesn't throw on missing IDs -->
+    <div style="display:none">
+        <div id="quick-screen-time"></div>
+        <div id="fc-avail-pct"></div>
+        <div id="fc-avail-time"></div>
+        <div id="fc-avail-sub"></div>
+        <div id="fc-locked-pct"></div>
+        <div id="fc-locked-time"></div>
+        <div id="fc-away-pct"></div>
+        <div id="fc-away-time"></div>
+        <div id="fc-away-front"></div>
+        <div id="availability-frame"></div>
+    </div>
 
     <!-- 7-Day Chart -->
-    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4"><img
-            src="{{ url_for('static', filename='bar-chart.png') }}" class="w-6 h-6 mr-2 inline-block" /> Screen Time (Last 7 Days)</h3>
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
+        Screen Time (Last 7 Days)
+    </h3>
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
         <div class="h-80 relative">
             <canvas id="screentime-history-chart"></canvas>
@@ -341,36 +358,39 @@
         <!-- App Usage -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img
-                        src="{{ url_for('static', filename='app.png') }}" class="w-4 h-4 inline mr-2" /> Application
-                    Usage</h3>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center">
+                    Application Usage
+                </h3>
                 <span id="apps-count"
                     class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
                     apps</span>
             </div>
             <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <input type="text" id="app-search" placeholder="Search apps..."
-                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                <div class="se-search-wrapper w-full">
+                    <span class="se-search-icon" aria-hidden="true">
+                        {{ icon('search', class='w-4 h-4') }}
+                    </span>
+                    <input type="text" id="app-search" placeholder="Search apps..." class="se-search-input w-full"
+                        autocomplete="off" spellcheck="false" role="searchbox" aria-label="Search applications">
+                </div>
             </div>
-            <div class="max-h-96 overflow-y-auto">
-                <table class="w-full" id="apps-table">
-                    <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
+            <div class="se-table-container max-h-96">
+                <table class="se-table" id="apps-table">
+                    <colgroup>
+                        <col class="col-app-name">
+                        <col class="col-app-sessions">
+                        <col class="col-app-duration">
+                        <col class="col-app-pct">
+                    </colgroup>
+                    <thead>
                         <tr>
-                            <th
-                                class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Application</th>
-                            <th
-                                class="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Sessions</th>
-                            <th
-                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Duration</th>
-                            <th
-                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                %</th>
+                            <th class="col-app-name">Application</th>
+                            <th class="col-app-sessions se-align-right">Sessions</th>
+                            <th class="col-app-duration se-align-right">Duration</th>
+                            <th class="col-app-pct se-align-right">Percentage</th>
                         </tr>
                     </thead>
-                    <tbody id="apps-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                    <tbody id="apps-body">
                         <tr>
                             <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...
                             </td>
@@ -383,36 +403,39 @@
         <!-- Domain Usage -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img
-                        src="{{ url_for('static', filename='globe.png') }}" class="w-4 h-4 inline mr-2" /> Domain
-                    Usage</h3>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center">
+                    Domain Usage
+                </h3>
                 <span id="domains-count"
                     class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
                     domains</span>
             </div>
             <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <input type="text" id="domain-search" placeholder="Search domains..."
-                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                <div class="se-search-wrapper w-full">
+                    <span class="se-search-icon" aria-hidden="true">
+                        {{ icon('search', class='w-4 h-4') }}
+                    </span>
+                    <input type="text" id="domain-search" placeholder="Search domains..." class="se-search-input w-full"
+                        autocomplete="off" spellcheck="false" role="searchbox" aria-label="Search domains">
+                </div>
             </div>
-            <div class="max-h-96 overflow-y-auto">
-                <table class="w-full" id="domains-table">
-                    <thead class="bg-gray-50 dark:bg-gray-700 sticky top-0">
+            <div class="se-table-container max-h-96">
+                <table class="se-table" id="domains-table">
+                    <colgroup>
+                        <col class="col-domain-name">
+                        <col class="col-domain-sessions">
+                        <col class="col-domain-duration">
+                        <col class="col-domain-pct">
+                    </colgroup>
+                    <thead>
                         <tr>
-                            <th
-                                class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Domain</th>
-                            <th
-                                class="px-4 py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Sessions</th>
-                            <th
-                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                Duration</th>
-                            <th
-                                class="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                %</th>
+                            <th class="col-domain-name">Domain</th>
+                            <th class="col-domain-sessions se-align-right">Sessions</th>
+                            <th class="col-domain-duration se-align-right">Duration</th>
+                            <th class="col-domain-pct se-align-right">Percentage</th>
                         </tr>
                     </thead>
-                    <tbody id="domains-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                    <tbody id="domains-body">
                         <tr>
                             <td colspan="4" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...
                             </td>
@@ -428,17 +451,22 @@
 <div id="tab-web" class="tab-content hidden">
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
         <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-            <div class="flex gap-3">   <img
-                    src="{{ url_for('static', filename='globe.png') }}" class="w-6 h-6" />
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"> Browser History</h3></div>
-         
+            <div class="flex items-center gap-2">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Browser History</h3>
+            </div>
+
             <span id="visits-count"
                 class="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full">0
                 visits</span>
         </div>
         <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-            <input type="text" id="visits-search" placeholder="Search sites..."
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <div class="se-search-wrapper w-full">
+                <span class="se-search-icon" aria-hidden="true">
+                    {{ icon('search', class='w-4 h-4') }}
+                </span>
+                <input type="text" id="visits-search" placeholder="Search sites..." class="se-search-input w-full"
+                    autocomplete="off" spellcheck="false" role="searchbox" aria-label="Search sites">
+            </div>
         </div>
         <div id="visits-list" class="max-h-96 overflow-y-auto">
             <div class="p-8 text-center text-gray-500 dark:text-gray-400">Loading...</div>
@@ -450,9 +478,9 @@
 <div id="tab-inventory" class="tab-content hidden">
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
         <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100"><img
-                    src="{{ url_for('static', filename='inventory.png') }}" class="w-5 h-5 mr-2 inline-block" />
-                Installed Applications</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center">
+                Installed Applications
+            </h3>
             <div class="flex items-center gap-3">
                 <span id="inventory-count"
                     class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
@@ -464,36 +492,40 @@
             </div>
         </div>
         <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-            <input type="text" id="inventory-search" placeholder="Search applications..."
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <div class="se-search-wrapper w-full">
+                <span class="se-search-icon" aria-hidden="true">
+                    {{ icon('search', class='w-4 h-4') }}
+                </span>
+                <input type="text" id="inventory-search" placeholder="Search applications..."
+                    class="se-search-input w-full" autocomplete="off" spellcheck="false" role="searchbox"
+                    aria-label="Search installed applications">
+            </div>
         </div>
-        <div class="max-h-96 overflow-y-auto">
-            <table class="w-full table-fixed" id="inventory-table">
-                <thead class="bg-gray-300 dark:bg-gray-700 sticky top-0">
+        <div class="inventory-table-container">
+            <table class="w-full" id="inventory-table">
+                <colgroup>
+                    <col class="col-inv-name">
+                    <col class="col-inv-version">
+                    <col class="col-inv-publisher">
+                    <col class="col-inv-location">
+                    <col class="col-inv-date">
+                    <col class="col-inv-source">
+                    <col class="col-inv-action">
+                </colgroup>
+                <thead>
                     <tr>
-                        <th
-                            class="w-1/5 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Name</th>
-                        <th
-                            class="w-16 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Version</th>
-                        <th
-                            class="w-1/6 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Publisher</th>
-                        <th
-                            class="w-1/3 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Install Location</th>
-                        <th
-                            class="w-24 px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Install Date</th>
-                        <th
-                            class="w-20 px-9 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                            Source</th>
+                        <th class="col-inv-name">Name</th>
+                        <th class="col-inv-version">Version</th>
+                        <th class="col-inv-publisher">Publisher</th>
+                        <th class="col-inv-location">Install Location</th>
+                        <th class="col-inv-date">Install Date</th>
+                        <th class="col-inv-source">Source</th>
+                        <th class="col-inv-action"><span class="sr-only">Details</span></th>
                     </tr>
                 </thead>
-                <tbody id="inventory-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                <tbody id="inventory-body">
                     <tr>
-                        <td colspan="6" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...</td>
+                        <td colspan="7" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">Loading...</td>
                     </tr>
                 </tbody>
             </table>
@@ -512,7 +544,7 @@
 
         <!-- Identity Card -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">🏷️ System Identity</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">System Identity</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                     <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Hostname</div>
@@ -543,7 +575,7 @@
 
         <!-- Hardware Specs Card -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">⚙️ Hardware Specifications</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Hardware Specifications</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
                     <div class="text-xs text-blue-600 dark:text-blue-400 mb-1">CPU</div>
@@ -571,7 +603,8 @@
                     <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Battery Health</div>
                     <div class="flex items-baseline gap-2">
                         <div id="hw-battery-health" class="text-2xl font-bold text-gray-900 dark:text-gray-100">-</div>
-                        <div id="hw-battery-name" class="text-xs text-gray-500 dark:text-gray-400 truncate flex-1"></div>
+                        <div id="hw-battery-name" class="text-xs text-gray-500 dark:text-gray-400 truncate flex-1">
+                        </div>
                     </div>
                     <div class="mt-2 h-2 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
                         <div id="hw-battery-bar" class="h-2 rounded-full transition-all" style="width: 0%"></div>
@@ -582,7 +615,7 @@
 
         <!-- Network Card -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">🌐 Network</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Network</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                     <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">IP Address</div>
@@ -601,7 +634,7 @@
 
         <!-- Security Card -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">🛡️ Security</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Security</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                     <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Antivirus</div>
@@ -627,309 +660,354 @@
 
 <!-- Tab: Security Indicators -->
 <div id="tab-security" class="tab-content hidden">
-            <div id="security-loading" class="p-8 text-center text-gray-500 dark:text-gray-400">
-                <div class="flex flex-col items-center gap-2">
-                    <svg class="w-8 h-8 animate-spin text-blue-500" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
-                        </circle>
-                        <path class="opacity-75" fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                        </path>
-                    </svg>
-                    <span>Analyzing security indicators...</span>
-                </div>
-            </div>
+    <div id="security-loading" class="p-8 text-center text-gray-500 dark:text-gray-400">
+        <div class="flex flex-col items-center gap-2">
+            {{ icon('spinner', class='w-8 h-8 animate-spin text-blue-500') }}
+            <span>Analyzing security indicators...</span>
+        </div>
+    </div>
 
-            <div id="security-empty" class="hidden p-8 text-center text-gray-500 dark:text-gray-400">
-                <div class="flex flex-col items-center gap-3">
-                    <div class="text-5xl">🛡️</div>
-                    <p class="text-lg font-semibold">No security indicators found</p>
-                    <p class="text-sm">The agent hasn't reported any risk indicators for this period.</p>
-                </div>
-            </div>
+    <div id="security-empty" class="hidden p-8 text-center text-gray-500 dark:text-gray-400">
+        <div class="flex flex-col items-center gap-3">
+            {{ icon('shield', class='w-14 h-14 text-gray-400 dark:text-gray-500 mb-2') }}
+            <p class="text-lg font-semibold">No security indicators found</p>
+            <p class="text-sm">The agent hasn't reported any risk indicators for this period.</p>
+        </div>
+    </div>
 
-            <div id="security-content" class="hidden space-y-6">
-                <!-- Summary Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 flex flex-col justify-between overflow-hidden relative">
-                        <div class="absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 bg-blue-500/10 rounded-full"></div>
-                        <div>
-                            <div class="text-sm text-gray-500 dark:text-gray-400 font-medium">Security Score</div>
-                            <div id="security-score" class="text-4xl font-bold text-gray-900 dark:text-gray-100 mt-1">--
-                            </div>
-                        </div>
-                        <div class="mt-4">
-                            <div id="security-score-bar-bg"
-                                class="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                <div id="security-score-bar"
-                                    class="h-full bg-gradient-to-r from-blue-500 to-purple-600 transition-all duration-1000"
-                                    style="width: 0%"></div>
-                            </div>
-                            <div id="security-score-label" class="text-xs text-gray-500 mt-2">Overall risk assessment
-                            </div>
-                        </div>
-                    </div>
-
-                    <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                        <div class="text-sm text-gray-500 dark:text-gray-400 font-medium">Critical Issues</div>
-                        <div id="critical-count" class="text-4xl font-bold text-red-600 dark:text-red-500 mt-1">0</div>
-                        <div class="text-xs text-red-500/80 mt-2 flex items-center gap-1">
-                            <span>🚨 Immediate attention required</span>
-                        </div>
-                    </div>
-
-                    <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                        <div class="text-sm text-gray-500 dark:text-gray-400 font-medium">Total Warnings</div>
-                        <div id="warning-count" class="text-4xl font-bold text-yellow-600 dark:text-yellow-500 mt-1">0
-                        </div>
-                        <div class="text-xs text-yellow-500/80 mt-2 flex items-center gap-1">
-                            <span>⚠️ Potential risks detected</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Critical & High Priority Section -->
-                <div
-                    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                    <div
-                        class="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
-                        <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                            <span>🚨 High Priority Alerts</span>
-                        </h3>
-                        <span id="critical-badge"
-                            class="hidden px-2 py-0.5 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 text-xs font-bold rounded-full border border-red-200 dark:border-red-800 animate-pulse">ACTION
-                            REQUIRED</span>
-                    </div>
-                    <div id="critical-issues-body" class="divide-y divide-gray-100 dark:divide-gray-700">
-                        <!-- Populated by JS -->
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <!-- Network Security -->
-                    <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
-                        <div
-                            class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                            <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                                <span>🌐 Network Security</span>
-                            </h3>
-                            <span id="network-count" class="text-xs text-gray-500">0 indicators</span>
-                        </div>
-                        <div class="overflow-x-auto max-h-80">
-                            <table class="w-full text-left">
-                                <thead
-                                    class="bg-gray-50 dark:bg-gray-900/50 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0">
-                                    <tr>
-                                        <th class="px-4 py-3">Type</th>
-                                        <th class="px-4 py-3">Process/Port</th>
-                                        <th class="px-4 py-3 text-right">Risk</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="network-body" class="divide-y divide-gray-100 dark:divide-gray-700">
-                                    <!-- Populated by JS -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- Browser Extensions -->
-                    <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
-                        <div
-                            class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                            <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                                <span>🔌 Extension Risk</span>
-                            </h3>
-                            <span id="extensions-count" class="text-xs text-gray-500">0 indicators</span>
-                        </div>
-                        <div class="overflow-x-auto max-h-80">
-                            <table class="w-full text-left">
-                                <thead
-                                    class="bg-gray-50 dark:bg-gray-900/50 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0">
-                                    <tr>
-                                        <th class="px-4 py-3">Browser</th>
-                                        <th class="px-4 py-3">Extension</th>
-                                        <th class="px-4 py-3 text-right">Risk</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="extensions-body" class="divide-y divide-gray-100 dark:divide-gray-700">
-                                    <!-- Populated by JS -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <!-- Startup & Persistence -->
-                    <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
-                        <div
-                            class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                            <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                                <span>⚡ Startup & Persistence</span>
-                            </h3>
-                            <span id="persistence-count" class="text-xs text-gray-500">0 indicators</span>
-                        </div>
-                        <div class="overflow-x-auto max-h-80">
-                            <table class="w-full text-left">
-                                <thead
-                                    class="bg-gray-50 dark:bg-gray-900/50 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0">
-                                    <tr>
-                                        <th class="px-4 py-3">Type</th>
-                                        <th class="px-4 py-3">Name</th>
-                                        <th class="px-4 py-3 text-right">Risk</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="persistence-body" class="divide-y divide-gray-100 dark:divide-gray-700">
-                                    <!-- Populated by JS -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- USB & Physical Audit -->
-                    <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
-                        <div
-                            class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                            <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                                <span>📱 Physical & Login Audit</span>
-                            </h3>
-                            <span id="audit-count" class="text-xs text-gray-500">0 indicators</span>
-                        </div>
-                        <div class="overflow-x-auto max-h-80">
-                            <table class="w-full text-left">
-                                <thead
-                                    class="bg-gray-50 dark:bg-gray-900/50 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0">
-                                    <tr>
-                                        <th class="px-4 py-3">Event</th>
-                                        <th class="px-4 py-3">Details</th>
-                                        <th class="px-4 py-3 text-right">Risk</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="audit-body" class="divide-y divide-gray-100 dark:divide-gray-700">
-                                    <!-- Populated by JS -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Raw System Visibility (always visible, outside security-content) -->
+    <div id="security-content" class="hidden space-y-6">
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div
-                    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                    <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                        <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100">Raw System Visibility</h3>
-                        <span id="system-visibility-updated" class="text-xs text-gray-500">Latest snapshot: -</span>
-                    </div>
-                    <div class="p-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-center text-xs">
-                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
-                            <div class="text-gray-500">Open Ports</div>
-                            <div id="visibility-open-ports-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
-                        </div>
-                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
-                            <div class="text-gray-500">Connections</div>
-                            <div id="visibility-connections-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
-                        </div>
-                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
-                            <div class="text-gray-500">Startup Apps</div>
-                            <div id="visibility-startup-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
-                        </div>
-                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
-                            <div class="text-gray-500">Tasks</div>
-                            <div id="visibility-tasks-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
-                        </div>
-                        <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
-                            <div class="text-gray-500">Disks</div>
-                            <div id="visibility-disks-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 p-4 pt-0">
-                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Open Ports</div>
-                            <div class="overflow-x-auto max-h-64">
-                                <table class="w-full text-left text-sm">
-                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
-                                        <tr>
-                                            <th class="px-3 py-2">Port</th>
-                                            <th class="px-3 py-2">Address</th>
-                                            <th class="px-3 py-2">Process</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="visibility-ports-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Network Connections</div>
-                            <div class="overflow-x-auto max-h-64">
-                                <table class="w-full text-left text-sm">
-                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
-                                        <tr>
-                                            <th class="px-3 py-2">Remote</th>
-                                            <th class="px-3 py-2">Local</th>
-                                            <th class="px-3 py-2">Process</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="visibility-connections-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Startup Programs</div>
-                            <div class="overflow-x-auto max-h-64">
-                                <table class="w-full text-left text-sm">
-                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
-                                        <tr>
-                                            <th class="px-3 py-2">Name</th>
-                                            <th class="px-3 py-2">Command</th>
-                                            <th class="px-3 py-2">Source</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="visibility-startup-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Scheduled Tasks</div>
-                            <div class="overflow-x-auto max-h-64">
-                                <table class="w-full text-left text-sm">
-                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
-                                        <tr>
-                                            <th class="px-3 py-2">Task</th>
-                                            <th class="px-3 py-2">Path</th>
-                                            <th class="px-3 py-2">Principal</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="visibility-tasks-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden lg:col-span-2">
-                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">Disk Usage</div>
-                            <div class="overflow-x-auto max-h-64">
-                                <table class="w-full text-left text-sm">
-                                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
-                                        <tr>
-                                            <th class="px-3 py-2">Drive</th>
-                                            <th class="px-3 py-2">Volume</th>
-                                            <th class="px-3 py-2">Used %</th>
-                                            <th class="px-3 py-2">Free GB</th>
-                                            <th class="px-3 py-2">Size GB</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="visibility-disk-body" class="divide-y divide-gray-200 dark:divide-gray-600"></tbody>
-                                </table>
-                            </div>
-                        </div>
+                class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 flex flex-col justify-between overflow-hidden relative">
+                <div class="absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 bg-blue-500/10 rounded-full"></div>
+                <div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400 font-medium">Security Score</div>
+                    <div id="security-score" class="text-4xl font-bold text-gray-900 dark:text-gray-100 mt-1">--
                     </div>
                 </div>
+                <div class="mt-4">
+                    <div id="security-score-bar-bg"
+                        class="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div id="security-score-bar"
+                            class="h-full bg-gradient-to-r from-blue-500 to-purple-600 transition-all duration-1000"
+                            style="width: 0%"></div>
+                    </div>
+                    <div id="security-score-label" class="text-xs text-gray-500 mt-2">Overall risk assessment
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                <div class="text-sm text-gray-500 dark:text-gray-400 font-medium">Critical Issues</div>
+                <div id="critical-count" class="text-4xl font-bold text-red-600 dark:text-red-500 mt-1">0</div>
+                <div class="text-xs text-red-500/80 mt-2 flex items-center gap-1.5">
+                    {{ icon('warning', class='w-3.5 h-3.5 text-red-500 flex-shrink-0') }}
+                    <span>Immediate attention required</span>
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                <div class="text-sm text-gray-500 dark:text-gray-400 font-medium">Total Warnings</div>
+                <div id="warning-count" class="text-4xl font-bold text-yellow-600 dark:text-yellow-500 mt-1">0
+                </div>
+                <div class="text-xs text-yellow-500/80 mt-2 flex items-center gap-1.5">
+                    {{ icon('warning', class='w-3.5 h-3.5 text-yellow-500 flex-shrink-0') }}
+                    <span>Potential risks detected</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Critical & High Priority Section -->
+        <div
+            class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div
+                class="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
+                <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                    <span>High Priority Alerts</span>
+                </h3>
+                <span id="critical-badge"
+                    class="hidden px-2 py-0.5 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 text-xs font-bold rounded-full border border-red-200 dark:border-red-800 animate-pulse">ACTION
+                    REQUIRED</span>
+            </div>
+            <div id="critical-issues-body" class="divide-y divide-gray-100 dark:divide-gray-700">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Network Security -->
+            <div
+                class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                        <span>Network Security</span>
+                    </h3>
+                    <span id="network-count" class="text-xs text-gray-500">0 indicators</span>
+                </div>
+                <div class="se-table-container max-h-80">
+                    <table class="se-table se-table-compact" id="network-table">
+                        <colgroup>
+                            <col class="col-sec-type">
+                            <col class="col-sec-desc">
+                            <col class="col-sec-risk">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="col-sec-type">Type</th>
+                                <th class="col-sec-desc">Process/Port</th>
+                                <th class="col-sec-risk se-align-right">Risk</th>
+                            </tr>
+                        </thead>
+                        <tbody id="network-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Browser Extensions -->
+            <div
+                class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                        <span>Extension Risk</span>
+                    </h3>
+                    <span id="extensions-count" class="text-xs text-gray-500">0 indicators</span>
+                </div>
+                <div class="se-table-container max-h-80">
+                    <table class="se-table se-table-compact" id="extensions-table">
+                        <colgroup>
+                            <col class="col-sec-type">
+                            <col class="col-sec-desc">
+                            <col class="col-sec-risk">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="col-sec-type">Browser</th>
+                                <th class="col-sec-desc">Extension</th>
+                                <th class="col-sec-risk se-align-right">Risk</th>
+                            </tr>
+                        </thead>
+                        <tbody id="extensions-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Startup & Persistence -->
+            <div
+                class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                        <span>Startup & Persistence</span>
+                    </h3>
+                    <span id="persistence-count" class="text-xs text-gray-500">0 indicators</span>
+                </div>
+                <div class="se-table-container max-h-80">
+                    <table class="se-table se-table-compact" id="persistence-table">
+                        <colgroup>
+                            <col class="col-sec-type">
+                            <col class="col-sec-desc">
+                            <col class="col-sec-risk">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="col-sec-type">Type</th>
+                                <th class="col-sec-desc">Name</th>
+                                <th class="col-sec-risk se-align-right">Risk</th>
+                            </tr>
+                        </thead>
+                        <tbody id="persistence-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- USB & Physical Audit -->
+            <div
+                class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <h3 class="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                        <span>Physical & Login Audit</span>
+                    </h3>
+                    <span id="audit-count" class="text-xs text-gray-500">0 indicators</span>
+                </div>
+                <div class="se-table-container max-h-80">
+                    <table class="se-table se-table-compact" id="audit-table">
+                        <colgroup>
+                            <col class="col-sec-type">
+                            <col class="col-sec-desc">
+                            <col class="col-sec-risk">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="col-sec-type">Event</th>
+                                <th class="col-sec-desc">Details</th>
+                                <th class="col-sec-risk se-align-right">Risk</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audit-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Raw System Visibility (always visible, outside security-content) -->
+    <div
+        class="mt-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-gray-100">Raw System Visibility</h3>
+            <span id="system-visibility-updated" class="text-xs text-gray-500">Latest snapshot: -</span>
+        </div>
+        <div class="p-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-center text-xs">
+            <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                <div class="text-gray-500">Open Ports</div>
+                <div id="visibility-open-ports-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0
+                </div>
+            </div>
+            <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                <div class="text-gray-500">Connections</div>
+                <div id="visibility-connections-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0
+                </div>
+            </div>
+            <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                <div class="text-gray-500">Startup Apps</div>
+                <div id="visibility-startup-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
+            </div>
+            <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                <div class="text-gray-500">Tasks</div>
+                <div id="visibility-tasks-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
+            </div>
+            <div class="p-2 rounded bg-gray-50 dark:bg-gray-700">
+                <div class="text-gray-500">Disks</div>
+                <div id="visibility-disks-count" class="text-base font-bold text-gray-900 dark:text-gray-100">0</div>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 p-4 pt-0">
+            <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div
+                    class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Open Ports</div>
+                <div class="se-table-container-compact max-h-64">
+                    <table class="se-table se-table-compact" id="visibility-ports-table">
+                        <colgroup>
+                            <col class="col-port-num">
+                            <col class="col-port-addr">
+                            <col class="col-port-proc">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="col-port-num">Port</th>
+                                <th class="col-port-addr">Address</th>
+                                <th class="col-port-proc">Process</th>
+                            </tr>
+                        </thead>
+                        <tbody id="visibility-ports-body"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div
+                    class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Network Connections</div>
+                <div class="se-table-container-compact max-h-64">
+                    <table class="se-table se-table-compact" id="visibility-connections-table">
+                        <colgroup>
+                            <col class="col-conn-remote">
+                            <col class="col-conn-local">
+                            <col class="col-conn-proc">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="col-conn-remote">Remote</th>
+                                <th class="col-conn-local">Local</th>
+                                <th class="col-conn-proc">Process</th>
+                            </tr>
+                        </thead>
+                        <tbody id="visibility-connections-body"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div
+                    class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Startup Programs</div>
+                <div class="se-table-container-compact max-h-64">
+                    <table class="se-table se-table-compact" id="visibility-startup-table">
+                        <colgroup>
+                            <col class="col-startup-name">
+                            <col class="col-startup-cmd">
+                            <col class="col-startup-src">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="col-startup-name">Name</th>
+                                <th class="col-startup-cmd">Command</th>
+                                <th class="col-startup-src">Source</th>
+                            </tr>
+                        </thead>
+                        <tbody id="visibility-startup-body"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <div
+                    class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Scheduled Tasks</div>
+                <div class="se-table-container-compact max-h-64">
+                    <table class="se-table se-table-compact" id="visibility-tasks-table">
+                        <colgroup>
+                            <col class="col-task-name">
+                            <col class="col-task-path">
+                            <col class="col-task-prin">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="col-task-name">Task</th>
+                                <th class="col-task-path">Path</th>
+                                <th class="col-task-prin">Principal</th>
+                            </tr>
+                        </thead>
+                        <tbody id="visibility-tasks-body"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden lg:col-span-2">
+                <div
+                    class="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    Disk Usage</div>
+                <div class="se-table-container-compact max-h-64">
+                    <table class="se-table se-table-compact" id="visibility-disk-table">
+                        <colgroup>
+                            <col class="col-disk-drive">
+                            <col class="col-disk-vol">
+                            <col class="col-disk-pct">
+                            <col class="col-disk-free">
+                            <col class="col-disk-size">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="col-disk-drive">Drive</th>
+                                <th class="col-disk-vol">Volume</th>
+                                <th class="col-disk-pct se-align-right">Used %</th>
+                                <th class="col-disk-free se-align-right">Free GB</th>
+                                <th class="col-disk-size se-align-right">Size GB</th>
+                            </tr>
+                        </thead>
+                        <tbody id="visibility-disk-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Tab: Extended Inventory -->
@@ -946,26 +1024,28 @@
         <!-- CLI Tools Section -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">💻 CLI Tools</h3>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">CLI Tools</h3>
                 <span id="cli-tools-count"
                     class="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs font-medium rounded-full">0
                     tools</span>
             </div>
-            <div class="max-h-64 overflow-y-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+            <div class="se-table-container-compact max-h-64">
+                <table class="se-table se-table-compact" id="cli-tools-table">
+                    <colgroup>
+                        <col class="col-cli-name">
+                        <col class="col-cli-ver">
+                        <col class="col-cli-path">
+                        <col class="col-cli-src">
+                    </colgroup>
+                    <thead>
                         <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Name
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Version
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Path
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Source
-                            </th>
+                            <th class="col-cli-name">Name</th>
+                            <th class="col-cli-ver">Version</th>
+                            <th class="col-cli-path">Path</th>
+                            <th class="col-cli-src">Source</th>
                         </tr>
                     </thead>
-                    <tbody id="cli-tools-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                    <tbody id="cli-tools-body">
                         <tr>
                             <td colspan="4" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No CLI tools
                                 detected</td>
@@ -978,28 +1058,30 @@
         <!-- Hardware Drivers Section -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🔧 Hardware Drivers</h3>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Hardware Drivers</h3>
                 <span id="drivers-count"
                     class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full">0
                     drivers</span>
             </div>
-            <div class="max-h-64 overflow-y-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+            <div class="se-table-container-compact max-h-64">
+                <table class="se-table se-table-compact" id="drivers-table">
+                    <colgroup>
+                        <col class="col-drv-dev">
+                        <col class="col-drv-ver">
+                        <col class="col-drv-mfr">
+                        <col class="col-drv-class">
+                        <col class="col-drv-sign">
+                    </colgroup>
+                    <thead>
                         <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Device
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Driver
-                                Version</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">
-                                Manufacturer</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Class
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Signed
-                            </th>
+                            <th class="col-drv-dev">Device</th>
+                            <th class="col-drv-ver">Driver Version</th>
+                            <th class="col-drv-mfr">Manufacturer</th>
+                            <th class="col-drv-class">Class</th>
+                            <th class="col-drv-sign se-align-center">Signed</th>
                         </tr>
                     </thead>
-                    <tbody id="drivers-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                    <tbody id="drivers-body">
                         <tr>
                             <td colspan="5" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No drivers
                                 detected</td>
@@ -1012,26 +1094,28 @@
         <!-- IDE Extensions (VS Code) Section -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🧩 IDE Extensions</h3>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">IDE Extensions</h3>
                 <span id="vscode-ext-count"
                     class="px-2 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs font-medium rounded-full">0
                     extensions</span>
             </div>
-            <div class="max-h-64 overflow-y-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+            <div class="se-table-container-compact max-h-64">
+                <table class="se-table se-table-compact" id="vscode-ext-table">
+                    <colgroup>
+                        <col class="col-vsc-ext">
+                        <col class="col-vsc-pub">
+                        <col class="col-vsc-ver">
+                        <col class="col-vsc-src">
+                    </colgroup>
+                    <thead>
                         <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">
-                                Extension</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">
-                                Publisher</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Version
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Source
-                            </th>
+                            <th class="col-vsc-ext">Extension</th>
+                            <th class="col-vsc-pub">Publisher</th>
+                            <th class="col-vsc-ver">Version</th>
+                            <th class="col-vsc-src">Source</th>
                         </tr>
                     </thead>
-                    <tbody id="vscode-ext-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                    <tbody id="vscode-ext-body">
                         <tr>
                             <td colspan="4" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No
                                 extensions detected</td>
@@ -1044,26 +1128,28 @@
         <!-- Browser Extensions Section -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🌐 Browser Extensions</h3>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Browser Extensions</h3>
                 <span id="browser-ext-count"
                     class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 text-xs font-medium rounded-full">0
                     extensions</span>
             </div>
-            <div class="max-h-64 overflow-y-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+            <div class="se-table-container-compact max-h-64">
+                <table class="se-table se-table-compact" id="browser-ext-table">
+                    <colgroup>
+                        <col class="col-brw-type">
+                        <col class="col-brw-name">
+                        <col class="col-brw-ver">
+                        <col class="col-brw-status">
+                    </colgroup>
+                    <thead>
                         <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Browser
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Name
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Version
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Enabled
-                            </th>
+                            <th class="col-brw-type">Browser</th>
+                            <th class="col-brw-name">Name</th>
+                            <th class="col-brw-ver">Version</th>
+                            <th class="col-brw-status se-align-center">Enabled</th>
                         </tr>
                     </thead>
-                    <tbody id="browser-ext-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                    <tbody id="browser-ext-body">
                         <tr>
                             <td colspan="4" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No browser
                                 extensions detected</td>
@@ -1076,26 +1162,28 @@
         <!-- Application Plugins Section -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">🔌 Application Plugins</h3>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Application Plugins</h3>
                 <span id="plugins-count"
                     class="px-2 py-1 bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200 text-xs font-medium rounded-full">0
                     plugins</span>
             </div>
-            <div class="max-h-64 overflow-y-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+            <div class="se-table-container-compact max-h-64">
+                <table class="se-table se-table-compact" id="plugins-table">
+                    <colgroup>
+                        <col class="col-plg-type">
+                        <col class="col-plg-name">
+                        <col class="col-plg-host">
+                        <col class="col-plg-status">
+                    </colgroup>
+                    <thead>
                         <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Type
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Name
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Host
-                                App</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Enabled
-                            </th>
+                            <th class="col-plg-type">Type</th>
+                            <th class="col-plg-name">Name</th>
+                            <th class="col-plg-host">Host App</th>
+                            <th class="col-plg-status se-align-center">Enabled</th>
                         </tr>
                     </thead>
-                    <tbody id="plugins-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                    <tbody id="plugins-body">
                         <tr>
                             <td colspan="4" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No plugins
                                 detected</td>
@@ -1108,28 +1196,30 @@
         <!-- Portable Applications Section -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
             <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">📦 Portable Applications</h3>
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Portable Applications</h3>
                 <span id="portable-count"
                     class="px-2 py-1 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 text-xs font-medium rounded-full">0
                     apps</span>
             </div>
-            <div class="max-h-64 overflow-y-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-100 dark:bg-gray-700 sticky top-0">
+            <div class="se-table-container-compact max-h-64">
+                <table class="se-table se-table-compact" id="portable-table">
+                    <colgroup>
+                        <col class="col-prt-name">
+                        <col class="col-prt-ver">
+                        <col class="col-prt-drv">
+                        <col class="col-prt-path">
+                        <col class="col-prt-size">
+                    </colgroup>
+                    <thead>
                         <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Name
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Version
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Drive
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Path
-                            </th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300">Size
-                            </th>
+                            <th class="col-prt-name">Name</th>
+                            <th class="col-prt-ver">Version</th>
+                            <th class="col-prt-drv se-align-center">Drive</th>
+                            <th class="col-prt-path">Path</th>
+                            <th class="col-prt-size se-align-right">Size</th>
                         </tr>
                     </thead>
-                    <tbody id="portable-body" class="divide-y divide-gray-200 dark:divide-gray-600">
+                    <tbody id="portable-body">
                         <tr>
                             <td colspan="5" class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">No portable
                                 applications detected</td>
@@ -1149,34 +1239,52 @@
 </script>
 <script nonce="{{ csp_nonce() }}">
     window.USER_ICON_URL = "{{ url_for('static', filename='user-setting.png') }}";
+    window.USER_ICON_SVG = `{{ icon('user-circle', class='w-8 h-8 mr-2 inline-block text-blue-600 dark:text-blue-400') | safe }}`;
+    window.CHEVRON_DOWN_SVG = (id) => `{{ icon('chevron-down', class='w-4 h-4 transform transition-transform duration-200') | safe }}`.replace('<svg ', `<svg id="${id}" `);
 </script>
 
-<script src="{{ url_for('static', filename='js/agent_detail.js') }}"></script>
+<script src="{{ url_for('static', filename='js/agent_detail.js') }}?v=20260930_3"></script>
 <script nonce="{{ csp_nonce() }}">
-async function deleteAgent(agentId, hostname) {
-    if (!confirm(`Delete agent "${hostname}"?\n\nThis will permanently remove ALL data (screen time, apps, domains, inventory, hardware, security indicators, etc.) for this agent. This cannot be undone.`)) {
-        return;
-    }
-
-    if (!confirm(`Are you absolutely sure? This is irreversible.`)) {
-        return;
-    }
-
-    try {
-        const resp = await fetch(`/dashboard/api/agent/${encodeURIComponent(agentId)}/delete`, {
-            method: 'POST',
-            credentials: 'same-origin'
+    async function deleteAgent(agentId, hostname) {
+        const confirmed1 = await SentinelConfirm.show({
+            title: `Delete Agent "${hostname}"`,
+            message: `This will permanently remove ALL data (screen time, apps, domains, inventory, hardware, security indicators, etc.) for this agent.\n\nThis cannot be undone.`,
+            confirmText: 'Delete Agent',
+            cancelText: 'Cancel',
+            variant: 'danger',
+            icon: 'trash'
         });
-        const data = await resp.json();
-
-        if (resp.ok) {
-            window.location.href = '/dashboard/agents';
-        } else {
-            alert(`Failed to delete agent: ${data.error || 'Unknown error'}`);
+        if (!confirmed1) {
+            return;
         }
-    } catch (err) {
-        alert(`Error deleting agent: ${err.message}`);
+
+        const confirmed2 = await SentinelConfirm.show({
+            title: 'Final Confirmation',
+            message: 'Are you absolutely sure? This is irreversible.',
+            confirmText: 'Permanently Delete',
+            cancelText: 'Cancel',
+            variant: 'danger',
+            icon: 'warning'
+        });
+        if (!confirmed2) {
+            return;
+        }
+
+        try {
+            const resp = await fetch(`/dashboard/api/agent/${encodeURIComponent(agentId)}/delete`, {
+                method: 'POST',
+                credentials: 'same-origin'
+            });
+            const data = await resp.json();
+
+            if (resp.ok) {
+                window.location.href = '/dashboard/agents';
+            } else {
+                alert(`Failed to delete agent: ${data.error || 'Unknown error'}`);
+            }
+        } catch (err) {
+            alert(`Error deleting agent: ${err.message}`);
+        }
     }
-}
 </script>
 {% endblock %}

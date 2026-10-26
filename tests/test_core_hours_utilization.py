@@ -6,7 +6,7 @@ Idle, locked, away are independent loss categories.
 """
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'monitoring_tool', 'server'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
 from server_dashboard import _compute_core_hours_utilization, _fmt_duration
 
@@ -40,8 +40,8 @@ CORE = ("09:00", "17:00")  # unused by new logic but required by signature
 def test_normal_productive_day():
     r = _compute_core_hours_utilization(21600, 3600, 1800, 0, *CORE)  # 6h active
     assert r["productive_pct"] == 75   # 21600/28800
-    assert r["idle_pct"] == 12         # 3600/28800 = 12.5 -> 12 (round)
-    assert r["locked_pct"] == 6        # 1800/28800 = 6.25 -> 6
+    assert r["idle_pct"] == 67         # 3600 / (3600+1800) = 66.6% -> 67
+    assert r["locked_pct"] == 33       # 1800 / (3600+1800) = 33.3% -> 33
     assert r["away_pct"] == 0
     assert r["productive_time_str"] == "6h"
 
@@ -83,10 +83,10 @@ def test_idle_is_loss_not_productive():
     assert r["idle_pct"] == 100
 
 
-def test_loss_categories_uncapped():
-    """Loss categories can exceed 100% (e.g. locked 9h on 8h shift = 112%)."""
+def test_inactive_breakdown_capped_at_100():
+    """Inactive breakdown categories never exceed 100% of total inactive time."""
     r = _compute_core_hours_utilization(0, 0, 32400, 0, *CORE)  # 9h locked
-    assert r["locked_pct"] == 112  # 32400/28800 * 100 = 112.5 -> 112
+    assert r["locked_pct"] == 100  # 32400 / 32400 * 100 = 100
     assert r["productive_pct"] == 0
 
 
@@ -111,3 +111,16 @@ def test_none_inputs_treated_as_zero():
     r = _compute_core_hours_utilization(None, None, None, None, *CORE)
     assert r["productive_pct"] == 0
     assert r["productive_time_str"] == "0m"
+
+def test_all_percentages_never_exceed_100():
+    r = _compute_core_hours_utilization(21600, 3600, 1800, 0, *CORE)
+
+    assert 0 <= r["productive_pct"] <= 100
+    assert 0 <= r["idle_pct"] <= 100
+    assert 0 <= r["locked_pct"] <= 100
+    assert 0 <= r["away_pct"] <= 100
+
+
+if __name__ == "__main__":
+    import pytest
+    sys.exit(pytest.main(["-v", __file__]))

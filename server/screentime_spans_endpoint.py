@@ -28,7 +28,7 @@ def validate_span(span: dict, agent_id: str) -> tuple[bool, str]:
         return False, f"Duration too long: {duration}s (max 24h)"
     
     # Check 2: Valid state
-    valid_states = ['active', 'idle', 'locked']
+    valid_states = ['active', 'idle', 'locked', 'away']
     state = span.get('state')
     if state not in valid_states:
         return False, f"Invalid state: {state} (must be one of {valid_states})"

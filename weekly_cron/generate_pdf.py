@@ -8,6 +8,16 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from weasyprint import HTML
 
+# FR-007: the single canonical date presentation, shared with the
+# Flask app so cron-rendered reports match server-rendered ones.
+try:
+    from utils.datetime_format import format_date as _fmt_date
+    from utils.datetime_format import format_datetime_seconds_labelled as _fmt_datetime_seconds_tz
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'server'))
+    from utils.datetime_format import format_date as _fmt_date
+    from utils.datetime_format import format_datetime_seconds_labelled as _fmt_datetime_seconds_tz
+
 def main():
     db_url = os.environ.get('DATABASE_URL')
     if not db_url:
@@ -40,6 +50,8 @@ def main():
     # Render PDF template
     template_dir = Path(__file__).parent / 'templates' / 'reports'
     env = Environment(loader=FileSystemLoader(str(template_dir)))
+    env.filters['fmt_date'] = _fmt_date
+    env.filters['fmt_datetime_seconds_tz'] = _fmt_datetime_seconds_tz
     template = env.get_template('team_weekly_report_pdf.html')
     
     output_dir = Path(__file__).parent / 'reports' / f"{start_str}_to_{end_str}"

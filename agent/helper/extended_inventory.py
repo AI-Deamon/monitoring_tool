@@ -1119,7 +1119,7 @@ class ExtendedInventoryCollector:
         )
         
         # Exclude directories
-        $excludeDirs = @('Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', '$Recycle.Bin')
+        $excludeDirs = @('Windows', 'Program Files', 'Program Files (x86)', 'ProgramData', '$Recycle.Bin', 'AppData', 'node_modules', '.git', 'venv', '.venv')
         
         foreach ($basePath in $scanPaths) {
             if (Test-Path $basePath) {

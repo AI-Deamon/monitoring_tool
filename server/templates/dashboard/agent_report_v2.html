@@ -1,5 +1,6 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Activity Report - {{ agent_id }} - SentinelEdge{% endblock %}
+{% from "components/icons.html" import icon %}
+{% block title %}{{ display_name or agent.agent_name or agent.hostname or agent_id }} - {{ report_date or 'Report' }} - SentinelEdge{% endblock %}
 
 {% block extra_css %}
 <style nonce="{{ csp_nonce() }}">
@@ -323,36 +324,6 @@
         margin-bottom: 15px;
     }
 
-    .report-actions .btn {
-        padding: 8px 16px;
-        font-size: 13px;
-        border-radius: 6px;
-        cursor: pointer;
-        border: none;
-        font-weight: 600;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-    }
-
-    .report-actions .btn-primary {
-        background: #6366f1;
-        color: white;
-    }
-
-    .report-actions .btn-primary:hover {
-        background: #4f46e5;
-    }
-
-    .report-actions .btn-secondary {
-        background: #e5e7eb;
-        color: #374151;
-    }
-
-    .report-actions .btn-secondary:hover {
-        background: #d1d5db;
-    }
-
     /* ===== DATE PICKER ===== */
     .date-picker-container {
         display: flex;
@@ -366,6 +337,7 @@
         border: 1px solid #d1d5db;
         border-radius: 6px;
         font-size: 14px;
+        cursor: pointer;
     }
 
     /* ===== UTILITY ===== */
@@ -416,23 +388,28 @@
         <div class="date-picker-container">
             <label style="font-weight: 600;">Report Date:</label>
             <input type="date" id="report-date-input" onchange="changeReportDate()">
-            <a href="/dashboard/agent/{{ agent_id }}" class="btn btn-secondary" style="margin-left: auto;">
-                ← Back to Agent
+            <a href="/dashboard/agent/{{ agent_id }}" class="btn btn-secondary inline-flex items-center" style="margin-left: auto;">
+                {{ icon('arrow-left', class='w-4 h-4 mr-1') }} Back to Agent
             </a>
         </div>
         <div class="report-actions">
-            <button onclick="window.print()" class="btn btn-primary">
-                📄 Print / Save PDF
+            <button onclick="downloadPDFReport()" class="btn btn-secondary inline-flex items-center">
+                {{ icon('download', class='w-4 h-4 mr-1.5') }} Export PDF
             </button>
-            <button onclick="exportCSV()" class="btn btn-secondary">
-                📊 Export CSV
+            <button onclick="window.print()" class="btn btn-primary inline-flex items-center">
+                {{ icon('print', class='w-4 h-4 mr-1.5') }} Print / Save PDF
+            </button>
+            <button onclick="exportCSV()" class="btn btn-secondary inline-flex items-center">
+                {{ icon('download', class='w-4 h-4 mr-1.5') }} Export CSV
             </button>
         </div>
     </div>
 
     <!-- ===== REPORT HEADER ===== -->
     <div class="report-header">
-        <h1 class="report-title">📊 Employee Activity Report</h1>
+        <h1 class="report-title flex items-center gap-2">
+            {{ icon('report', class='w-6 h-6 text-blue-600') }} Employee Activity Report
+        </h1>
         <p class="report-date" id="report-date-display">Loading...</p>
         <div class="agent-badge">
             <span class="status-dot" id="status-indicator"></span>
@@ -482,7 +459,9 @@
 
         <!-- ===== TIME BREAKDOWN BAR ===== -->
         <div class="time-bar-container">
-            <h2 class="section-header">⏱️ Time Distribution</h2>
+            <h2 class="section-header flex items-center gap-2">
+                {{ icon('clock', class='w-5 h-5 text-blue-600') }} Time Distribution
+            </h2>
             <div class="time-bar" id="time-bar"></div>
             <div class="time-legend">
                 <div class="legend-item">
@@ -501,7 +480,9 @@
         </div>
 
         <!-- ===== TOP APPLICATIONS ===== -->
-        <h2 class="section-header">📱 Top Applications</h2>
+        <h2 class="section-header flex items-center gap-2">
+            {{ icon('app', class='w-5 h-5 text-blue-600') }} Top Applications
+        </h2>
         <table class="report-data-table">
             <thead>
                 <tr>
@@ -520,7 +501,9 @@
         </table>
 
         <!-- ===== TOP WEBSITES ===== -->
-        <h2 class="section-header">🌐 Top Websites</h2>
+        <h2 class="section-header flex items-center gap-2">
+            {{ icon('globe', class='w-5 h-5 text-blue-600') }} Top Websites
+        </h2>
         <table class="report-data-table">
             <thead>
                 <tr>
@@ -538,7 +521,9 @@
         </table>
 
         <!-- ===== ACTIVITY TIMELINE ===== -->
-        <h2 class="section-header"><img src="{{ url_for('static', filename='report.png') }}" class="w-5 h-5 inline mr-2" /> Activity Timeline (24 Hours)</h2>
+        <h2 class="section-header flex items-center gap-2">
+            {{ icon('clock', class='w-5 h-5 text-blue-600') }} Activity Timeline (24 Hours)
+        </h2>
         <div class="timeline-container">
             <div class="timeline-bars" id="timeline-bars"></div>
             <div class="timeline-labels">
@@ -555,7 +540,7 @@
             <p><strong>SentinelEdge</strong> - Employee Monitoring & Analytics Platform</p>
             <p>This report contains sensitive employee activity data. Distribution without authorization is prohibited.
             </p>
-            <p>© 2025 SentinelEdge. All rights reserved. | All times shown in IST (UTC+5:30)</p>
+            <p>© 2026 SentinelEdge. All rights reserved. | All times shown in IST (UTC+5:30)</p>
         </div>
 
     </div>
@@ -597,6 +582,34 @@
         window.location.assign(`/dashboard/agent/${agentId}/report-v2?date=${newDate}`);
     }
 
+    let currentExportFilename = '';
+
+    function sanitizeIdentityClient(ident) {
+        return (ident || 'agent').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^[-_]+|[-_]+$/g, '') || 'agent';
+    }
+
+    function getExportTimestamp() {
+        return new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    }
+
+    function generateShortId() {
+        return Math.random().toString(16).substring(2, 8);
+    }
+
+    function updateReportTitleAndFilename(ident, dateStr) {
+        const safeId = sanitizeIdentityClient(ident);
+        const ts = getExportTimestamp();
+        const eid = generateShortId();
+        currentExportFilename = `${safeId}_daily_${dateStr}_generated-${ts}_${eid}`;
+        document.title = `${currentExportFilename} - SentinelEdge`;
+    }
+
+    function downloadPDFReport() {
+        const dateVal = safeDateParam(document.getElementById('report-date-input').value);
+        const agentId = safeAgentId(AGENT_ID);
+        window.location.href = `/dashboard/agent/${agentId}/report/export?date=${dateVal}&format=pdf`;
+    }
+
     // ===== LOAD REPORT DATA =====
     async function loadReport() {
         try {
@@ -607,6 +620,8 @@
             console.log('📊 Report data loaded:', data);
 
             reportData = data;
+            const agentIdent = reportData?.agent?.agent_name || reportData?.agent?.hostname || reportData?.agent?.username || AGENT_ID;
+            updateReportTitleAndFilename(agentIdent, reportDate);
             renderReport(data);
 
         } catch (error) {
@@ -867,7 +882,8 @@
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.setAttribute('href', url);
-        link.setAttribute('download', `report_${data.agent?.hostname || AGENT_ID}_${data.date || reportDate}.csv`);
+        const csvFilename = currentExportFilename ? `${currentExportFilename}.csv` : `report_${data.agent?.hostname || AGENT_ID}_${data.date || reportDate}.csv`;
+        link.setAttribute('download', csvFilename);
         link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();

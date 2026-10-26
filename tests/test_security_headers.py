@@ -49,5 +49,17 @@ class TestSecurityHeaders(unittest.TestCase):
         self.assertNotIn("'unsafe-inline'", script_src)
 
 
+    def test_auth_routes_have_no_store(self):
+        for path in ('/auth/login', '/auth/forgot-password', '/auth/reset-password'):
+            h = self._resp_headers(path=path)
+            self.assertEqual(h.get('Cache-Control'), 'no-store, no-cache, must-revalidate, private')
+            self.assertEqual(h.get('Pragma'), 'no-cache')
+            self.assertEqual(h.get('Expires'), '0')
+
+    def test_static_routes_do_not_have_no_store(self):
+        h = self._resp_headers(path='/static/css/tailwind.css')
+        self.assertNotIn('no-store', h.get('Cache-Control', ''))
+
+
 if __name__ == "__main__":
     unittest.main()

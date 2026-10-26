@@ -791,13 +791,17 @@ def _fix_stale_next_runs():
     from server_reports import _calc_next_run
 
     rows = db.session.execute(text(
-        "SELECT id, frequency, day_of_week, day_of_month, send_hour "
+        "SELECT id, frequency, day_of_week, day_of_month, send_hour, next_run "
         "FROM report_schedules WHERE enabled = true"
     )).fetchall()
 
     for row in rows:
         s = dict(row._mapping)
-        next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9))
+        send_min = s['next_run'].minute if s.get('next_run') else 0
+        try:
+            next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9), send_minute=send_min)
+        except TypeError:
+            next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9))
         db.session.execute(text(
             "UPDATE report_schedules SET next_run = :nr WHERE id = :id"
         ), {'nr': next_run, 'id': s['id']})
@@ -816,7 +820,7 @@ def run_scheduled_reports():
     try:
         due = db.session.execute(text("""
             SELECT id, report_type, scope, agent_id, recipients,
-                   frequency, day_of_week, day_of_month, send_hour,
+                   frequency, day_of_week, day_of_month, send_hour, next_run,
                    auto_email, include_pdf
             FROM report_schedules
             WHERE enabled = true AND next_run <= NOW()
@@ -836,7 +840,11 @@ def run_scheduled_reports():
                            start_date, end_date, auto_email=bool(s['auto_email']), recipients=recipients)
 
             from server_reports import _calc_next_run
-            next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9))
+            send_min = s['next_run'].minute if s.get('next_run') else 0
+            try:
+                next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9), send_minute=send_min)
+            except TypeError:
+                next_run = _calc_next_run(s['frequency'], s.get('day_of_week'), s.get('day_of_month'), s.get('send_hour', 9))
             db.session.execute(text(
                 "UPDATE report_schedules SET last_run=NOW(), next_run=:nr WHERE id=:id"
             ), {'nr': next_run, 'id': s['id']})

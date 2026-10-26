@@ -1,6 +1,251 @@
 {% extends "dashboard/base.html" %}
+{% from "components/icons.html" import icon %}
 
-{% block title %}Agent Report - {{ agent_id }} - SentinelEdge{% endblock %}
+{% block title %}{{ display_name or agent.agent_name or agent.hostname or agent_id }} - {{ report_date or 'Report' }} - SentinelEdge{% endblock %}
+
+{% block extra_head %}
+<style nonce="{{ csp_nonce() }}">
+  .donut-legend {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    margin-top: 0.75rem;
+    white-space: nowrap;
+  }
+  .donut-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    cursor: pointer;
+    user-select: none;
+    transition: opacity 0.15s ease;
+  }
+  .donut-legend-marker {
+    width: 10px;
+    height: 10px;
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .donut-legend-label {
+    font-size: 0.75rem;
+    line-height: 1;
+    font-weight: 500;
+  }
+  @media print {
+    .donut-legend {
+      display: flex !important;
+      flex-direction: row !important;
+      justify-content: center !important;
+      align-items: center !important;
+      gap: 1.25rem !important;
+      margin-top: 0.5rem !important;
+      white-space: nowrap !important;
+    }
+    .donut-legend-item {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 0.375rem !important;
+    }
+    .donut-legend-marker {
+      width: 10px !important;
+      height: 10px !important;
+      min-width: 10px !important;
+      min-height: 10px !important;
+      border-radius: 50% !important;
+      display: inline-block !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .donut-legend-label {
+      color: #374151 !important;
+      font-size: 0.75rem !important;
+      line-height: 1 !important;
+    }
+  }
+
+  /* External HTML Chart Tooltip */
+  #chartjs-external-tooltip {
+    position: fixed;
+    z-index: 10000;
+    pointer-events: none;
+    opacity: 0;
+    background: rgba(17, 24, 39, 0.95);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #f9fafb;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0.5rem;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.75rem;
+    line-height: 1.25;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+    transition: opacity 0.12s ease;
+    min-width: 180px;
+    max-width: 280px;
+  }
+  #chartjs-external-tooltip .tooltip-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    padding-bottom: 0.375rem;
+    margin-bottom: 0.375rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  #chartjs-external-tooltip .tooltip-color-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  #chartjs-external-tooltip .tooltip-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #ffffff;
+  }
+  #chartjs-external-tooltip .tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.125rem 0;
+  }
+  #chartjs-external-tooltip .tooltip-label {
+    color: #9ca3af;
+  }
+  #chartjs-external-tooltip .tooltip-val {
+    font-family: var(--font-mono, monospace);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    color: #f3f4f6;
+  }
+
+  /* Usage Data Tables */
+  .usage-table-wrapper {
+    width: 100%;
+    overflow: hidden;
+  }
+  .usage-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+    line-height: 1.25rem;
+  }
+  .usage-table th {
+    padding: 0.5rem 0.5rem;
+    font-weight: 600;
+    letter-spacing: 0.025em;
+    border-bottom: 1px solid #e5e7eb;
+    user-select: none;
+    box-sizing: border-box;
+  }
+  .dark .usage-table th {
+    border-bottom-color: rgba(75, 85, 99, 0.6);
+  }
+  .usage-table td {
+    padding: 0.375rem 0.5rem;
+    vertical-align: middle;
+    box-sizing: border-box;
+  }
+  .usage-table tbody tr {
+    border-bottom: 1px solid #f3f4f6;
+    transition: background-color 0.15s ease;
+  }
+  .dark .usage-table tbody tr {
+    border-bottom-color: rgba(55, 65, 81, 0.4);
+  }
+  .usage-table tbody tr:last-child {
+    border-bottom: none;
+  }
+  .usage-table tbody tr:hover {
+    background-color: rgba(156, 163, 175, 0.08);
+  }
+  .dark .usage-table tbody tr:hover {
+    background-color: rgba(156, 163, 175, 0.06);
+  }
+  .usage-color-dot {
+    width: 8px;
+    height: 8px;
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  @media print {
+    #chartjs-external-tooltip {
+      display: none !important;
+    }
+    .usage-charts-container {
+      display: grid !important;
+      grid-template-columns: 1fr 1fr !important;
+      gap: 1.5rem !important;
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+    .usage-card {
+      border: 1px solid #e5e7eb !important;
+      background: #ffffff !important;
+      padding: 1rem !important;
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+      min-width: 0 !important;
+    }
+    .usage-card h3 {
+      font-size: 1rem !important;
+      color: #111827 !important;
+      margin-bottom: 0.75rem !important;
+    }
+    .usage-chart-wrapper {
+      height: 230px !important;
+      max-width: 250px !important;
+      margin: 0 auto !important;
+    }
+    .usage-table {
+      table-layout: auto !important;
+    }
+    .usage-table th,
+    .usage-table td {
+      width: auto !important;
+      font-size: 0.6rem !important;
+      padding: 0.2rem 0.25rem !important;
+    }
+    .usage-table th {
+      color: #374151 !important;
+      border-bottom: 1px solid #d1d5db !important;
+      white-space: nowrap !important;
+    }
+    .usage-table td {
+      border-bottom: 1px solid #f3f4f6 !important;
+      color: #1f2937 !important;
+    }
+    .usage-table td .truncate,
+    .usage-table td .usage-cat-name {
+      color: #111827 !important;
+      display: inline-block !important;
+    }
+    .usage-color-dot {
+      width: 8px !important;
+      height: 8px !important;
+      min-width: 8px !important;
+      min-height: 8px !important;
+      border-radius: 50% !important;
+      display: inline-block !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+  }
+</style>
+{% endblock %}
 {% block content %}
 
 <!-- Page Header -->
@@ -10,14 +255,11 @@
     <div>
       <a href="{{ url_for('dashboard.dashboard_home') }}"
         class="inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors no-print">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path d="M19 12H5m7 7l-7-7 7-7" />
-        </svg>
+        {{ icon('arrow-left', class='w-5 h-5') }}
         Back to Dashboard
       </a>
 
       <h1 class="mt-3 text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100 flex items-center gap-3">
-        <img src="{{ url_for('static', filename='report.png') }}" class="w-7 h-7" />
         Agent Activity Report
       </h1>
       <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -30,13 +272,21 @@
       <input type="date" id="report-date" onchange="changeDate()"
         class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
 
+      <!-- <button onclick="downloadPDFReport()"
+        class="btn btn-secondary inline-flex items-center gap-1.5" title="Download report PDF">
+        {{ icon('download', class='w-4 h-4') }}
+        Export PDF
+      </button> -->
+
       <button onclick="printReport()"
-        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-primary-600 rounded-lg shadow hover:bg-primary-700 transition-colors">
-        Print / PDF
+        class="btn btn-primary">
+        {{ icon('print', class='w-4 h-4') }}
+        Print PDF
       </button>
 
       <button onclick="exportAllCSV()"
-        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-primary-700 dark:text-primary-300 bg-primary-100 dark:bg-primary-900 rounded-lg hover:bg-primary-200 dark:hover:bg-primary-800 transition-colors">
+        class="btn btn-secondary">
+        {{ icon('download', class='w-4 h-4') }}
         Export CSV
       </button>
     </div>
@@ -53,7 +303,7 @@
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
 
       <div class="flex items-center gap-4">
-        <img src="{{ url_for('static', filename='report.png') }}" class="w-12 h-12" />
+        {{ icon('report', class='w-12 h-12 text-primary-600') }}
         <div>
 
           <p class="text-lg text-gray-500 dark:text-white font-extrabold">Employee Activity Report</p>
@@ -63,8 +313,9 @@
       <div class="text-sm text-gray-600 dark:text-gray-300">
         <div id="report-date-display" class="font-semibold text-gray-900 dark:text-gray-100">Loading...</div>
         <div>Generated: <span id="report-generated-time"></span></div>
-        <div class="text-xs text-gray-400 dark:text-gray-500 mt-1"><img
-            src="{{ url_for('static', filename='clock.png') }}" class="w-4 h-4 inline mr-1" /> IST (UTC+5:30)</div>
+        <div class="text-xs text-gray-400 dark:text-gray-500 mt-1 flex items-center">
+          {{ icon('clock', class='w-4 h-4 inline mr-1') }} IST (UTC+5:30)
+        </div>
       </div>
     </div>
   </div>
@@ -74,37 +325,43 @@
 
     <!-- Executive Summary -->
     <section>
-      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6"><img
-          src="{{ url_for('static', filename='bar-chart.png') }}" class="w-4 h-4 inline mr-1" /> Executive Summary</h3>
+      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6 flex items-center">
+        {{ icon('chart', class='w-5 h-5 inline mr-2 text-blue-600') }} Executive Summary
+      </h3>
 
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
         <div
           class="dark:bg-gray-700 bg-gradient-to-br   border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
-          <div class="text-2xl mb-1"><img src="{{ url_for('static', filename='clock.png') }}"
-              class="w-4 h-4 inline mr-1" /></div>
+          <div class="text-2xl mb-1">
+            {{ icon('clock', class='w-6 h-6 inline text-blue-500') }}
+          </div>
           <div id="exec-screen-time" class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</div>
           <div class="text-sm text-gray-500 dark:text-gray-400">Total Screen Time</div>
         </div>
 
         <div
           class="bg-gradient-to-br from-emerald-50 dark:from-emerald-900/20 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
-          <div class="text-2xl mb-1">📱</div>
+          <div class="text-2xl mb-1">
+            {{ icon('app', class='w-6 h-6 inline text-emerald-500') }}
+          </div>
           <div id="exec-apps-count" class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</div>
           <div class="text-sm text-gray-500 dark:text-gray-400">Applications Used</div>
         </div>
 
         <div
           class="bg-gradient-to-br from-sky-50 dark:from-sky-900/20 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
-          <div class="text-2xl mb-1"><img src="{{ url_for('static', filename='globe.png') }}"
-              class="w-4 h-4 inline mr-1" /></div>
+          <div class="text-2xl mb-1">
+            {{ icon('globe', class='w-6 h-6 inline text-sky-500') }}
+          </div>
           <div id="exec-domains-count" class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</div>
           <div class="text-sm text-gray-500 dark:text-gray-400">Domains Visited</div>
         </div>
 
         <div
           class="bg-gradient-to-br from-purple-50 dark:from-purple-900/20 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 text-center">
-          <div class="text-2xl mb-1"><img src="{{ url_for('static', filename='bar-chart.png') }}"
-              class="w-4 h-4 inline mr-1" /></div>
+          <div class="text-2xl mb-1">
+            {{ icon('chart', class='w-6 h-6 inline text-purple-500') }}
+          </div>
           <div id="exec-productivity" class="text-2xl font-bold text-gray-900 dark:text-gray-100">--</div>
           <div class="text-sm text-gray-500 dark:text-gray-400">Productivity Score</div>
         </div>
@@ -113,7 +370,9 @@
 
     <!-- Agent Info -->
     <section>
-      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">👤 Agent Information</h3>
+      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6 flex items-center">
+        {{ icon('user', class='w-5 h-5 inline mr-2 text-primary-500') }} Agent Information
+      </h3>
 
       <div class="grid grid-cols-2 md:grid-cols-3 gap-6 text-sm">
         <div class="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700">
@@ -145,7 +404,9 @@
 
     <!-- Screen Time -->
     <section>
-      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">⏱️ Screen Time Breakdown</h3>
+      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6 flex items-center">
+        {{ icon('clock', class='w-5 h-5 inline mr-2 text-primary-500') }} Screen Time Breakdown
+      </h3>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
@@ -176,8 +437,9 @@
 
             <div
               class="bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl p-5 text-center">
-              <div class="text-lg"><img src="{{ url_for('static', filename='bar-chart.png') }}"
-                  class="w-4 h-4 inline mr-1" /> Total</div>
+              <div class="text-lg">
+                {{ icon('chart', class='w-4 h-4 inline mr-1') }} Total
+              </div>
               <div id="r-total-time" class="text-xl font-bold mt-1 text-gray-900 dark:text-gray-100"></div>
             </div>
 
@@ -185,9 +447,24 @@
         </div>
 
         <!-- RIGHT : PIE CHART -->
-        <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl  flex items-center justify-center">
-          <div class="relative h-56 w-full max-w-xs">
+        <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl p-5 flex flex-col items-center justify-center">
+          <div class="relative w-full max-w-xs flex items-center justify-center" style="height: 180px;">
             <canvas id="screentime-pie-chart" class="absolute inset-0"></canvas>
+          </div>
+          <!-- Donut Chart Legend -->
+          <div id="screentime-legend" class="donut-legend">
+            <div class="donut-legend-item" data-index="0">
+              <span class="donut-legend-marker" style="background-color: #10B981;"></span>
+              <span class="donut-legend-label text-gray-700 dark:text-gray-300">Active</span>
+            </div>
+            <div class="donut-legend-item" data-index="1">
+              <span class="donut-legend-marker" style="background-color: #F59E0B;"></span>
+              <span class="donut-legend-label text-gray-700 dark:text-gray-300">Idle</span>
+            </div>
+            <div class="donut-legend-item" data-index="2">
+              <span class="donut-legend-marker" style="background-color: #EF4444;"></span>
+              <span class="donut-legend-label text-gray-700 dark:text-gray-300">Locked</span>
+            </div>
           </div>
         </div>
 
@@ -195,70 +472,50 @@
 
     </section>
 
-    <!-- Application Usage -->
-    <section>
-      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">📱 Application Usage</h3>
+    <!-- Application & Domain Usage (Side-by-Side Polar-Area Charts & Data Tables) -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 usage-charts-container">
 
-      <div class="grid lg:grid-cols-2 gap-8">
-        <div class="border border-gray-200 dark:border-gray-700 rounded-xl p-6 bg-white dark:bg-gray-700">
-          <canvas id="apps-bar-chart" height="260"></canvas>
+      <!-- Application Usage Card -->
+      <section class="usage-card border border-gray-200 dark:border-gray-700 rounded-xl p-6 bg-white dark:bg-gray-700 flex flex-col items-center">
+        <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6 w-full text-left">
+          Application Usage
+        </h3>
+
+        <!-- Polar-Area Chart Canvas -->
+        <div class="relative w-full flex items-center justify-center usage-chart-wrapper" style="height: 280px; max-width: 300px;">
+          <canvas id="apps-polar-chart"></canvas>
         </div>
 
-        <div class="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-white dark:bg-gray-700">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-100 dark:bg-gray-600">
-              <tr>
-                <th class="px-4 py-3 text-left text-gray-900 dark:text-gray-100">#</th>
-                <th class="px-4 py-3 text-left text-gray-900 dark:text-gray-100">Application</th>
-                <th class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">Duration</th>
-                <th class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">Sessions</th>
-                <th class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">%</th>
-              </tr>
-            </thead>
-            <tbody id="apps-tbody" class="divide-y divide-gray-200 dark:divide-gray-600">
-              <tr>
-                <td colspan="5" class="py-6 text-center text-gray-400 dark:text-gray-500">Loading...</td>
-              </tr>
-            </tbody>
-          </table>
+        <!-- Clean Data Table Container -->
+        <div id="apps-table-container" class="w-full mt-6">
+          <div class="text-xs text-gray-400 dark:text-gray-500 text-center py-4">Loading application usage...</div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- Domain Usage -->
-    <section>
-      <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">🌐 Domain Usage</h3>
+      <!-- Domain Usage Card -->
+      <section class="usage-card border border-gray-200 dark:border-gray-700 rounded-xl p-6 bg-white dark:bg-gray-700 flex flex-col items-center">
+        <h3 class="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6 w-full text-left">
+          Domain Usage
+        </h3>
 
-      <div class="grid lg:grid-cols-2 gap-8">
-        <div class="border border-gray-200 dark:border-gray-700 rounded-xl p-6 bg-white dark:bg-gray-700">
-          <canvas id="domains-bar-chart" height="260"></canvas>
+        <!-- Polar-Area Chart Canvas -->
+        <div class="relative w-full flex items-center justify-center usage-chart-wrapper" style="height: 280px; max-width: 300px;">
+          <canvas id="domains-polar-chart"></canvas>
         </div>
 
-        <div class="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-white dark:bg-gray-700">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-100 dark:bg-gray-600">
-              <tr>
-                <th class="px-4 py-3 text-left text-gray-900 dark:text-gray-100">#</th>
-                <th class="px-4 py-3 text-left text-gray-900 dark:text-gray-100">Domain</th>
-                <th class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">Duration</th>
-                <th class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">Sessions</th>
-              </tr>
-            </thead>
-            <tbody id="domains-tbody" class="divide-y divide-gray-200 dark:divide-gray-600">
-              <tr>
-                <td colspan="4" class="py-6 text-center text-gray-400 dark:text-gray-500">Loading...</td>
-              </tr>
-            </tbody>
-          </table>
+        <!-- Clean Data Table Container -->
+        <div id="domains-table-container" class="w-full mt-6">
+          <div class="text-xs text-gray-400 dark:text-gray-500 text-center py-4">Loading domain usage...</div>
         </div>
-      </div>
-    </section>
+      </section>
+
+    </div>
 
     <!-- Insights Box -->
     <div id="insights-box"
       class="hidden bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-6 rounded-lg">
       <h4 class="text-sm font-semibold text-yellow-800 dark:text-yellow-200 mb-3 flex items-center gap-2">
-        💡 Key Insights
+        {{ icon('bolt', class='w-4 h-4 inline text-yellow-500') }} Key Insights
       </h4>
       <ul id="insights-list" class="text-sm text-yellow-700 dark:text-yellow-300 space-y-1 ml-4 list-disc">
       </ul>
@@ -292,6 +549,10 @@
 <script nonce="{{ csp_nonce() }}">
   const AGENT_ID = "{{ agent_id }}";
   let reportData = null;
+  let screentimeChart = null;
+  let appsPolarChart = null;
+  let domainsPolarChart = null;
+  let isPrintingActive = false;
 
   document.addEventListener('DOMContentLoaded', () => {
     // Set date picker to selected date
@@ -307,6 +568,34 @@
     const date = safeDateParam(document.getElementById('report-date').value);
     const agentId = safeAgentId(AGENT_ID);
     window.location.assign(`/dashboard/agent/${agentId}/report?date=${date}`);
+  }
+
+  let currentExportFilename = '';
+
+  function sanitizeIdentityClient(ident) {
+    return (ident || 'agent').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^[-_]+|[-_]+$/g, '') || 'agent';
+  }
+
+  function getExportTimestamp() {
+    return new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  }
+
+  function generateShortId() {
+    return Math.random().toString(16).substring(2, 8);
+  }
+
+  function updateReportTitleAndFilename(ident, dateStr) {
+    const safeId = sanitizeIdentityClient(ident);
+    const ts = getExportTimestamp();
+    const eid = generateShortId();
+    currentExportFilename = `${safeId}_daily_${dateStr}_generated-${ts}_${eid}`;
+    document.title = `${currentExportFilename} - SentinelEdge`;
+  }
+
+  function downloadPDFReport() {
+    const dateVal = safeDateParam(document.getElementById('report-date').value);
+    const agentId = safeAgentId(AGENT_ID);
+    window.location.href = `/dashboard/agent/${agentId}/report/export?date=${dateVal}&format=pdf`;
   }
 
   async function loadReport(dateStr) {
@@ -332,6 +621,9 @@
       return;
     }
     reportData = data;
+
+    const agentIdent = reportData?.agent?.agent_name || reportData?.agent?.hostname || reportData?.agent?.username || AGENT_ID;
+    updateReportTitleAndFilename(agentIdent, dateStr);
 
     // Render all sections
     renderExecutiveSummary(data);
@@ -411,21 +703,34 @@
     // Pie Chart
     const ctx = document.getElementById('screentime-pie-chart');
     if (ctx) {
-      new Chart(ctx, {
+      if (screentimeChart) {
+        screentimeChart.destroy();
+      }
+      screentimeChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
           labels: ['Active', 'Idle', 'Locked'],
           datasets: [{
             data: [activeSeconds, idleSeconds, lockedSeconds],
-            backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+            backgroundColor: ['#10B981', '#F59E0B', '#EF4444'],
             borderWidth: 0
           }]
         },
         options: {
           responsive: true,
-          maintainAspectRatio: true,
+          maintainAspectRatio: false,
           plugins: {
-            legend: { position: 'bottom' },
+            legend: {
+              display: false,
+              position: 'bottom',
+              labels: {
+                usePointStyle: true,
+                pointStyle: 'circle',
+                boxWidth: 10,
+                boxHeight: 10,
+                padding: 16
+              }
+            },
             tooltip: {
               callbacks: {
                 label: (ctx) => ctx.label + ': ' + formatTime(ctx.raw)
@@ -434,139 +739,553 @@
           }
         }
       });
+      bindDonutLegend(screentimeChart);
     }
+  }
+
+  function bindDonutLegend(chart) {
+    const legendItems = document.querySelectorAll('.donut-legend-item');
+    legendItems.forEach((item) => {
+      item.style.opacity = '1';
+      item.style.textDecoration = 'none';
+      if (!item.dataset.bound) {
+        item.dataset.bound = 'true';
+        item.addEventListener('click', () => {
+          const idx = parseInt(item.getAttribute('data-index'), 10);
+          if (chart && !isNaN(idx)) {
+            chart.toggleDataVisibility(idx);
+            chart.update();
+            const isVisible = chart.getDataVisibility(idx);
+            item.style.opacity = isVisible ? '1' : '0.4';
+            item.style.textDecoration = isVisible ? 'none' : 'line-through';
+          }
+        });
+      }
+    });
+  }
+
+  // 10-category Indigo/Violet Palette for Application Usage
+  // Coordinated distinct shades including recommended #6366F1, #818CF8, #A5B4FC, #4F46E5
+  const APP_PALETTE = [
+    '#4F46E5', // Indigo 600 - rich deep indigo
+    '#6366F1', // Indigo 500 - vibrant signature indigo
+    '#7C3AED', // Violet 600 - vivid purple-violet
+    '#818CF8', // Indigo 400 - bright indigo
+    '#8B5CF6', // Violet 500 - vibrant violet
+    '#A5B4FC', // Indigo 300 - soft indigo
+    '#A78BFA', // Violet 400 - light violet
+    '#C084FC', // Purple 400 - lavender violet
+    '#C7D2FE', // Indigo 200 - pale indigo
+    '#DDD6FE'  // Violet 200 - soft lilac
+  ];
+
+  // 10-category Green/Teal Palette for Domain Usage
+  // Coordinated distinct shades including recommended #059669, #10B981, #34D399, #047857
+  const DOMAIN_PALETTE = [
+    '#047857', // Emerald 700 - deep emerald
+    '#059669', // Emerald 600 - rich emerald
+    '#0D9488', // Teal 600 - rich deep teal
+    '#10B981', // Emerald 500 - vibrant signature green
+    '#14B8A6', // Teal 500 - vibrant teal
+    '#34D399', // Emerald 400 - bright mint
+    '#2DD4BF', // Teal 400 - bright aqua teal
+    '#6EE7B7', // Emerald 300 - soft mint
+    '#5EEAD4', // Teal 300 - soft aqua
+    '#A7F3D0'  // Emerald 200 - light pale mint
+  ];
+
+  /**
+   * Reusable Chart.js plugin to draw a clean, centered circular label
+   * inside the polar-area chart.
+   * First line: "TOP 10" (prominent, bold)
+   * Second line: "APPS" or "DOMAINS"
+   */
+  const polarCenterLabelPlugin = {
+    id: 'polarCenterLabel',
+    afterDraw(chart, args, options) {
+      if (!options || !options.line1) return;
+      const { ctx } = chart;
+      const rScale = chart.scales.r;
+      if (!rScale) return;
+
+      const centerX = rScale.xCenter;
+      const centerY = rScale.yCenter;
+      const drawingArea = rScale.drawingArea || 100;
+
+      // Base radius matches value 0 baseline ring, clamped cleanly
+      let radius = typeof rScale.getDistanceFromCenterForValue === 'function'
+        ? rScale.getDistanceFromCenterForValue(0)
+        : Math.round(drawingArea * 0.28);
+      radius = Math.min(Math.max(radius, 28), 44);
+
+      const isDark = document.documentElement.classList.contains('dark') && !isPrintingActive;
+
+      ctx.save();
+
+      // Subtle shadow for layer elevation above sectors
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 2;
+
+      // Center circle background
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.fillStyle = isDark ? '#1F2937' : '#FFFFFF';
+      ctx.fill();
+
+      // Clear shadow before drawing stroke and text
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+
+      // Subtle border ring
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.10)';
+      ctx.stroke();
+
+      // High-contrast typography
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Line 1: "TOP 10" (slightly more prominent)
+      const font1Size = Math.max(9, Math.round(radius * 0.36));
+      ctx.font = `800 ${font1Size}px 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+      ctx.fillStyle = isDark ? '#F9FAFB' : '#111827';
+      ctx.fillText(options.line1, centerX, centerY - (radius * 0.22));
+
+      // Line 2: "APPS" / "DOMAINS"
+      const font2Size = Math.max(8, Math.round(radius * 0.28));
+      ctx.font = `700 ${font2Size}px 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+      ctx.fillStyle = isDark ? '#9CA3AF' : '#6B7280';
+      ctx.fillText(options.line2, centerX, centerY + (radius * 0.28));
+
+      ctx.restore();
+    }
+  };
+
+  /**
+   * Safe HTML escaping utility for labels and tooltips
+   */
+  function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * External HTML Tooltip for Polar Area Charts
+   * High z-index (10000+), appended to document.body, free from parent container clipping
+   */
+  function getOrCreateTooltip() {
+    let tooltipEl = document.getElementById('chartjs-external-tooltip');
+    if (!tooltipEl) {
+      tooltipEl = document.createElement('div');
+      tooltipEl.id = 'chartjs-external-tooltip';
+      document.body.appendChild(tooltipEl);
+    }
+    return tooltipEl;
+  }
+
+  function externalTooltipHandler(context) {
+    const { chart, tooltip } = context;
+    const tooltipEl = getOrCreateTooltip();
+
+    // Hide tooltip if inactive or during print
+    if (!tooltip || tooltip.opacity === 0 || isPrintingActive) {
+      tooltipEl.style.opacity = '0';
+      tooltipEl.style.pointerEvents = 'none';
+      return;
+    }
+
+    if (tooltip.dataPoints && tooltip.dataPoints.length > 0) {
+      const dp = tooltip.dataPoints[0];
+      const dataIndex = dp.dataIndex;
+      const dataset = chart.data.datasets[0];
+      const label = chart.data.labels[dataIndex] || '';
+      const durationVal = dataset.data[dataIndex] || 0;
+      const sessions = (dataset.sessions && dataset.sessions[dataIndex] !== undefined)
+        ? dataset.sessions[dataIndex]
+        : '-';
+      const pct = (dataset.percentages && dataset.percentages[dataIndex])
+        ? dataset.percentages[dataIndex]
+        : '';
+      const color = (dataset.backgroundColor && dataset.backgroundColor[dataIndex])
+        ? dataset.backgroundColor[dataIndex]
+        : '#3B82F6';
+
+      const safeLabel = escapeHtml(label);
+      const sessionsDisplay = typeof sessions === 'number' ? Intl.NumberFormat().format(sessions) : escapeHtml(String(sessions));
+
+      tooltipEl.innerHTML = `
+        <div class="tooltip-header">
+          <span class="tooltip-color-dot" style="background-color: ${color};"></span>
+          <span class="tooltip-title" title="${safeLabel}">${safeLabel}</span>
+        </div>
+        <div class="tooltip-body">
+          <div class="tooltip-row">
+            <span class="tooltip-label">Duration:</span>
+            <span class="tooltip-val">${formatTime(durationVal)}</span>
+          </div>
+          <div class="tooltip-row">
+            <span class="tooltip-label">Sessions:</span>
+            <span class="tooltip-val">${sessionsDisplay}</span>
+          </div>
+          <div class="tooltip-row">
+            <span class="tooltip-label">Percentage:</span>
+            <span class="tooltip-val font-semibold">${escapeHtml(pct)}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // Precise viewport coordinates using getBoundingClientRect
+    const canvasRect = chart.canvas.getBoundingClientRect();
+    const tipWidth = tooltipEl.offsetWidth || 190;
+    const tipHeight = tooltipEl.offsetHeight || 95;
+
+    let targetLeft = canvasRect.left + tooltip.caretX - (tipWidth / 2);
+    let targetTop = canvasRect.top + tooltip.caretY - tipHeight - 12;
+
+    const pad = 10;
+    if (targetLeft < pad) {
+      targetLeft = pad;
+    } else if (targetLeft + tipWidth > window.innerWidth - pad) {
+      targetLeft = window.innerWidth - tipWidth - pad;
+    }
+
+    if (targetTop < pad) {
+      // Flip below cursor if overflowing top viewport edge
+      targetTop = canvasRect.top + tooltip.caretY + 16;
+    }
+
+    tooltipEl.style.left = `${Math.round(targetLeft)}px`;
+    tooltipEl.style.top = `${Math.round(targetTop)}px`;
+    tooltipEl.style.opacity = '1';
+    tooltipEl.style.pointerEvents = 'none';
+  }
+
+  /**
+   * Data selection and calculation:
+   * 1. Aggregates duration and session counts by application or domain.
+   * 2. Calculates total recorded usage across ALL categories before filtering top 10.
+   * 3. Calculates percentage for each category using total recorded usage as denominator.
+   *    (categoryPercentage = categoryDuration / totalDurationAcrossAllCategories * 100)
+   * 4. Sorts categories by total duration descending (secondary sort name ascending).
+   * 5. Selects top 10 categories (or available count if fewer than 10 valid categories exist).
+   * 6. Safely handles 0 duration and empty data.
+   */
+  function processUsageDataset(rawItems, nameKey) {
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
+      return { items: [], totalDuration: 0, hasData: false };
+    }
+
+    // 1. Aggregate duration and sessions by category name
+    const aggregated = new Map();
+    rawItems.forEach(item => {
+      const rawName = item[nameKey];
+      if (!rawName) return;
+      const name = String(rawName).trim();
+      if (!name) return;
+      const duration = Math.max(0, Number(item.duration_seconds) || 0);
+      const sessions = Math.max(0, Number(item.session_count) || 0);
+
+      if (aggregated.has(name)) {
+        const existing = aggregated.get(name);
+        existing.duration_seconds += duration;
+        existing.session_count += sessions;
+      } else {
+        aggregated.set(name, {
+          name: name,
+          duration_seconds: duration,
+          session_count: sessions
+        });
+      }
+    });
+
+    const categories = Array.from(aggregated.values());
+    if (categories.length === 0) {
+      return { items: [], totalDuration: 0, hasData: false };
+    }
+
+    // 2. Sum duration across ALL valid categories in dataset before selecting top 10
+    const totalDurationAcrossAll = categories.reduce((sum, c) => sum + c.duration_seconds, 0);
+
+    // 3. Calculate percentage using totalDurationAcrossAll as denominator
+    categories.forEach(c => {
+      if (totalDurationAcrossAll > 0 && c.duration_seconds > 0) {
+        const pct = (c.duration_seconds / totalDurationAcrossAll) * 100;
+        c.percentageNum = pct;
+        c.percentageStr = (Math.round(pct * 10) / 10).toFixed(1) + '%';
+      } else {
+        c.percentageNum = 0;
+        c.percentageStr = '0%';
+      }
+    });
+
+    // 4. Sort: duration descending, secondary sort name ascending
+    categories.sort((a, b) => {
+      if (b.duration_seconds !== a.duration_seconds) {
+        return b.duration_seconds - a.duration_seconds;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    // 5. Select exactly top 10 categories (or available categories if < 10 exist)
+    const topCategories = categories.slice(0, 10);
+
+    return {
+      items: topCategories,
+      totalDuration: totalDurationAcrossAll,
+      hasData: topCategories.length > 0 && totalDurationAcrossAll > 0
+    };
+  }
+
+  /**
+   * Renders professional, consistently aligned data tables beneath each polar area chart
+   * Displays: Category (with color indicator dot), Duration, Sessions, and Percentage
+   */
+  function renderTable(containerId, items, palette, emptyMsg = 'No data recorded') {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!items || items.length === 0) {
+      container.innerHTML = `<div class="text-xs text-gray-400 dark:text-gray-500 text-center py-6">${escapeHtml(emptyMsg)}</div>`;
+      return;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'usage-table-wrapper w-full';
+
+    const table = document.createElement('table');
+    table.className = 'usage-table w-full text-xs table-fixed';
+
+    table.innerHTML = `
+      <thead>
+        <tr class="text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700/60 select-none">
+          <th scope="col" class="py-2.5 px-2 font-semibold text-left">Category</th>
+          <th scope="col" class="py-2.5 px-1.5 font-semibold text-right" style="width: 72px;">Duration</th>
+          <th scope="col" class="py-2.5 px-1.5 font-semibold text-right" style="width: 60px;">Sessions</th>
+          <th scope="col" class="py-2.5 px-1.5 font-semibold text-right" style="width: 82px;">Percentage</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 dark:divide-gray-700/40"></tbody>
+    `;
+
+    const tbody = table.querySelector('tbody');
+
+    items.forEach((item, index) => {
+      const color = palette[index % palette.length];
+      const tr = document.createElement('tr');
+      tr.className = 'hover:bg-gray-50/70 dark:hover:bg-gray-600/20 transition-colors';
+
+      const safeName = escapeHtml(item.name);
+      const sessions = typeof item.session_count === 'number' ? item.session_count : 0;
+      const sessionsFormatted = Intl.NumberFormat().format(sessions);
+
+      tr.innerHTML = `
+        <td class="py-2 px-2 text-left align-middle overflow-hidden">
+          <div class="flex items-center gap-2 min-w-0 w-full">
+            <span class="usage-color-dot flex-shrink-0" style="background-color: ${color};"></span>
+            <span class="usage-cat-name truncate font-medium text-gray-800 dark:text-gray-200 block min-w-0 flex-1">${safeName}</span>
+          </div>
+        </td>
+        <td class="py-2 px-1.5 text-right align-middle font-mono tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap">
+          ${formatTime(item.duration_seconds)}
+        </td>
+        <td class="py-2 px-1.5 text-right align-middle font-mono tabular-nums text-gray-600 dark:text-gray-300 whitespace-nowrap">
+          ${sessionsFormatted}
+        </td>
+        <td class="py-2 px-1.5 text-right align-middle font-mono tabular-nums font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">
+          ${escapeHtml(item.percentageStr)}
+        </td>
+      `;
+
+      // Conditional tooltip: only show full name when category text is actually ellipsed / clipped
+      const catCell = tr.querySelector('td:first-child');
+      const nameSpan = tr.querySelector('.usage-cat-name');
+      if (catCell && nameSpan) {
+        catCell.addEventListener('mouseenter', () => {
+          if (nameSpan.scrollWidth > nameSpan.clientWidth) {
+            nameSpan.setAttribute('title', item.name);
+          } else {
+            nameSpan.removeAttribute('title');
+          }
+        });
+      }
+
+      tbody.appendChild(tr);
+    });
+
+    wrapper.appendChild(table);
+    container.appendChild(wrapper);
+  }
+
+  /**
+   * Reusable Polar-Area Chart Initializer with External Tooltip
+   */
+  function createPolarChart({ canvasId, dataItems, palette, centerSubLabel }) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
+
+    const ctx = canvas.getContext('2d');
+    const labels = dataItems.map(d => d.name);
+    const durations = dataItems.map(d => d.duration_seconds);
+    const percentages = dataItems.map(d => d.percentageStr);
+    const sessions = dataItems.map(d => d.session_count || 0);
+    const colors = dataItems.map((_, i) => palette[i % palette.length]);
+
+    const maxDuration = Math.max(...durations, 1);
+    const minScaleVal = -Math.round(maxDuration * 0.40);
+
+    const isDark = document.documentElement.classList.contains('dark') && !isPrintingActive;
+
+    // Fast mouse leave listener to ensure tooltip disappears immediately
+    canvas.addEventListener('mouseleave', () => {
+      const tip = document.getElementById('chartjs-external-tooltip');
+      if (tip) tip.style.opacity = '0';
+    });
+
+    return new Chart(ctx, {
+      type: 'polarArea',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: durations,
+          backgroundColor: colors,
+          borderWidth: 1.5,
+          borderColor: isDark ? '#374151' : '#ffffff',
+          percentages: percentages,
+          sessions: sessions
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: {
+            display: false
+          },
+          tooltip: {
+            enabled: false,
+            external: externalTooltipHandler
+          },
+          polarCenterLabel: {
+            line1: 'TOP 10',
+            line2: centerSubLabel
+          }
+        },
+        scales: {
+          r: {
+            min: minScaleVal,
+            ticks: {
+              display: false
+            },
+            grid: {
+              color: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+              circular: true
+            },
+            angleLines: {
+              color: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)'
+            }
+          }
+        }
+      },
+      plugins: [polarCenterLabelPlugin]
+    });
   }
 
   function renderAppUsage(appData) {
-    if (!appData) return;
+    if (appsPolarChart) {
+      appsPolarChart.destroy();
+      appsPolarChart = null;
+    }
+    const tip = document.getElementById('chartjs-external-tooltip');
+    if (tip) tip.style.opacity = '0';
 
-    const tbody = document.getElementById('apps-tbody');
-    tbody.innerHTML = '';
+    const rawList = appData && Array.isArray(appData.data) ? appData.data : [];
+    const processed = processUsageDataset(rawList, 'app');
 
-    if (!appData.data || appData.data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-gray-400 dark:text-gray-500 py-6">No app data</td></tr>';
+    renderTable('apps-table-container', processed.items, APP_PALETTE, 'No application usage recorded for this date');
+
+    const appsCanvasWrapper = document.querySelector('#apps-polar-chart')?.parentElement;
+    if (!processed.hasData) {
+      if (appsCanvasWrapper) appsCanvasWrapper.style.display = 'none';
       return;
+    } else {
+      if (appsCanvasWrapper) appsCanvasWrapper.style.display = 'flex';
     }
 
-    const top10 = appData.data.slice(0, 10);
-
-    top10.forEach((app, i) => {
-      const tr = document.createElement('tr');
-      tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-600';
-      tr.innerHTML = `
-                <td class="px-4 py-3 text-gray-900 dark:text-gray-100">${i + 1}</td>
-                <td class="px-4 py-3 text-gray-900 dark:text-gray-100">${app.app}</td>
-                <td class="px-4 py-3 text-right font-mono text-gray-900 dark:text-gray-100">${formatTime(app.duration_seconds)}</td>
-                <td class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">${app.session_count}</td>
-                <td class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">${app.percentage}%</td>
-            `;
-      tbody.appendChild(tr);
+    appsPolarChart = createPolarChart({
+      canvasId: 'apps-polar-chart',
+      dataItems: processed.items,
+      palette: APP_PALETTE,
+      centerSubLabel: 'APPS'
     });
-
-    // Bar Chart
-    const ctx = document.getElementById('apps-bar-chart');
-    if (ctx) {
-      new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: top10.map(a => a.app.substring(0, 15)),
-          datasets: [{
-            label: 'Duration (seconds)',
-            data: top10.map(a => a.duration_seconds),
-            backgroundColor: '#6366f1',
-            borderRadius: 4
-          }]
-        },
-        options: {
-          indexAxis: 'y',
-          responsive: true,
-          maintainAspectRatio: true,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => formatTime(ctx.raw)
-              }
-            }
-          },
-          scales: {
-            x: {
-              ticks: { callback: (val) => formatTimeShort(val) },
-              grid: { display: false }
-            },
-            y: {
-              grid: { display: false }
-            }
-          }
-        }
-      });
-    }
   }
 
   function renderDomainUsage(domainData) {
-    if (!domainData) return;
+    if (domainsPolarChart) {
+      domainsPolarChart.destroy();
+      domainsPolarChart = null;
+    }
+    const tip = document.getElementById('chartjs-external-tooltip');
+    if (tip) tip.style.opacity = '0';
 
-    const tbody = document.getElementById('domains-tbody');
-    tbody.innerHTML = '';
+    const rawList = domainData && Array.isArray(domainData.data) ? domainData.data : [];
+    const processed = processUsageDataset(rawList, 'domain');
 
-    if (!domainData.data || domainData.data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray-400 dark:text-gray-500 py-6">No domain data</td></tr>';
+    renderTable('domains-table-container', processed.items, DOMAIN_PALETTE, 'No domain usage recorded for this date');
+
+    const domainsCanvasWrapper = document.querySelector('#domains-polar-chart')?.parentElement;
+    if (!processed.hasData) {
+      if (domainsCanvasWrapper) domainsCanvasWrapper.style.display = 'none';
       return;
+    } else {
+      if (domainsCanvasWrapper) domainsCanvasWrapper.style.display = 'flex';
     }
 
-    const top10 = domainData.data.slice(0, 10);
-
-    top10.forEach((d, i) => {
-      const tr = document.createElement('tr');
-      tr.className = 'hover:bg-gray-50 dark:hover:bg-gray-600';
-      tr.innerHTML = `
-                <td class="px-4 py-3 text-gray-900 dark:text-gray-100">${i + 1}</td>
-                <td class="px-4 py-3 text-gray-900 dark:text-gray-100">${d.domain}</td>
-                <td class="px-4 py-3 text-right font-mono text-gray-900 dark:text-gray-100">${formatTime(d.duration_seconds)}</td>
-                <td class="px-4 py-3 text-right text-gray-900 dark:text-gray-100">${d.session_count}</td>
-            `;
-      tbody.appendChild(tr);
+    domainsPolarChart = createPolarChart({
+      canvasId: 'domains-polar-chart',
+      dataItems: processed.items,
+      palette: DOMAIN_PALETTE,
+      centerSubLabel: 'DOMAINS'
     });
-
-    // Bar Chart
-    const ctx = document.getElementById('domains-bar-chart');
-    if (ctx) {
-      new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: top10.map(d => d.domain.substring(0, 20)),
-          datasets: [{
-            label: 'Duration (seconds)',
-            data: top10.map(d => d.duration_seconds),
-            backgroundColor: '#10b981',
-            borderRadius: 4
-          }]
-        },
-        options: {
-          indexAxis: 'y',
-          responsive: true,
-          maintainAspectRatio: true,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => formatTime(ctx.raw)
-              }
-            }
-          },
-          scales: {
-            x: {
-              ticks: { callback: (val) => formatTimeShort(val) },
-              grid: { display: false }
-            },
-            y: {
-              grid: { display: false }
-            }
-          }
-        }
-      });
-    }
   }
+
+  // Theme & Print synchronization
+  window.addEventListener('beforeprint', () => {
+    isPrintingActive = true;
+    const tip = document.getElementById('chartjs-external-tooltip');
+    if (tip) tip.style.opacity = '0';
+    if (appsPolarChart) {
+      appsPolarChart.update('none');
+    }
+    if (domainsPolarChart) {
+      domainsPolarChart.update('none');
+    }
+  });
+
+  window.addEventListener('afterprint', () => {
+    isPrintingActive = false;
+    if (appsPolarChart) appsPolarChart.update('none');
+    if (domainsPolarChart) domainsPolarChart.update('none');
+  });
+
+  window.addEventListener('themechange', () => {
+    if (appsPolarChart) appsPolarChart.update('none');
+    if (domainsPolarChart) domainsPolarChart.update('none');
+  });
+
+  window.addEventListener('scroll', () => {
+    const tip = document.getElementById('chartjs-external-tooltip');
+    if (tip && tip.style.opacity !== '0') tip.style.opacity = '0';
+  }, { passive: true });
 
   function generateInsights(data) {
     const insights = [];
@@ -663,7 +1382,21 @@
   }
 
   function printReport() {
+    isPrintingActive = true;
+    if (appsPolarChart) {
+      if (appsPolarChart.tooltip) appsPolarChart.tooltip.setActiveElements([], {x: 0, y: 0});
+      appsPolarChart.update('none');
+    }
+    if (domainsPolarChart) {
+      if (domainsPolarChart.tooltip) domainsPolarChart.tooltip.setActiveElements([], {x: 0, y: 0});
+      domainsPolarChart.update('none');
+    }
     window.print();
+    setTimeout(() => {
+      isPrintingActive = false;
+      if (appsPolarChart) appsPolarChart.update('none');
+      if (domainsPolarChart) domainsPolarChart.update('none');
+    }, 500);
   }
 
   function exportAllCSV() {
@@ -711,7 +1444,8 @@
         });
     }
 
-    downloadCSV(csv, `agent_report_${reportData.agent?.hostname || AGENT_ID}_${reportData.date}.csv`);
+    const csvFilename = currentExportFilename ? `${currentExportFilename}.csv` : `agent_report_${reportData.agent?.hostname || AGENT_ID}_${reportData.date}.csv`;
+    downloadCSV(csv, csvFilename);
   }
 
   function downloadCSV(content, filename) {

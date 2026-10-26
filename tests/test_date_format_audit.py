@@ -43,6 +43,10 @@ ALLOWED = {
     "static/js/datetime_format.js": "the canonical client formatter",
     "static/js/timezone_utils.js": "delegates to DateFmt; header documents its history",
     "utils/datetime_format.py": "the canonical server formatter",
+    # Report schedules are computed in IST wall-clock time
+    # (server_reports.py: next_run/last_run are built with datetime.now(IST)),
+    # so the schedule UI must display them in Asia/Kolkata, labelled.
+    "templates/dashboard/reports.html": "report schedules run on IST wall-clock; times are labelled",
 }
 
 FORBIDDEN = [

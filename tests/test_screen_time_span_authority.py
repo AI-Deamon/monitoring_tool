@@ -256,6 +256,34 @@ class TestReconcile:
         _run_reconcile(day)
         assert _get_row(test_agent, day)[1] == 5400
 
+    def test_cross_midnight_span_is_split_between_two_days(
+            self, app_context, test_agent):
+        """Agent state machine splits spans at midnight:
+        Span 1: Aug 31, 23:00 -> Aug 31, 23:59:59 (3600s)
+        Span 2: Sep 1,  00:00 -> Sep 1,  02:00:00 (7200s)
+        """
+        agent_id = test_agent
+
+        # Span 1 (Aug 31 portion: 23:00 to 00:00 = 3600s)
+        _insert_span(agent_id, 'active', '2026-08-31T23:00:00', '2026-09-01T00:00:00')
+
+        # Span 2 (Sep 1 portion: 00:00 to 02:00 = 7200s)
+        _insert_span(agent_id, 'active', '2026-09-01T00:00:00', '2026-09-01T02:00:00')
+
+        # Reconcile both days
+        _run_reconcile(date(2026, 8, 31))
+        _run_reconcile(date(2026, 9, 1))
+
+        aug31_row = _get_row(agent_id, date(2026, 8, 31))
+        sep1_row = _get_row(agent_id, date(2026, 9, 1))
+
+        assert aug31_row is not None
+        assert sep1_row is not None
+
+        # Check active_seconds for each day
+        assert aug31_row[1] == 3600
+        assert sep1_row[1] == 7200
+
 
 # ============================================================================
 # T025 — late span lands within one daily sweep cycle (SC-004)

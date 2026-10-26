@@ -1,176 +1,1233 @@
 {% extends "dashboard/base.html" %}
+{% from "components/icons.html" import icon %}
 
 {% block title %}Reports - SentinelEdge Dashboard{% endblock %}
 
+{% block extra_head %}
+<style nonce="{{ csp_nonce() }}">
+    /* ── Native Controls Hidden State When Enhanced by Custom UI ─────────── */
+    .se-custom-native-hidden {
+        position: absolute !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        width: 1px !important;
+        height: 1px !important;
+        overflow: hidden !important;
+        clip: rect(0, 0, 0, 0) !important;
+        white-space: nowrap !important;
+        margin: -1px !important;
+        border: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* ── Custom Select & Datepicker Wrapper ─────────────────────────────── */
+    .se-custom-select-wrapper,
+    .se-custom-datepicker-wrapper {
+        position: relative;
+        display: block;
+        width: 100%;
+    }
+
+    /* ── Custom Trigger Button (Matches Team Overview .se-agent-selector__btn) */
+    .se-custom-select__btn,
+    .se-datepicker__btn {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        width: 100%;
+        height: 40px;
+        padding: 8px 12px;
+        border: 1px solid var(--border, #d1d5db);
+        border-radius: 8px;
+        font-size: var(--text-sm, 0.875rem);
+        font-family: inherit;
+        font-weight: 400;
+        line-height: 1.4;
+        cursor: pointer;
+        white-space: nowrap;
+        text-align: left;
+        box-sizing: border-box;
+        background-color: var(--bg-card, #ffffff);
+        color: var(--text-primary, #111827);
+        box-shadow: var(--shadow-xs, 0 1px 2px 0 rgba(0, 0, 0, 0.05));
+        transition: background-color 150ms ease,
+                    border-color 150ms ease,
+                    color 150ms ease,
+                    box-shadow 150ms ease;
+        user-select: none;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    html.dark .se-custom-select__btn,
+    html.dark .se-datepicker__btn,
+    [data-theme="dark"] .se-custom-select__btn,
+    [data-theme="dark"] .se-datepicker__btn {
+        background-color: var(--bg-card, #1f2937);
+        border-color: var(--border-strong, #374151);
+        color: var(--text-primary, #f9fafb);
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.25);
+    }
+
+    .se-custom-select__btn:hover:not(:disabled),
+    .se-datepicker__btn:hover:not(:disabled) {
+        background-color: var(--bg-card-hover, #f3f4f6);
+        border-color: var(--border-focus, #6366f1);
+    }
+
+    html.dark .se-custom-select__btn:hover:not(:disabled),
+    html.dark .se-datepicker__btn:hover:not(:disabled),
+    [data-theme="dark"] .se-custom-select__btn:hover:not(:disabled),
+    [data-theme="dark"] .se-datepicker__btn:hover:not(:disabled) {
+        background-color: var(--bg-tertiary, #374151);
+        border-color: var(--border-focus, #818cf8);
+    }
+
+    .se-custom-select__btn:focus-visible,
+    .se-datepicker__btn:focus-visible,
+    .se-custom-select-wrapper.se-dropdown--open .se-custom-select__btn,
+    .se-custom-datepicker-wrapper.se-dropdown--open .se-datepicker__btn {
+        outline: none;
+        border-color: var(--border-focus, #6366f1);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--border-focus, #6366f1) 22%, transparent) !important;
+    }
+
+    html.dark .se-custom-select__btn:focus-visible,
+    html.dark .se-datepicker__btn:focus-visible,
+    html.dark .se-custom-select-wrapper.se-dropdown--open .se-custom-select__btn,
+    html.dark .se-custom-datepicker-wrapper.se-dropdown--open .se-datepicker__btn,
+    [data-theme="dark"] .se-custom-select__btn:focus-visible,
+    [data-theme="dark"] .se-datepicker__btn:focus-visible,
+    [data-theme="dark"] .se-custom-select-wrapper.se-dropdown--open .se-custom-select__btn,
+    [data-theme="dark"] .se-custom-datepicker-wrapper.se-dropdown--open .se-datepicker__btn {
+        border-color: var(--brand-primary, #818cf8);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary, #818cf8) 25%, transparent) !important;
+    }
+
+    .se-custom-select__btn:disabled,
+    .se-datepicker__btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        background-color: var(--bg-subtle, #f9fafb);
+        border-color: var(--border, #e5e7eb);
+        color: var(--text-muted, #9ca3af);
+        box-shadow: none;
+    }
+
+    html.dark .se-custom-select__btn:disabled,
+    html.dark .se-datepicker__btn:disabled,
+    [data-theme="dark"] .se-custom-select__btn:disabled,
+    [data-theme="dark"] .se-datepicker__btn:disabled {
+        background-color: var(--bg-primary, #111827);
+        border-color: var(--border-strong, #374151);
+        color: var(--text-disabled, #64748b);
+    }
+
+    .se-custom-select__label,
+    .se-datepicker__label {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .se-custom-select__chevron {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        color: var(--text-secondary, #6b7280);
+        transition: transform 200ms ease, color 150ms ease;
+    }
+
+    html.dark .se-custom-select__chevron,
+    [data-theme="dark"] .se-custom-select__chevron {
+        color: var(--text-muted, #9ca3af);
+    }
+
+    .se-custom-select-wrapper.se-dropdown--open .se-custom-select__chevron {
+        transform: rotate(180deg);
+        color: var(--brand-primary, #6366f1);
+    }
+
+    html.dark .se-custom-select-wrapper.se-dropdown--open .se-custom-select__chevron,
+    [data-theme="dark"] .se-custom-select-wrapper.se-dropdown--open .se-custom-select__chevron {
+        color: var(--brand-primary, #818cf8);
+    }
+
+    .se-datepicker__icon {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        color: var(--text-secondary, #6b7280);
+        transition: color 150ms ease;
+    }
+
+    html.dark .se-datepicker__icon,
+    [data-theme="dark"] .se-datepicker__icon {
+        color: var(--text-muted, #9ca3af);
+    }
+
+    .se-custom-datepicker-wrapper.se-dropdown--open .se-datepicker__icon {
+        color: var(--brand-primary, #6366f1);
+    }
+
+    html.dark .se-custom-datepicker-wrapper.se-dropdown--open .se-datepicker__icon,
+    [data-theme="dark"] .se-custom-datepicker-wrapper.se-dropdown--open .se-datepicker__icon {
+        color: var(--brand-primary, #818cf8);
+    }
+
+    /* ── Custom Select Dropdown Panel ────────────────────────────────────── */
+    .se-custom-select__panel {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        z-index: 1000;
+        width: 100%;
+        min-width: 220px;
+        box-sizing: border-box;
+        border-radius: 10px;
+        border: 1px solid var(--border, #d1d5db);
+        background: var(--bg-card, #ffffff);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 4px 10px -4px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+        padding: 4px;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        animation: sePanelFadeIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    html.dark .se-custom-select__panel,
+    [data-theme="dark"] .se-custom-select__panel {
+        background: var(--bg-card, #1f2937);
+        border-color: var(--border-strong, #374151);
+        box-shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+    }
+
+    .se-custom-select__list {
+        max-height: 250px;
+        overflow-y: auto;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    .se-custom-select__list::-webkit-scrollbar {
+        width: 6px;
+    }
+    .se-custom-select__list::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .se-custom-select__list::-webkit-scrollbar-thumb {
+        background: #d1d5db;
+        border-radius: 3px;
+    }
+    html.dark .se-custom-select__list::-webkit-scrollbar-thumb,
+    [data-theme="dark"] .se-custom-select__list::-webkit-scrollbar-thumb {
+        background: #4b5563;
+    }
+
+    .se-custom-select__item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 12px;
+        margin: 2px 0;
+        border-radius: 6px;
+        font-size: var(--text-sm, 0.875rem);
+        color: var(--text-primary, #111827);
+        cursor: pointer;
+        user-select: none;
+        transition: background-color 120ms ease, color 120ms ease;
+        outline: none;
+    }
+
+    html.dark .se-custom-select__item,
+    [data-theme="dark"] .se-custom-select__item {
+        color: var(--text-primary, #f9fafb);
+    }
+
+    .se-custom-select__item:hover,
+    .se-custom-select__item.se-item--focused {
+        background-color: var(--bg-card-hover, #f3f4f6);
+        color: var(--text-primary, #111827);
+    }
+
+    html.dark .se-custom-select__item:hover,
+    html.dark .se-custom-select__item.se-item--focused,
+    [data-theme="dark"] .se-custom-select__item:hover,
+    [data-theme="dark"] .se-custom-select__item.se-item--focused {
+        background-color: var(--bg-tertiary, #374151);
+        color: var(--text-primary, #f9fafb);
+    }
+
+    .se-custom-select__item.se-item--selected {
+        background-color: var(--color-primary-subtle, #eef2ff);
+        color: var(--brand-primary, #6366f1);
+        font-weight: 600;
+    }
+
+    html.dark .se-custom-select__item.se-item--selected,
+    [data-theme="dark"] .se-custom-select__item.se-item--selected {
+        background-color: color-mix(in srgb, var(--brand-primary, #6366f1) 18%, transparent);
+        color: var(--brand-primary, #818cf8);
+        font-weight: 600;
+    }
+
+    .se-custom-select__item-check {
+        flex-shrink: 0;
+        width: 16px;
+        height: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: currentColor;
+    }
+
+    /* ── Custom Datepicker Calendar Panel ────────────────────────────────── */
+    .se-datepicker__panel {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        z-index: 1200;
+        width: 290px;
+        box-sizing: border-box;
+        border-radius: 12px;
+        border: 1px solid var(--border, #d1d5db);
+        background: var(--bg-card, #ffffff);
+        box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.16), 0 10px 15px -5px rgba(0, 0, 0, 0.08);
+        padding: 12px 14px;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        animation: sePanelFadeIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
+        user-select: none;
+    }
+
+    html.dark .se-datepicker__panel,
+    [data-theme="dark"] .se-datepicker__panel {
+        background: var(--bg-card, #1f2937);
+        border-color: var(--border-strong, #374151);
+        box-shadow: 0 18px 36px -4px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+    }
+
+    .se-dp-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+        margin-bottom: 10px;
+    }
+
+    /* ── Navigation Arrows (< and >) ───────────────────────────────────────── */
+    .se-dp-nav-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        border: 1px solid var(--border, #e5e7eb);
+        background: var(--bg-card, #ffffff);
+        color: var(--text-secondary, #6b7280);
+        cursor: pointer;
+        box-sizing: border-box;
+        padding: 0;
+        transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, transform 100ms ease;
+    }
+
+    html.dark .se-dp-nav-btn,
+    [data-theme="dark"] .se-dp-nav-btn {
+        border-color: var(--border-strong, #374151);
+        background: var(--bg-tertiary, #374151);
+        color: var(--text-muted, #9ca3af);
+    }
+
+    .se-dp-nav-btn:hover:not(:disabled) {
+        background: var(--bg-card-hover, #f3f4f6);
+        color: var(--text-primary, #111827);
+        border-color: var(--border-focus, #6366f1);
+    }
+
+    html.dark .se-dp-nav-btn:hover:not(:disabled),
+    [data-theme="dark"] .se-dp-nav-btn:hover:not(:disabled) {
+        background: var(--bg-card-hover, #4b5563);
+        color: var(--text-primary, #f9fafb);
+        border-color: var(--brand-primary, #818cf8);
+    }
+
+    .se-dp-nav-btn:disabled {
+        opacity: 0.3 !important;
+        cursor: not-allowed !important;
+        pointer-events: none !important;
+    }
+
+    /* ── Independent Month & Year Dropdown Triggers ───────────────────────── */
+    .se-dp-selectors {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        justify-content: center;
+        flex: 1 1 auto;
+    }
+
+    .se-dp-header-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        background: transparent;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        line-height: 1.2;
+        color: var(--text-primary, #111827);
+        cursor: pointer;
+        transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+        user-select: none;
+    }
+
+    html.dark .se-dp-header-btn,
+    [data-theme="dark"] .se-dp-header-btn {
+        color: var(--text-primary, #f9fafb);
+    }
+
+    .se-dp-header-btn:hover {
+        background: var(--bg-card-hover, #f3f4f6);
+        border-color: var(--border, #e5e7eb);
+    }
+
+    html.dark .se-dp-header-btn:hover,
+    [data-theme="dark"] .se-dp-header-btn:hover {
+        background: var(--bg-tertiary, #374151);
+        border-color: var(--border-strong, #4b5563);
+    }
+
+    .se-dp-header-btn.se-header-btn--active {
+        background: var(--color-primary-subtle, #eef2ff);
+        color: var(--brand-primary, #6366f1);
+        border-color: var(--border-focus, #6366f1);
+    }
+
+    html.dark .se-dp-header-btn.se-header-btn--active,
+    [data-theme="dark"] .se-dp-header-btn.se-header-btn--active {
+        background: color-mix(in srgb, var(--brand-primary, #6366f1) 20%, transparent);
+        color: var(--brand-primary, #818cf8);
+        border-color: var(--brand-primary, #818cf8);
+    }
+
+    .se-dp-header-chevron {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 180ms ease;
+        color: var(--text-secondary, #6b7280);
+    }
+
+    html.dark .se-dp-header-chevron,
+    [data-theme="dark"] .se-dp-header-chevron {
+        color: var(--text-muted, #9ca3af);
+    }
+
+    .se-dp-header-btn.se-header-btn--active .se-dp-header-chevron {
+        transform: rotate(180deg);
+        color: currentColor;
+    }
+
+    /* ── Views Container & Weekdays ───────────────────────────────────────── */
+    .se-dp-views-container {
+        position: relative;
+        min-height: 205px;
+    }
+
+    .se-dp-weekdays {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 2px;
+        text-align: center;
+        margin-bottom: 6px;
+    }
+
+    .se-dp-weekday {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--text-muted, #6b7280);
+        padding: 4px 0;
+    }
+
+    html.dark .se-dp-weekday,
+    [data-theme="dark"] .se-dp-weekday {
+        color: var(--text-secondary, #9ca3af);
+    }
+
+    /* ── Days Grid ────────────────────────────────────────────────────────── */
+    .se-dp-days {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 3px;
+        text-align: center;
+    }
+
+    .se-dp-day {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 32px;
+        border-radius: 7px;
+        font-size: 0.8125rem;
+        cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease, transform 100ms ease;
+        color: var(--text-primary, #111827);
+        background: transparent;
+        border: none;
+        padding: 0;
+        position: relative;
+        outline: none;
+    }
+
+    html.dark .se-dp-day,
+    [data-theme="dark"] .se-dp-day {
+        color: var(--text-primary, #f9fafb);
+    }
+
+    .se-dp-day:hover:not(.se-day--disabled):not(.se-day--selected) {
+        background-color: var(--bg-card-hover, #f3f4f6);
+    }
+
+    html.dark .se-dp-day:hover:not(.se-day--disabled):not(.se-day--selected),
+    [data-theme="dark"] .se-dp-day:hover:not(.se-day--disabled):not(.se-day--selected) {
+        background-color: var(--bg-tertiary, #374151);
+    }
+
+    .se-dp-day:focus-visible {
+        outline: 2px solid var(--brand-primary, #6366f1);
+        outline-offset: 1px;
+    }
+
+    .se-dp-day.se-day--other-month {
+        color: var(--text-muted, #9ca3af);
+        opacity: 0.45;
+    }
+
+    html.dark .se-dp-day.se-day--other-month,
+    [data-theme="dark"] .se-dp-day.se-day--other-month {
+        color: var(--text-secondary, #64748b);
+        opacity: 0.45;
+    }
+
+    .se-dp-day.se-day--today:not(.se-day--selected)::after {
+        content: '';
+        position: absolute;
+        bottom: 3px;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background-color: var(--brand-primary, #6366f1);
+    }
+
+    html.dark .se-dp-day.se-day--today:not(.se-day--selected)::after,
+    [data-theme="dark"] .se-dp-day.se-day--today:not(.se-day--selected)::after {
+        background-color: var(--brand-primary, #818cf8);
+    }
+
+    .se-dp-day.se-day--selected {
+        background-color: #6366f1 !important;
+        color: #ffffff !important;
+        font-weight: 600;
+        box-shadow: 0 2px 6px rgba(99, 102, 241, 0.35);
+    }
+
+    /* ── Month Grid View (12 Months in 3x4 Layout) ────────────────────────── */
+    .se-dp-month-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        padding: 6px 0;
+        min-height: 200px;
+        box-sizing: border-box;
+        align-content: center;
+    }
+
+    .se-dp-month-item {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 40px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border, #e5e7eb);
+        background: var(--bg-card, #ffffff);
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--text-primary, #111827);
+        cursor: pointer;
+        outline: none;
+        transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+    }
+
+    html.dark .se-dp-month-item,
+    [data-theme="dark"] .se-dp-month-item {
+        border-color: var(--border-strong, #374151);
+        background: var(--bg-card, #1f2937);
+        color: var(--text-primary, #f9fafb);
+    }
+
+    .se-dp-month-item:hover:not(:disabled):not(.se-month--selected) {
+        background-color: var(--bg-card-hover, #f3f4f6);
+        border-color: var(--border-focus, #6366f1);
+    }
+
+    html.dark .se-dp-month-item:hover:not(:disabled):not(.se-month--selected),
+    [data-theme="dark"] .se-dp-month-item:hover:not(:disabled):not(.se-month--selected) {
+        background-color: var(--bg-tertiary, #374151);
+        border-color: var(--brand-primary, #818cf8);
+    }
+
+    .se-dp-month-item:focus-visible {
+        outline: 2px solid var(--brand-primary, #6366f1);
+        outline-offset: 1px;
+    }
+
+    .se-dp-month-item.se-month--selected {
+        background-color: #6366f1 !important;
+        border-color: #6366f1 !important;
+        color: #ffffff !important;
+        font-weight: 600;
+        box-shadow: 0 2px 6px rgba(99, 102, 241, 0.35);
+    }
+
+    .se-dp-month-item:disabled,
+    .se-dp-month-item.se-month--disabled {
+        opacity: 0.35 !important;
+        cursor: not-allowed !important;
+        pointer-events: none !important;
+    }
+
+    /* ── Year Grid View (Scrollable 3-Column Year Grid) ────────────────────── */
+    .se-dp-year-view {
+        max-height: 205px;
+        overflow-y: auto;
+        padding: 4px 2px;
+        box-sizing: border-box;
+    }
+
+    .se-dp-year-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+    }
+
+    .se-dp-year-item {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 38px;
+        padding: 4px 6px;
+        border-radius: 8px;
+        border: 1px solid var(--border, #e5e7eb);
+        background: var(--bg-card, #ffffff);
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--text-primary, #111827);
+        cursor: pointer;
+        outline: none;
+        transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+    }
+
+    html.dark .se-dp-year-item,
+    [data-theme="dark"] .se-dp-year-item {
+        border-color: var(--border-strong, #374151);
+        background: var(--bg-card, #1f2937);
+        color: var(--text-primary, #f9fafb);
+    }
+
+    .se-dp-year-item:hover:not(:disabled):not(.se-year--selected) {
+        background-color: var(--bg-card-hover, #f3f4f6);
+        border-color: var(--border-focus, #6366f1);
+    }
+
+    html.dark .se-dp-year-item:hover:not(:disabled):not(.se-year--selected),
+    [data-theme="dark"] .se-dp-year-item:hover:not(:disabled):not(.se-year--selected) {
+        background-color: var(--bg-tertiary, #374151);
+        border-color: var(--brand-primary, #818cf8);
+    }
+
+    .se-dp-year-item:focus-visible {
+        outline: 2px solid var(--brand-primary, #6366f1);
+        outline-offset: 1px;
+    }
+
+    .se-dp-year-item.se-year--selected {
+        background-color: #6366f1 !important;
+        border-color: #6366f1 !important;
+        color: #ffffff !important;
+        font-weight: 600;
+        box-shadow: 0 2px 6px rgba(99, 102, 241, 0.35);
+    }
+
+    .se-dp-year-item:disabled,
+    .se-dp-year-item.se-year--disabled {
+        opacity: 0.35 !important;
+        cursor: not-allowed !important;
+        pointer-events: none !important;
+    }
+
+    /* Scrollbar for year list */
+    .se-dp-year-view::-webkit-scrollbar {
+        width: 6px;
+    }
+    .se-dp-year-view::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .se-dp-year-view::-webkit-scrollbar-thumb {
+        background: #d1d5db;
+        border-radius: 3px;
+    }
+    html.dark .se-dp-year-view::-webkit-scrollbar-thumb,
+    [data-theme="dark"] .se-dp-year-view::-webkit-scrollbar-thumb {
+        background: #4b5563;
+    }
+
+    /* ── Calendar Footer (Clear & Today Actions) ─────────────────────────── */
+    .se-dp-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border, #e5e7eb);
+    }
+
+    html.dark .se-dp-footer,
+    [data-theme="dark"] .se-dp-footer {
+        border-top-color: var(--border-strong, #374151);
+    }
+
+    .se-dp-action-btn {
+        border: none;
+        background: transparent;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 5px;
+        transition: background-color 120ms ease, color 120ms ease;
+        user-select: none;
+        outline: none;
+    }
+
+    .se-dp-action-btn:focus-visible {
+        outline: 2px solid var(--brand-primary, #6366f1);
+        outline-offset: 1px;
+    }
+
+    .se-dp-btn--clear {
+        color: var(--text-secondary, #6b7280);
+    }
+
+    html.dark .se-dp-btn--clear,
+    [data-theme="dark"] .se-dp-btn--clear {
+        color: var(--text-muted, #9ca3af);
+    }
+
+    .se-dp-btn--clear:hover:not(:disabled) {
+        color: var(--danger, #ef4444);
+        background-color: rgba(239, 68, 68, 0.08);
+    }
+
+    .se-dp-btn--today {
+        color: var(--brand-primary, #6366f1);
+        font-weight: 600;
+    }
+
+    html.dark .se-dp-btn--today,
+    [data-theme="dark"] .se-dp-btn--today {
+        color: var(--brand-primary, #818cf8);
+    }
+
+    .se-dp-btn--today:hover:not(:disabled) {
+        background-color: color-mix(in srgb, var(--brand-primary, #6366f1) 12%, transparent);
+    }
+
+    .se-dp-action-btn:disabled {
+        opacity: 0.4 !important;
+        cursor: not-allowed !important;
+        pointer-events: none !important;
+    }
+
+    @keyframes sePanelFadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(-4px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* Fallback Native Controls Styling */
+    .se-report-control {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        height: 40px;
+        padding: 8px 12px;
+        font-size: var(--text-sm, 0.875rem);
+        font-family: inherit;
+        font-weight: 400;
+        line-height: 1.4;
+        border-radius: 8px;
+        border: 1px solid var(--border, #d1d5db);
+        background-color: var(--bg-card, #ffffff);
+        color: var(--text-primary, #111827);
+        outline: none;
+        box-shadow: var(--shadow-xs, 0 1px 2px 0 rgba(0, 0, 0, 0.05));
+        box-sizing: border-box;
+        transition: background-color var(--transition-fast, 150ms),
+                    border-color var(--transition-fast, 150ms),
+                    color var(--transition-fast, 150ms),
+                    box-shadow var(--transition-fast, 150ms);
+        -webkit-font-smoothing: antialiased;
+    }
+
+    html.dark .se-report-control,
+    [data-theme="dark"] .se-report-control {
+        background-color: var(--bg-card, #1f2937);
+        border-color: var(--border-strong, #374151);
+        color: var(--text-primary, #f9fafb);
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.25);
+    }
+
+    .se-report-control:hover:not(:disabled):not(:focus) {
+        background-color: var(--bg-card-hover, #f3f4f6);
+        border-color: var(--border-focus, #6366f1);
+    }
+
+    html.dark .se-report-control:hover:not(:disabled):not(:focus),
+    [data-theme="dark"] .se-report-control:hover:not(:disabled):not(:focus) {
+        background-color: var(--bg-tertiary, #374151);
+        border-color: var(--border-focus, #818cf8);
+    }
+
+    .se-report-control:focus,
+    .se-report-control:focus-visible {
+        outline: none;
+        border-color: var(--border-focus, #6366f1);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--border-focus, #6366f1) 22%, transparent) !important;
+        background-color: #ffffff;
+    }
+
+    html.dark .se-report-control:focus,
+    html.dark .se-report-control:focus-visible,
+    [data-theme="dark"] .se-report-control:focus,
+    [data-theme="dark"] .se-report-control:focus-visible {
+        outline: none;
+        border-color: var(--brand-primary, #818cf8);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-primary, #818cf8) 25%, transparent) !important;
+        background-color: var(--bg-card, #1f2937);
+    }
+
+    .se-report-control:disabled,
+    .se-report-control[disabled] {
+        opacity: 0.6;
+        cursor: not-allowed;
+        background-color: var(--bg-subtle, #f9fafb);
+        border-color: var(--border, #e5e7eb);
+        color: var(--text-muted, #9ca3af);
+        box-shadow: none;
+    }
+
+    html.dark .se-report-control:disabled,
+    html.dark .se-report-control[disabled],
+    [data-theme="dark"] .se-report-control:disabled,
+    [data-theme="dark"] .se-report-control[disabled] {
+        background-color: var(--bg-primary, #111827);
+        border-color: var(--border-strong, #374151);
+        color: var(--text-disabled, #64748b);
+    }
+
+    .se-report-select {
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        cursor: pointer;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+        background-position: right 12px center;
+        background-repeat: no-repeat;
+        background-size: 15px 15px;
+        padding-right: 38px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+
+    html.dark .se-report-select,
+    [data-theme="dark"] .se-report-select {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239ca3af' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+    }
+
+    .se-report-select:hover:not(:disabled) {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+    }
+
+    html.dark .se-report-select:hover:not(:disabled),
+    [data-theme="dark"] .se-report-select:hover:not(:disabled) {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23818cf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+    }
+
+    .se-report-select:focus {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+    }
+
+    html.dark .se-report-select:focus,
+    [data-theme="dark"] .se-report-select:focus {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23818cf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+    }
+
+    .se-report-select option {
+        background-color: #ffffff;
+        color: #111827;
+        font-size: 0.875rem;
+        font-family: inherit;
+        padding: 8px 12px;
+    }
+
+    html.dark .se-report-select option,
+    [data-theme="dark"] .se-report-select option {
+        background-color: #1f2937;
+        color: #f9fafb;
+    }
+
+    .se-report-select option:checked {
+        background-color: #eef2ff;
+        color: #4f46e5;
+        font-weight: 600;
+    }
+
+    html.dark .se-report-select option:checked,
+    [data-theme="dark"] .se-report-select option:checked {
+        background-color: #312e81;
+        color: #c7d2fe;
+    }
+
+    .se-report-date,
+    .se-report-time {
+        color-scheme: light;
+        cursor: pointer;
+        font-family: inherit;
+        letter-spacing: 0.01em;
+    }
+
+    html.dark .se-report-date,
+    html.dark .se-report-time,
+    [data-theme="dark"] .se-report-date,
+    [data-theme="dark"] .se-report-time {
+        color-scheme: dark !important;
+    }
+
+    .se-report-date::-webkit-calendar-picker-indicator,
+    .se-report-time::-webkit-calendar-picker-indicator {
+        cursor: pointer;
+        opacity: 0.65;
+        padding: 4px;
+        margin-right: -4px;
+        border-radius: 4px;
+        transition: opacity var(--transition-fast, 150ms), transform var(--transition-fast, 150ms);
+    }
+
+    .se-report-date:hover::-webkit-calendar-picker-indicator,
+    .se-report-time:hover::-webkit-calendar-picker-indicator {
+        opacity: 1;
+        transform: scale(1.08);
+    }
+
+    html.dark .se-report-date::-webkit-calendar-picker-indicator,
+    html.dark .se-report-time::-webkit-calendar-picker-indicator,
+    [data-theme="dark"] .se-report-date::-webkit-calendar-picker-indicator,
+    [data-theme="dark"] .se-report-time::-webkit-calendar-picker-indicator {
+        filter: invert(0.85);
+        opacity: 0.75;
+    }
+
+    html.dark .se-report-date:hover::-webkit-calendar-picker-indicator,
+    html.dark .se-report-time:hover::-webkit-calendar-picker-indicator,
+    [data-theme="dark"] .se-report-date:hover::-webkit-calendar-picker-indicator,
+    [data-theme="dark"] .se-report-time:hover::-webkit-calendar-picker-indicator {
+        opacity: 1;
+    }
+
+    .se-report-label {
+        display: block;
+        font-size: var(--text-sm, 0.875rem);
+        font-weight: 500;
+        color: var(--text-secondary, #475569);
+        margin-bottom: 0.375rem;
+        line-height: 1.4;
+        transition: color var(--transition-fast, 150ms);
+    }
+
+    html.dark .se-report-label,
+    [data-theme="dark"] .se-report-label {
+        color: var(--text-secondary, #cbd5e1);
+    }
+</style>
+{% endblock %}
+
 {% block content %}
+<!-- Inline SVG icons defs matching Team Overview chevron -->
+<svg style="display:none;" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="se-icon-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m19.5 8.25-7.5 7.5-7.5-7.5"/>
+    </symbol>
+</svg>
 <div class="flex items-center justify-between mb-8">
     <div>
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <img src="{{ url_for('static', filename='report.png') }}" class="w-6 h-6" />
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2.5">
             Generate Reports
         </h1>
         <p class="text-gray-600 dark:text-gray-400 mt-1">Export fleet-wide or individual agent activity data</p>
     </div>
     {#
-      D18 / FR-025: the top-level "Generate Report" button was removed here.
+    D18 / FR-025: the top-level "Generate Report" button was removed here.
 
-      It opened a unified modal whose two modes each duplicated a feature that
-      already exists further down this page: "Generate Now" duplicated the
-      Activity Report section's own generate button, and "Schedule" duplicated
-      the Email Schedules section's "New Schedule" form. Two routes to the same
-      outcome left users unsure which one to use.
+    It opened a unified modal whose two modes each duplicated a feature that
+    already exists further down this page: "Generate Now" duplicated the
+    Activity Report section's own generate button, and "Schedule" duplicated
+    the Email Schedules section's "New Schedule" form. Two routes to the same
+    outcome left users unsure which one to use.
 
-      FR-025a is satisfied — both capabilities remain reachable through their own
-      sections, asserted by tests/test_reports_page_entry_points.py.
+    FR-025a is satisfied — both capabilities remain reachable through their own
+    sections, asserted by tests/test_reports_page_entry_points.py.
 
-      The modal markup and its um-* handlers below are now unreachable and should
-      be deleted as a follow-up; they are left in place here so this defect fix
-      stays reviewable as a single removal.
+    The modal markup and its um-* handlers below are now unreachable and should
+    be deleted as a follow-up; they are left in place here so this defect fix
+    stays reviewable as a single removal.
     #}
 </div>
 
 <!-- Unified Report Modal -->
 <div id="unified-modal" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true">
-    <div class="absolute inset-0 bg-black bg-opacity-60" onclick="closeUnifiedModal()" onkeydown="if(event.key==='Enter'||event.key===' '){closeUnifiedModal()}" role="button" tabindex="-1" aria-hidden="true"></div>
+    <div class="absolute inset-0 bg-black bg-opacity-60" onclick="closeUnifiedModal()"
+        onkeydown="if(event.key==='Enter'||event.key===' '){closeUnifiedModal()}" role="button" tabindex="-1"
+        aria-hidden="true"></div>
     <div class="relative z-10 flex items-center justify-center min-h-screen p-4">
-        <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div
+            class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
 
             <!-- Header -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
                 <div class="flex items-center gap-3">
-                    <svg class="w-4 h-4 inline-block align-[-0.125em] text-indigo-600 dark:text-indigo-400 text-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-                    <h2 id="um-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100">Generate Report</h2>
+                    {{ icon('report', 'w-5 h-5 text-indigo-600 dark:text-indigo-400') }}
+                    <h2 id="um-title" class="text-lg font-semibold text-gray-900 dark:text-gray-100">Generate Report
+                    </h2>
                 </div>
                 <div class="flex items-center gap-2">
                     <div class="flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden text-sm">
                         <button id="um-mode-generate" onclick="setUmMode('generate')"
-                            class="px-3 py-1.5 bg-indigo-600 text-white font-medium transition-colors">Generate Now</button>
+                            class="px-3 py-1.5 bg-indigo-600 text-white font-medium transition-colors">Generate
+                            Now</button>
                         <button id="um-mode-schedule" onclick="setUmMode('schedule')"
                             class="px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium transition-colors">Schedule</button>
                     </div>
-                    <button onclick="closeUnifiedModal()" class="ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl leading-none">&times;</button>
+                    <button onclick="closeUnifiedModal()"
+                        class="ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl leading-none">&times;</button>
                 </div>
             </div>
 
             <!-- Step: Config -->
             <div id="um-step-config" class="flex flex-col md:flex-row flex-1 overflow-auto">
                 <!-- Left: config 60% -->
-                <div class="flex-1 p-6 border-b md:border-b-0 md:border-r border-gray-200 dark:border-gray-700 overflow-y-auto">
+                <div
+                    class="flex-1 p-6 border-b md:border-b-0 md:border-r border-gray-200 dark:border-gray-700 overflow-y-auto">
                     <!-- Report Type -->
                     <div class="mb-5">
-                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Report Type</label>
+                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Report
+                            Type</label>
                         <div class="flex gap-4">
-                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-type" value="weekly" checked onchange="umTypeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Weekly</span></label>
-                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-type" value="monthly" onchange="umTypeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Monthly</span></label>
-                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-type" value="daily" onchange="umTypeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Daily</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-type"
+                                    value="weekly" checked onchange="umTypeChanged()" class="text-indigo-600"><span
+                                    class="text-sm text-gray-700 dark:text-gray-300">Weekly</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-type"
+                                    value="monthly" onchange="umTypeChanged()" class="text-indigo-600"><span
+                                    class="text-sm text-gray-700 dark:text-gray-300">Monthly</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-type"
+                                    value="daily" onchange="umTypeChanged()" class="text-indigo-600"><span
+                                    class="text-sm text-gray-700 dark:text-gray-300">Daily</span></label>
                         </div>
                     </div>
                     <!-- Scope -->
                     <div class="mb-5">
                         <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Scope</label>
                         <div class="flex gap-4">
-                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-scope" value="team" checked onchange="umScopeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Team Report</span></label>
-                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-scope" value="individual" onchange="umScopeChanged()" class="text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">Individual Agent</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-scope"
+                                    value="team" checked onchange="umScopeChanged()" class="text-indigo-600"><span
+                                    class="text-sm text-gray-700 dark:text-gray-300">Team Report</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="um-scope"
+                                    value="individual" onchange="umScopeChanged()" class="text-indigo-600"><span
+                                    class="text-sm text-gray-700 dark:text-gray-300">Individual Agent</span></label>
                         </div>
                     </div>
                     <!-- Agent selector -->
                     <div id="um-agent-wrap" class="mb-5 hidden">
-                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Agent</label>
-                        <select id="um-agent" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                        <label class="se-report-label mb-2">Agent</label>
+                        <select id="um-agent"
+                            class="se-report-control se-report-select">
                             <option value="">-- Select Agent --</option>
                         </select>
                     </div>
                     <!-- Date Range -->
                     <div class="mb-5">
-                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Date Range</label>
+                        <label class="se-report-label mb-2">Date
+                            Range</label>
                         <div class="flex gap-2 mb-2 flex-wrap">
-                            <button type="button" onclick="umPreset('last_week')" class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900">Last Week</button>
-                            <button type="button" onclick="umPreset('this_week')" class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900">This Week</button>
-                            <button type="button" onclick="umPreset('last_month')" class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900">Last Month</button>
+                            <button type="button" onclick="umPreset('last_week')"
+                                class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900">Last
+                                Week</button>
+                            <button type="button" onclick="umPreset('this_week')"
+                                class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900">This
+                                Week</button>
+                            <button type="button" onclick="umPreset('last_month')"
+                                class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900">Last
+                                Month</button>
                         </div>
                         <div class="flex gap-3">
-                            <div class="flex-1"><label class="block text-xs text-gray-500 mb-1">Start</label><input type="date" id="um-start" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"></div>
-                            <div class="flex-1"><label class="block text-xs text-gray-500 mb-1">End</label><input type="date" id="um-end" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"></div>
+                            <div class="flex-1"><label class="block text-xs text-gray-500 mb-1">Start</label><input
+                                    type="date" id="um-start"
+                                    class="se-report-control se-report-date">
+                            </div>
+                            <div class="flex-1"><label class="block text-xs text-gray-500 mb-1">End</label><input
+                                    type="date" id="um-end"
+                                    class="se-report-control se-report-date">
+                            </div>
                         </div>
                         <p id="um-period-hint" class="text-xs text-gray-400 mt-1"></p>
                     </div>
                     <!-- Options -->
                     <div class="mb-5">
-                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Options</label>
+                        <label class="se-report-label mb-2">Options</label>
                         <div class="space-y-2">
-                            <label id="um-pdf-wrap" class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="um-include-pdf" class="text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">Include PDF export (WeasyPrint)</span></label>
-                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" id="um-auto-email" class="text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">Auto-email upon generation</span></label>
+                            <label id="um-pdf-wrap" class="flex items-center gap-2 cursor-pointer"><input
+                                    type="checkbox" id="um-include-pdf" class="text-indigo-600 rounded"><span
+                                    class="text-sm text-gray-700 dark:text-gray-300">Include PDF export
+                                    (WeasyPrint)</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox"
+                                    id="um-auto-email" class="text-indigo-600 rounded"><span
+                                    class="text-sm text-gray-700 dark:text-gray-300">Auto-email upon
+                                    generation</span></label>
                         </div>
                     </div>
                     <!-- Schedule options -->
-                    <div id="um-schedule-opts" class="hidden mb-5 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                        <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Schedule Options</label>
+                    <div id="um-schedule-opts"
+                        class="hidden mb-5 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <label class="se-report-label mb-3">Schedule
+                            Options</label>
                         <div class="grid grid-cols-2 gap-3">
-                            <div><label class="block text-xs text-gray-500 mb-1">Frequency</label><select id="um-freq" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg text-sm"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="daily">Daily</option></select></div>
-                            <div><label class="block text-xs text-gray-500 mb-1">Send Hour (IST)</label><input type="number" id="um-send-hour" value="9" min="0" max="23" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg text-sm"></div>
-                            <div class="col-span-2"><label class="block text-xs text-gray-500 mb-1">Schedule Name</label><input type="text" id="um-sched-name" placeholder="Weekly Team Report" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg text-sm"></div>
+                            <div><label class="block text-xs text-gray-500 mb-1">Frequency</label><select id="um-freq"
+                                    class="se-report-control se-report-select">
+                                    <option value="weekly">Weekly</option>
+                                    <option value="monthly">Monthly</option>
+                                    <option value="daily">Daily</option>
+                                </select></div>
+                            <div><label class="block text-xs text-gray-500 mb-1">Send Hour (IST)</label><input
+                                    type="number" id="um-send-hour" value="9" min="0" max="23"
+                                    class="se-report-control">
+                            </div>
+                            <div class="col-span-2"><label class="block text-xs text-gray-500 mb-1">Schedule
+                                    Name</label><input type="text" id="um-sched-name" placeholder="Weekly Team Report"
+                                    class="se-report-control">
+                            </div>
                         </div>
                     </div>
                 </div>
                 <!-- Right: recipients 40% -->
                 <div class="w-full md:w-80 p-6 overflow-y-auto">
-                    <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Email Recipients</label>
-                    <input type="text" id="um-recipient-search" placeholder="Search users..." oninput="umFilterRecipients()"
-                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm mb-2">
-                    <div class="flex gap-2 mb-2">
-                        <button type="button" onclick="umSelectAllRecipients()" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Select All</button>
-                        <span class="text-gray-300 dark:text-gray-600">|</span>
-                        <button type="button" onclick="umClearRecipients()" class="text-xs text-gray-500 hover:underline">Clear</button>
+                    <label class="se-report-label mb-2" for="um-recipient-search">Email
+                        Recipients</label>
+                    <div class="se-search-wrapper w-full mb-2">
+                        <span class="se-search-icon" aria-hidden="true">
+                            {{ icon('search', class='w-4 h-4') }}
+                        </span>
+                        <input type="text" id="um-recipient-search" placeholder="Search users..."
+                            oninput="umFilterRecipients()"
+                            class="se-search-input w-full"
+                            autocomplete="off"
+                            spellcheck="false"
+                            role="searchbox"
+                            aria-label="Search users">
                     </div>
-                    <div id="um-recipients-list" class="space-y-1 max-h-52 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-2 mb-3">
+                    <div class="flex gap-2 mb-2">
+                        <button type="button" onclick="umSelectAllRecipients()"
+                            class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Select All</button>
+                        <span class="text-gray-300 dark:text-gray-600">|</span>
+                        <button type="button" onclick="umClearRecipients()"
+                            class="text-xs text-gray-500 hover:underline">Clear</button>
+                    </div>
+                    <div id="um-recipients-list"
+                        class="space-y-1 max-h-52 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-2 mb-3">
                         <p class="text-xs text-gray-400">Loading users...</p>
                     </div>
                     <label class="block text-xs text-gray-500 mb-1">Or enter emails manually</label>
                     <input type="text" id="um-manual-emails" placeholder="user@example.com, ..."
-                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 rounded-lg text-sm">
+                        class="se-report-control">
                 </div>
             </div>
 
             <!-- Step: Generating -->
-            <div id="um-step-generating" class="hidden flex-1 flex flex-col items-center justify-center p-10 text-center">
-                <div class="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-6"></div>
-                <p id="um-gen-status" class="text-gray-700 dark:text-gray-300 font-medium mb-2">Starting generation...</p>
+            <div id="um-step-generating"
+                class="hidden flex-1 flex flex-col items-center justify-center p-10 text-center">
+                <div class="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-6">
+                </div>
+                <p id="um-gen-status" class="text-gray-700 dark:text-gray-300 font-medium mb-2">Starting generation...
+                </p>
                 <p id="um-gen-detail" class="text-sm text-gray-500 dark:text-gray-400"></p>
             </div>
 
             <!-- Step: Result -->
             <div id="um-step-result" class="hidden flex-1 flex flex-col items-center justify-center p-10 text-center">
                 <div id="um-result-icon" class="text-5xl mb-4">&#x2705;</div>
-                <p id="um-result-msg" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Report generated successfully</p>
+                <p id="um-result-msg" class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Report
+                    generated successfully</p>
                 <p id="um-result-detail" class="text-sm text-gray-500 dark:text-gray-400 mb-6"></p>
                 <div class="flex flex-wrap gap-3 justify-center">
-                    <button id="um-btn-view" onclick="umViewReport()" class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium"><svg class="w-4 h-4 inline-block align-[-0.125em]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg> View Report</button>
-                    <button id="um-btn-email" onclick="umSendEmail()" class="inline-flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium"><svg class="w-4 h-4 inline-block align-[-0.125em]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg> Send Email</button>
-                    <button onclick="umReset()" class="inline-flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium"><svg class="w-4 h-4 inline-block align-[-0.125em]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> New Report</button>
+                    <button id="um-btn-view" onclick="umViewReport()"
+                        class="btn btn-primary">
+                        {{ icon('eye', 'w-4 h-4') }} View Report
+                    </button>
+                    <button id="um-btn-email" onclick="umSendEmail()"
+                        class="btn btn-success">
+                        {{ icon('email', 'w-4 h-4') }} Send Email
+                    </button>
+                    <button onclick="umReset()"
+                        class="btn btn-secondary">
+                        {{ icon('refresh', 'w-4 h-4') }} New Report
+                    </button>
                 </div>
             </div>
 
             <!-- Footer -->
-            <div id="um-footer" class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <div id="um-footer"
+                class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
                 <p id="um-footer-error" class="text-sm text-red-600 dark:text-red-400 hidden"></p>
                 <div class="flex gap-3 ml-auto">
-                    <button onclick="closeUnifiedModal()" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 transition-colors">Cancel</button>
-                    <button id="um-submit-btn" onclick="umSubmit()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">Generate</button>
+                    <button onclick="closeUnifiedModal()"
+                        class="btn btn-secondary">Cancel</button>
+                    <button id="um-submit-btn" onclick="umSubmit()"
+                        class="btn btn-primary">Generate</button>
                 </div>
             </div>
         </div>
     </div>
-</div>
-
-<!-- Report Type Selection -->
+</div><!-- Report Type Selection -->
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
     <button type="button"
         class="text-left w-full bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 cursor-pointer hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600 transition-all duration-200 group focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
         onclick="showSection('individual')">
         <div class="text-center">
             <div
-                class="w-16 h-16 mx-auto bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center text-3xl mb-4 group-hover:bg-blue-200 dark:group-hover:bg-blue-800 transition-colors">
-                <img src="{{ url_for('static', filename='user-setting.png') }}" class="w-8 h-8" alt="" />
+                class="w-16 h-16 mx-auto bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-300 mb-4 group-hover:bg-blue-200 dark:group-hover:bg-blue-800 transition-colors">
+                {{ icon('user', 'w-8 h-8') }}
             </div>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Individual Agent</h3>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Daily activity for a specific agent</p>
@@ -188,8 +1245,8 @@
         onclick="showSection('fleet')">
         <div class="text-center">
             <div
-                class="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center text-3xl mb-4 group-hover:bg-green-200 dark:group-hover:bg-green-800 transition-colors">
-                <img src="{{ url_for('static', filename='users.png') }}" class="w-8 h-8" alt="" />
+                class="w-16 h-16 mx-auto bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center text-green-600 dark:text-green-300 mb-4 group-hover:bg-green-200 dark:group-hover:bg-green-800 transition-colors">
+                {{ icon('users', 'w-8 h-8') }}
             </div>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Fleet Summary</h3>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Comparative fleet-wide statistics</p>
@@ -206,8 +1263,8 @@
         onclick="showSection('inventory')">
         <div class="text-center">
             <div
-                class="w-16 h-16 mx-auto bg-purple-100 dark:bg-purple-900 rounded-full flex items-center justify-center text-3xl mb-4 group-hover:bg-purple-200 dark:group-hover:bg-purple-800 transition-colors">
-                <img src="{{ url_for('static', filename='inventory.png') }}" class="w-8 h-8" alt="" />
+                class="w-16 h-16 mx-auto bg-purple-100 dark:bg-purple-900 rounded-full flex items-center justify-center text-purple-600 dark:text-purple-300 mb-4 group-hover:bg-purple-200 dark:group-hover:bg-purple-800 transition-colors">
+                {{ icon('inventory', 'w-8 h-8') }}
             </div>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">App Inventory</h3>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Full software inventory across fleet</p>
@@ -224,8 +1281,8 @@
         onclick="showSection('lifecycle')">
         <div class="text-center">
             <div
-                class="w-16 h-16 mx-auto bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center text-3xl mb-4 group-hover:bg-red-200 dark:group-hover:bg-red-800 transition-colors">
-                <svg class="w-4 h-4 inline-block align-[-0.125em] text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                class="w-16 h-16 mx-auto bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center text-red-600 dark:text-red-300 mb-4 group-hover:bg-red-200 dark:group-hover:bg-red-800 transition-colors">
+                {{ icon('shield', 'w-8 h-8') }}
             </div>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Lifecycle Compliance</h3>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Risk analysis & EOL tracking</p>
@@ -242,14 +1299,17 @@
         class="text-left w-full bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 cursor-pointer hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-600 transition-all duration-200 group focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
         onclick="showSection('activity')">
         <div class="text-center">
-            <div class="w-16 h-16 mx-auto bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-indigo-200 dark:group-hover:bg-indigo-800 transition-colors">
-                <svg class="w-4 h-4 inline-block align-[-0.125em] text-2xl text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+            <div
+                class="w-16 h-16 mx-auto bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center text-indigo-600 dark:text-indigo-300 mb-4 group-hover:bg-indigo-200 dark:group-hover:bg-indigo-800 transition-colors">
+                {{ icon('report', 'w-8 h-8') }}
             </div>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Activity Reports</h3>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Weekly / Monthly team & individual</p>
             <div class="flex justify-center gap-2">
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200">Preview</span>
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200">Email</span>
+                <span
+                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200">Preview</span>
+                <span
+                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200">Email</span>
             </div>
         </div>
     </button>
@@ -259,16 +1319,18 @@
         class="text-left w-full bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 cursor-pointer hover:shadow-md hover:border-teal-300 dark:hover:border-teal-600 transition-all duration-200 group focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
         onclick="showSection('schedules')">
         <div class="text-center">
-            <div class="w-16 h-16 mx-auto bg-teal-100 dark:bg-teal-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-teal-200 dark:group-hover:bg-teal-800 transition-colors">
-                <svg class="w-4 h-4 inline-block align-[-0.125em] text-2xl text-teal-600 dark:text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <div
+                class="w-16 h-16 mx-auto bg-teal-100 dark:bg-teal-900 rounded-full flex items-center justify-center text-teal-600 dark:text-teal-300 mb-4 group-hover:bg-teal-200 dark:group-hover:bg-teal-800 transition-colors">
+                {{ icon('clock', 'w-8 h-8') }}
             </div>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Email Schedules</h3>
             <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Auto-send reports via noreply</p>
             <div class="flex justify-center">
-                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200">Scheduled</span>
+                <span
+                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200">Scheduled</span>
             </div>
         </div>
-     </button>
+    </button>
 </div>
 
 <!-- Individual Agent Report Section -->
@@ -276,44 +1338,36 @@
     class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6"
     style="display:none;">
     <div class="flex items-center gap-3 mb-6">
-        <div class="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center text-xl">
-            <img src="{{ url_for('static', filename='user-setting.png') }}" class="w-8 h-8" />
+        <div class="w-10 h-10 bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 rounded-lg flex items-center justify-center">
+            {{ icon('user', 'w-5 h-5') }}
         </div>
         <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Individual Agent Report</h2>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select Agent</label>
+            <label for="agent-select" class="se-report-label">Select Agent</label>
             <select id="agent-select"
-                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                class="se-report-control se-report-select">
                 <option value="">Loading agents...</option>
             </select>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Report Date</label>
+            <label for="report-date" class="se-report-label">Report Date</label>
             <input type="date" id="report-date"
-                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                class="se-report-control se-report-date">
         </div>
     </div>
 
     <div class="flex flex-wrap gap-3">
         <button onclick="openAgentReport()"
-            class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
-            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
-                </path>
-            </svg>
+            class="btn btn-primary">
+            {{ icon('eye', 'w-4 h-4 mr-2') }}
             View Report (Print/PDF)
         </button>
         <button onclick="downloadAgentCSV()"
-            class="inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-lg transition-colors">
-            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
-                </path>
-            </svg>
+            class="btn btn-secondary">
+            {{ icon('download', 'w-4 h-4 mr-2') }}
             Download CSV
         </button>
     </div>
@@ -324,25 +1378,21 @@
     class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6"
     style="display:none;">
     <div class="flex items-center gap-3 mb-6">
-        <div class="w-10 h-10 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center text-xl">
-            <img src="{{ url_for('static', filename='users.png') }}" class="w-8 h-8" />
+        <div class="w-10 h-10 bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300 rounded-lg flex items-center justify-center">
+            {{ icon('users', 'w-5 h-5') }}
         </div>
         <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Fleet Summary Report</h2>
     </div>
 
     <div class="mb-6">
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Report Date</label>
+        <label for="fleet-date" class="se-report-label">Report Date</label>
         <input type="date" id="fleet-date"
-            class="w-full max-w-xs px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+            class="se-report-control se-report-date max-w-xs">
     </div>
 
     <button onclick="downloadFleetCSV()"
-        class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors">
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
-            </path>
-        </svg>
+        class="btn btn-primary">
+        {{ icon('download', 'w-4 h-4 mr-2') }}
         Download Fleet Summary CSV
     </button>
 </div>
@@ -352,43 +1402,37 @@
     class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6"
     style="display:none;">
     <div class="flex items-center gap-3 mb-6">
-        <div class="w-10 h-10 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center text-xl">
-            <img src="{{ url_for('static', filename='inventory.png') }}" class="w-8 h-8" />
+        <div class="w-10 h-10 bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300 rounded-lg flex items-center justify-center">
+            {{ icon('inventory', 'w-5 h-5') }}
         </div>
         <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Application Inventory Report</h2>
     </div>
 
     <div class="mb-6">
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Select Agent (or All)</label>
+        <label for="inventory-agent-select" class="se-report-label">Select Agent (or All)</label>
         <select id="inventory-agent-select"
-            class="w-full max-w-md px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+            class="se-report-control se-report-select max-w-md">
             <option value="all">All Agents (Combined)</option>
         </select>
     </div>
 
-    <button onclick="downloadInventoryCSV()"
-        class="inline-flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors">
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
-            </path>
-        </svg>
-        Download Inventory CSV
-    </button>
+    <div class="flex flex-wrap gap-3 items-center">
+        <button onclick="downloadInventoryCSV()"
+            class="btn btn-primary">
+            {{ icon('download', 'w-4 h-4 mr-2') }}
+            Download Inventory CSV
+        </button>
 
-    {# D15 / FR-025b: the combined CSV concatenates every agent's inventory into
-       one undivided list, so fleet-common applications repeat once per agent.
-       This format gives each agent its own worksheet. FR-025e — the CSV above
-       is unchanged and still available. #}
-    <button onclick="downloadInventoryXLSX()" id="btn-inventory-xlsx"
-        class="inline-flex items-center px-4 py-2 ml-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors">
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M9 17v-6h13M9 7h13M4 7h1m-1 5h1m-1 5h1M3 5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5z">
-            </path>
-        </svg>
-        Download Excel (one sheet per agent)
-    </button>
+        {# D15 / FR-025b: the combined CSV concatenates every agent's inventory into
+        one undivided list, so fleet-common applications repeat once per agent.
+        This format gives each agent its own worksheet. FR-025e — the CSV above
+        is unchanged and still available. #}
+        <button onclick="downloadInventoryXLSX()" id="btn-inventory-xlsx"
+            class="btn btn-secondary">
+            {{ icon('table', 'w-4 h-4 mr-2') }}
+            Download Excel (one sheet per agent)
+        </button>
+    </div>
 </div>
 
 <!-- Lifecycle Section -->
@@ -397,17 +1441,17 @@
     style="display:none;">
     <div class="flex items-center gap-3 mb-6">
         <div
-            class="w-10 h-10 bg-red-100 dark:bg-red-900 rounded-lg flex items-center justify-center text-xl text-red-600">
-            <svg class="w-4 h-4 inline-block align-[-0.125em]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+            class="w-10 h-10 bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-300 rounded-lg flex items-center justify-center">
+            {{ icon('shield', 'w-5 h-5') }}
         </div>
         <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Software Lifecycle Compliance Report</h2>
     </div>
 
     <div class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Filter by Status</label>
+            <label for="lifecycle-status-filter" class="se-report-label">Filter by Status</label>
             <select id="lifecycle-status-filter"
-                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent">
+                class="se-report-control se-report-select">
                 <option value="all">All Statuses</option>
                 <option value="eol">Only EOL Products</option>
                 <option value="outdated">Only Outdated Products</option>
@@ -415,19 +1459,15 @@
             </select>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Organization Scope</label>
+            <label class="se-report-label">Organization Scope</label>
             <input type="text" value="{{ session.org_id or 'All Organizations' }}" disabled
-                class="w-full px-4 py-2 bg-gray-100 dark:bg-gray-600 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 dark:text-gray-400 italic">
+                class="se-report-control italic">
         </div>
     </div>
 
     <button id="btn-lifecycle-csv" onclick="downloadLifecycleCSV()"
-        class="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors">
-        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
-            </path>
-        </svg>
+        class="btn btn-primary">
+        {{ icon('download', 'w-4 h-4 mr-2') }}
         Download Lifecycle Compliance Export
     </button>
 </div>
@@ -438,81 +1478,97 @@
     class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6"
     style="display:none;">
     <div class="flex items-center gap-3 mb-6">
-        <div class="w-10 h-10 bg-indigo-100 dark:bg-indigo-900 rounded-lg flex items-center justify-center">
-            <svg class="w-4 h-4 inline-block align-[-0.125em] text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+        <div class="w-10 h-10 bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300 rounded-lg flex items-center justify-center">
+            {{ icon('report', 'w-5 h-5') }}
         </div>
         <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Activity Reports</h2>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Report Type</label>
-            <select id="ar-type" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+            <label for="ar-type" class="se-report-label">Report Type</label>
+            <select id="ar-type" onchange="toggleArDateFields()"
+                class="se-report-control se-report-select">
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
                 <option value="daily">Daily</option>
             </select>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Scope</label>
-            <select id="ar-scope" onchange="toggleArAgent()" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+            <label for="ar-scope" class="se-report-label">Scope</label>
+            <select id="ar-scope" onchange="toggleArAgent()"
+                class="se-report-control se-report-select">
                 <option value="team">Team (All)</option>
                 <option value="individual">Individual Agent</option>
             </select>
         </div>
         <div id="ar-agent-wrap" style="display:none;">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Agent</label>
-            <select id="ar-agent" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+            <label for="ar-agent" class="se-report-label">Agent</label>
+            <select id="ar-agent"
+                class="se-report-control se-report-select">
                 <option value="">-- Select Agent --</option>
             </select>
         </div>
-        <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Date</label>
-            <input type="date" id="ar-start" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+        <div id="ar-start-wrap">
+            <label for="ar-start" class="se-report-label">Start Date</label>
+            <input type="date" id="ar-start"
+                class="se-report-control se-report-date">
         </div>
-        <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End Date</label>
-            <input type="date" id="ar-end" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+        <div id="ar-end-wrap">
+            <label for="ar-end" class="se-report-label">End Date</label>
+            <input type="date" id="ar-end"
+                class="se-report-control se-report-date">
+        </div>
+        <div id="ar-date-wrap" style="display:none;">
+            <label for="ar-date" class="se-report-label">Date</label>
+            <input type="date" id="ar-date"
+                class="se-report-control se-report-date">
         </div>
     </div>
 
     <!-- Email Now -->
-    <div id="ar-email-wrap" class="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Send Email To (comma-separated)</label>
+    <div id="ar-email-wrap" class="mb-6">
+        <label for="ar-recipients" class="se-report-label">Send Email To
+            (comma-separated)</label>
         <input type="text" id="ar-recipients" placeholder="user@example.com, user2@example.com"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500">
+            class="se-report-control">
     </div>
 
     <div id="ar-status" class="mb-4 hidden p-3 rounded-lg text-sm"></div>
 
     <div class="flex flex-wrap gap-3">
         <button id="ar-generate-btn" onclick="generateActivityReport()"
-            class="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors">
-            <svg class="w-4 h-4 inline-block align-[-0.125em] mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-1.847A1 1 0 0010 10.17v3.66a1 1 0 001.555.832l3.197-1.847a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Generate Report
+            class="btn btn-primary inline-flex items-center">
+            {{ icon('play', 'w-4 h-4 mr-2') }} Generate Report
         </button>
         <button id="ar-view-btn" onclick="viewActivityReport()" style="display:none"
-            class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
-            <svg class="w-4 h-4 inline-block align-[-0.125em] mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg> View Report
+            class="btn btn-secondary inline-flex items-center">
+            {{ icon('eye', 'w-4 h-4 mr-2') }} View Report
         </button>
         <button id="ar-email-btn" onclick="emailActivityReport()" style="display:none"
-            class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors">
-            <svg class="w-4 h-4 inline-block align-[-0.125em] mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg> Send Email
+            class="btn btn-success inline-flex items-center">
+            {{ icon('email', 'w-4 h-4 mr-2') }} Send Email
         </button>
     </div>
 </div>
 
 <!-- Job History Section -->
-<div id="section-job-history" class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6" style="display:none;">
+<div id="section-job-history"
+    class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6"
+    style="display:none;">
     <div class="flex items-center justify-between mb-4">
         <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-indigo-100 dark:bg-indigo-900 rounded-lg flex items-center justify-center">
-                <svg class="w-4 h-4 inline-block align-[-0.125em] text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <div class="w-10 h-10 bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300 rounded-lg flex items-center justify-center">
+                {{ icon('clock', 'w-5 h-5') }}
             </div>
             <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Recent Report Jobs</h2>
         </div>
-        <button onclick="loadJobHistory()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">Refresh</button>
+        <button onclick="loadJobHistory()"
+            class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">Refresh</button>
     </div>
-    <div id="job-history-table"><p class="text-gray-500 dark:text-gray-400 text-sm">Loading...</p></div>
+    <div id="job-history-table">
+        <div class="se-table-container-compact p-6 text-center text-gray-500 dark:text-gray-400 text-sm">Loading report jobs...</div>
+    </div>
 </div>
 
 <!-- ── Email Schedules Section ──────────────────────────────────────────── -->
@@ -521,89 +1577,145 @@
     style="display:none;">
     <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-teal-100 dark:bg-teal-900 rounded-lg flex items-center justify-center">
-                <svg class="w-4 h-4 inline-block align-[-0.125em] text-teal-600 dark:text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <div class="w-10 h-10 bg-teal-100 dark:bg-teal-900 text-teal-600 dark:text-teal-300 rounded-lg flex items-center justify-center">
+                {{ icon('clock', 'w-5 h-5') }}
             </div>
             <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Email Schedules</h2>
         </div>
         <button onclick="toggleNewScheduleForm()"
-            class="inline-flex items-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors">
-            <svg class="w-4 h-4 inline-block align-[-0.125em] mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg> New Schedule
+            class="btn btn-primary inline-flex items-center">
+            {{ icon('plus', 'w-4 h-4 mr-2') }} New Schedule
         </button>
     </div>
 
     <!-- New Schedule Form -->
-    <div id="new-schedule-form" class="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600" style="display:none;">
-        <h3 class="font-semibold text-gray-900 dark:text-gray-100 mb-4">Create Schedule</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-            <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
-                <input type="text" id="sch-name" placeholder="Weekly Team Report"
-                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+    <!-- New Schedule Form -->
+    <div id="new-schedule-form" class="sch-form-card" style="display:none;" role="region" aria-labelledby="sch-form-title">
+        <div class="sch-form-header">
+            <h3 id="sch-form-title" class="sch-form-title">Create Schedule</h3>
+            <span class="sch-form-subtitle"><span class="sch-required">*</span> Indicates required field</span>
+        </div>
+
+        <div class="sch-form-grid" id="sch-grid-container">
+            <!-- Row 1: Report Name | Report Type | Scope -->
+            <div id="sch-name-wrap" class="sch-grid-item sch-col-span-1">
+                <label for="sch-name" class="sch-label">
+                    Report Name <span class="sch-required" aria-hidden="true">*</span>
+                </label>
+                <input type="text" id="sch-name" name="sch-name" placeholder="Weekly Team Report" maxlength="100"
+                    oninput="clearFieldError('sch-name')"
+                    class="sch-control se-report-control">
+                <p id="sch-name-error" class="sch-error-msg hidden" role="alert"></p>
             </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Report Type</label>
-                <select id="sch-type" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
+
+            <div id="sch-type-wrap" class="sch-grid-item sch-col-span-1">
+                <label for="sch-type" class="sch-label">
+                    Report Type <span class="sch-required" aria-hidden="true">*</span>
+                </label>
+                <select id="sch-type" name="sch-type" onchange="onSchTypeChange()"
+                    class="sch-control se-report-control se-report-select">
                     <option value="daily">Daily</option>
+                    <option value="weekly" selected>Weekly</option>
+                    <option value="monthly">Monthly</option>
                 </select>
+                <p id="sch-type-error" class="sch-error-msg hidden" role="alert"></p>
             </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Scope</label>
-                <select id="sch-scope" onchange="toggleSchAgent()" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
-                    <option value="team">Team</option>
+
+            <div id="sch-scope-wrap" class="sch-grid-item sch-col-span-1">
+                <label for="sch-scope" class="sch-label">
+                    Scope <span class="sch-required" aria-hidden="true">*</span>
+                </label>
+                <select id="sch-scope" name="sch-scope" onchange="onSchScopeChange()"
+                    class="sch-control se-report-control se-report-select">
+                    <option value="team" selected>Team</option>
                     <option value="individual">Individual</option>
                 </select>
+                <p id="sch-scope-error" class="sch-error-msg hidden" role="alert"></p>
             </div>
-            <div id="sch-agent-wrap" style="display:none;">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Agent</label>
-                <select id="sch-agent" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+
+            <!-- Row 2 & 3: Agent (conditional) | Frequency | Schedule Day (conditional) | Send Time | Recipients -->
+            <div id="sch-agent-wrap" class="sch-grid-item sch-col-span-1" style="display:none;">
+                <label for="sch-agent" class="sch-label">
+                    Agent <span class="sch-required" aria-hidden="true">*</span>
+                </label>
+                <select id="sch-agent" name="sch-agent" onchange="clearFieldError('sch-agent')"
+                    class="sch-control se-report-control se-report-select">
                     <option value="">-- Select Agent --</option>
                 </select>
+                <p id="sch-agent-error" class="sch-error-msg hidden" role="alert"></p>
             </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Frequency</label>
-                <select id="sch-freq" onchange="toggleFreqFields()" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
+
+            <div id="sch-freq-wrap" class="sch-grid-item sch-col-span-1">
+                <label for="sch-freq" class="sch-label">
+                    Frequency <span class="sch-required" aria-hidden="true">*</span>
+                </label>
+                <select id="sch-freq" name="sch-freq" onchange="onSchFreqChange()"
+                    class="sch-control se-report-control se-report-select">
                     <option value="daily">Daily</option>
+                    <option value="weekly" selected>Weekly</option>
                 </select>
+                <p id="sch-freq-error" class="sch-error-msg hidden" role="alert"></p>
             </div>
-            <div id="sch-dow-wrap">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Day of Week</label>
-                <select id="sch-dow" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
-                    <option value="0">Monday</option>
-                    <option value="1">Tuesday</option>
-                    <option value="2">Wednesday</option>
-                    <option value="3">Thursday</option>
-                    <option value="4">Friday</option>
-                </select>
+
+            <div id="sch-day-wrap" class="sch-grid-item sch-col-span-1">
+                <div id="sch-dow-wrap">
+                    <label for="sch-dow" class="sch-label">
+                        Day of Week <span class="sch-required" aria-hidden="true">*</span>
+                    </label>
+                    <select id="sch-dow" name="sch-dow" onchange="clearFieldError('sch-day')"
+                        class="sch-control se-report-control se-report-select">
+                        <option value="0">Monday</option>
+                        <option value="1">Tuesday</option>
+                        <option value="2">Wednesday</option>
+                        <option value="3">Thursday</option>
+                        <option value="4">Friday</option>
+                        <option value="5">Saturday</option>
+                        <option value="6">Sunday</option>
+                    </select>
+                </div>
+                <div id="sch-dom-wrap" style="display:none;">
+                    <label for="sch-dom" class="sch-label">
+                        Day of Month <span class="sch-required" aria-hidden="true">*</span>
+                    </label>
+                    <input type="number" id="sch-dom" name="sch-dom" min="1" max="31" value="15"
+                        oninput="clearFieldError('sch-day')"
+                        class="sch-control se-report-control">
+                </div>
+                <p id="sch-day-error" class="sch-error-msg hidden" role="alert"></p>
             </div>
-            <div id="sch-dom-wrap" style="display:none;">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Day of Month</label>
-                <input type="number" id="sch-dom" min="1" max="28" value="1"
-                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+
+            <div id="sch-time-wrap" class="sch-grid-item sch-col-span-1">
+                <label for="sch-time" class="sch-label">
+                    Send Time (IST) <span class="sch-required" aria-hidden="true">*</span>
+                </label>
+                <input type="time" id="sch-time" name="sch-time" step="60" min="00:00" max="23:59" value="09:15"
+                    oninput="clearFieldError('sch-time')"
+                    class="sch-control se-report-control se-report-time">
+                <input type="hidden" id="sch-hour" value="9">
+                <p class="sch-hint">24-hour IST (00:00–23:59, e.g. 09:15)</p>
+                <p id="sch-time-error" class="sch-error-msg hidden" role="alert"></p>
             </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Send Hour (IST)</label>
-                <input type="number" id="sch-hour" min="0" max="23" value="9"
-                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
+
+            <div id="sch-recipients-wrap" class="sch-grid-item sch-col-span-2">
+                <label for="sch-recipients" class="sch-label">
+                    Recipients (comma-separated emails) <span class="sch-required" aria-hidden="true">*</span>
+                </label>
+                <input type="text" id="sch-recipients" name="sch-recipients" placeholder="user@example.com, manager@example.com"
+                    oninput="clearFieldError('sch-recipients')"
+                    class="sch-control se-report-control">
+                <p class="sch-hint">Comma-separated email addresses for delivery</p>
+                <p id="sch-recipients-error" class="sch-error-msg hidden" role="alert"></p>
             </div>
         </div>
-        <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recipients (comma-separated emails)</label>
-            <input type="text" id="sch-recipients" placeholder="user@example.com, manager@example.com"
-                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-600 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-teal-500">
-        </div>
-        <div id="sch-status" class="mb-3 hidden"></div>
-        <div class="flex gap-3">
-            <button onclick="createSchedule()"
-                class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors">
+
+        <div id="sch-status" class="mb-4 hidden" role="status" aria-live="polite"></div>
+
+        <!-- Form Actions -->
+        <div class="sch-actions">
+            <button id="sch-submit-btn" onclick="createSchedule()" type="button" class="sch-btn-primary">
                 Save Schedule
             </button>
-            <button onclick="toggleNewScheduleForm()"
-                class="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 font-medium rounded-lg transition-colors">
+            <button id="sch-cancel-btn" onclick="toggleNewScheduleForm()" type="button" class="sch-btn-secondary">
                 Cancel
             </button>
         </div>
@@ -619,9 +1731,6 @@
 <!-- Quick Access Section -->
 <div class="mb-6">
     <div class="flex items-center gap-3 mb-4">
-        <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-        </svg>
         <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">Quick Access - Agent Reports</h3>
     </div>
 </div>
@@ -641,21 +1750,115 @@
 
 {% block extra_js %}
 <script nonce="{{ csp_nonce() }}">
+    const HEROICON_MONITOR_SM = `{{ icon('monitor', class='w-4 h-4 text-gray-500') | safe }}`;
+    const HEROICON_VIEW_SM = `{{ icon('eye', class='w-4 h-4') | safe }}`;
+    const HEROICON_SPINNER_SM = `{{ icon('spinner', class='w-4 h-4 inline-block align-[-0.125em] animate-spin mr-2') | safe }}`;
+    const HEROICON_ERROR_FIELD = `{{ icon('warning', class='w-3.5 h-3.5 flex-shrink-0', variant='solid') | safe }}`;
+    const HEROICON_RUN_BTN = `{{ icon('play', class='w-3 h-3', variant='solid') | safe }}`;
+    const HEROICON_EDIT_BTN = `{{ icon('edit', class='w-3.5 h-3.5') | safe }}`;
+    const HEROICON_DELETE_BTN = `{{ icon('trash', class='w-3.5 h-3.5') | safe }}`;
+    const HEROICON_CHECK_BADGE = `{{ icon('online', class='w-4 h-4 inline-block text-green-500 mr-1.5') | safe }}`;
+
+    /* =======================================================================
+       CUSTOM CONTROLS: TEAM OVERVIEW STYLE DROPDOWNS & DATE PICKERS
+       Visual Reference: Team Overview Selector (.se-agent-selector) & modal ref
+       ======================================================================= */
+
+    function initCustomReportsControls() {
+        const reportContainers = document.querySelectorAll(
+            '#section-individual, #section-fleet, #section-inventory, #section-lifecycle, #section-activity, #new-schedule-form, #unified-modal, #section-schedules'
+        );
+        reportContainers.forEach(container => {
+            if (typeof window.SeCustomSelect === 'function') {
+                container.querySelectorAll('select').forEach(sel => {
+                    new window.SeCustomSelect(sel);
+                });
+            }
+            if (typeof window.SeCustomDatePicker === 'function') {
+                container.querySelectorAll('input[type="date"]').forEach(inp => {
+                    new window.SeCustomDatePicker(inp);
+                });
+            }
+        });
+
+        // Delegate label clicks to the corresponding custom button
+        document.querySelectorAll('label[for]').forEach(lbl => {
+            if (lbl._seLabelBound) return;
+            lbl._seLabelBound = true;
+            lbl.addEventListener('click', (e) => {
+                const targetId = lbl.getAttribute('for');
+                const customBtn = document.getElementById(`${targetId}-btn`);
+                if (customBtn) {
+                    e.preventDefault();
+                    customBtn.click();
+                }
+            });
+        });
+    }
+
+    // Outside-click listener to dismiss all dropdowns and datepickers
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.se-custom-select-wrapper')) {
+            document.querySelectorAll('.se-custom-select-wrapper.se-dropdown--open').forEach(w => {
+                const comp = w.querySelector('select') ? w.querySelector('select')._seCustomSelect : null;
+                if (comp && typeof comp.close === 'function') comp.close();
+            });
+        }
+        if (!e.target.closest('.se-custom-datepicker-wrapper')) {
+            document.querySelectorAll('.se-custom-datepicker-wrapper.se-dropdown--open').forEach(w => {
+                const comp = w.querySelector('input') ? w.querySelector('input')._seCustomDatePicker : null;
+                if (comp && typeof comp.close === 'function') comp.close();
+            });
+        }
+    });
+
+    // Escape listener
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.se-custom-select-wrapper.se-dropdown--open').forEach(w => {
+                const comp = w.querySelector('select') ? w.querySelector('select')._seCustomSelect : null;
+                if (comp && typeof comp.close === 'function') comp.close();
+            });
+            document.querySelectorAll('.se-custom-datepicker-wrapper.se-dropdown--open').forEach(w => {
+                const comp = w.querySelector('input') ? w.querySelector('input')._seCustomDatePicker : null;
+                if (comp && typeof comp.close === 'function') comp.close();
+            });
+        }
+    });
+
     let allAgents = [];
 
     document.addEventListener('DOMContentLoaded', async () => {
         // Set today's date as default
         const today = localDateStr();
-        document.getElementById('report-date').value = today;
-        document.getElementById('fleet-date').value = today;
+        const repDate = document.getElementById('report-date');
+        if (repDate) repDate.value = today;
+        const fleetDate = document.getElementById('fleet-date');
+        if (fleetDate) fleetDate.value = today;
+
+        // Initialize custom dropdowns & datepickers safely
+        try {
+            initCustomReportsControls();
+        } catch (e) {
+            console.error('Error initializing custom controls:', e);
+        }
 
         // Load agents
-        const response = await fetchJSON('/dashboard/api/agents');
-        if (response && response.data) {
-            allAgents = response.data;
-            populateAgentSelects();
-            populateActivityAgentSelects();
-            renderAgentsGrid();
+        try {
+            const response = await fetchJSON('/dashboard/api/agents');
+            if (response && response.data) {
+                allAgents = response.data;
+                populateAgentSelects();
+                populateActivityAgentSelects();
+                renderAgentsGrid();
+                try {
+                    initCustomReportsControls();
+                } catch (e) {
+                    console.error('Error updating custom controls:', e);
+                }
+            }
+        } catch (e) {
+            console.error('Error loading agents:', e);
         }
     });
 
@@ -695,9 +1898,7 @@
             card.innerHTML = `
                 <div class="flex-1">
                     <div class="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                        </svg>
+                        ${HEROICON_MONITOR_SM}
                         ${agent.hostname || 'Unknown'}
                     </div>
                     <div class="text-sm text-gray-600 dark:text-gray-400 mt-1">
@@ -707,11 +1908,8 @@
                         </span>
                     </div>
                 </div>
-                <a href="/dashboard/agent/${agent.agent_id}/report" class="inline-flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                    </svg>
+                <a href="/dashboard/agent/${agent.agent_id}/report" class="btn btn-sm btn-primary">
+                    ${HEROICON_VIEW_SM}
                     View
                 </a>
             `;
@@ -856,7 +2054,7 @@
         const statusFilter = document.getElementById('lifecycle-status-filter').value;
         const btn = document.getElementById('btn-lifecycle-csv');
         const original = btn.innerHTML;
-        btn.innerHTML = '<svg class="w-4 h-4 inline-block align-[-0.125em] animate-spin fa-spin mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Generating Audit...';
+        btn.innerHTML = `${HEROICON_SPINNER_SM} Generating Audit...`;
         btn.disabled = true;
 
         try {
@@ -956,19 +2154,49 @@
             document.getElementById('ar-scope').value === 'individual' ? '' : 'none';
     }
 
+    function toggleArDateFields() {
+        const type = (document.getElementById('ar-type') || {}).value || 'weekly';
+        const startWrap = document.getElementById('ar-start-wrap');
+        const endWrap = document.getElementById('ar-end-wrap');
+        const dateWrap = document.getElementById('ar-date-wrap');
+        const arDate = document.getElementById('ar-date');
+        const arStart = document.getElementById('ar-start');
+
+        if (type === 'daily') {
+            if (startWrap) startWrap.style.display = 'none';
+            if (endWrap) endWrap.style.display = 'none';
+            if (dateWrap) dateWrap.style.display = '';
+            if (arDate && !arDate.value) {
+                if (arStart && arStart.value) {
+                    arDate.value = arStart.value;
+                } else if (typeof DateFmt !== 'undefined') {
+                    const [ty, tm, td] = DateFmt.todayISO().split('-').map(Number);
+                    const d = new Date(ty, tm - 1, td);
+                    d.setDate(d.getDate() - 1);
+                    arDate.value = localDateStr(d);
+                }
+            }
+        } else {
+            if (startWrap) startWrap.style.display = '';
+            if (endWrap) endWrap.style.display = '';
+            if (dateWrap) dateWrap.style.display = 'none';
+            if (arStart && !arStart.value && arDate && arDate.value) {
+                arStart.value = arDate.value;
+            }
+        }
+    }
+
     function getArDates() {
         const type = document.getElementById('ar-type').value;
         // FR-011: "today" is the VIEWER's today, not a hardcoded IST day.
-        // This previously added a fixed 5.5-hour offset to a UTC instant and then
-        // read UTC parts back off it — a manual-offset hack that is wrong for every
-        // viewer outside IST and cannot handle daylight saving anywhere.
-        // DateFmt.todayISO() resolves the calendar day in the viewer's zone.
         const [ty, tm, td] = DateFmt.todayISO().split('-').map(Number);
         const today = new Date(ty, tm - 1, td);
         let start, end;
         if (type === 'daily') {
             const d = new Date(today); d.setDate(d.getDate() - 1);
-            start = end = localDateStr(d);
+            const defaultDate = localDateStr(d);
+            const chosen = (document.getElementById('ar-date') || {}).value || (document.getElementById('ar-start') || {}).value || defaultDate;
+            return { start: chosen, end: chosen };
         } else if (type === 'monthly') {
             const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
             const last = new Date(today.getFullYear(), today.getMonth(), 0);
@@ -1035,15 +2263,142 @@
     }
 
     // ── Email Schedules ─────────────────────────────────────────────────────
+    let _editingScheduleId = null;
+    let _schedulesData = [];
+
+    const SCH_FREQ_MAP = {
+        daily: [
+            { value: 'daily', label: 'Daily' },
+            { value: 'weekly', label: 'Weekly' },
+            { value: 'monthly', label: 'Monthly' }
+        ],
+        weekly: [
+            { value: 'daily', label: 'Daily' },
+            { value: 'weekly', label: 'Weekly' }
+        ],
+        monthly: [
+            { value: 'monthly', label: 'Monthly' }
+        ]
+    };
+
+    function showFieldError(fieldId, msg) {
+        const errEl = document.getElementById(`${fieldId}-error`);
+        if (errEl) {
+            errEl.innerHTML = `${HEROICON_ERROR_FIELD} <span>${escapeHtml(msg)}</span>`;
+            errEl.classList.remove('hidden');
+        }
+        const inputEl = document.getElementById(fieldId);
+        if (inputEl) {
+            inputEl.classList.add('sch-input-error');
+            inputEl.setAttribute('aria-invalid', 'true');
+        }
+    }
+
+    function clearFieldError(fieldId) {
+        const errEl = document.getElementById(`${fieldId}-error`);
+        if (errEl) {
+            errEl.textContent = '';
+            errEl.classList.add('hidden');
+        }
+        const inputEl = document.getElementById(fieldId);
+        if (inputEl) {
+            inputEl.classList.remove('sch-input-error');
+            inputEl.removeAttribute('aria-invalid');
+        }
+    }
+
+    function clearAllFieldErrors() {
+        ['sch-name', 'sch-type', 'sch-scope', 'sch-agent', 'sch-freq', 'sch-day', 'sch-time', 'sch-recipients'].forEach(clearFieldError);
+    }
+
+    function onSchTypeChange() {
+        clearFieldError('sch-type');
+        clearFieldError('sch-freq');
+        const reportType = document.getElementById('sch-type').value;
+        const freqSelect = document.getElementById('sch-freq');
+        const validFreqs = SCH_FREQ_MAP[reportType] || SCH_FREQ_MAP.weekly;
+        const currentFreq = freqSelect.value;
+
+        freqSelect.innerHTML = validFreqs.map(f => `<option value="${f.value}">${f.label}</option>`).join('');
+
+        const stillValid = validFreqs.some(f => f.value === currentFreq);
+        if (stillValid) {
+            freqSelect.value = currentFreq;
+        } else {
+            // Automatically reset Frequency to the first valid option
+            freqSelect.value = validFreqs[0].value;
+        }
+        toggleFreqFields();
+    }
+
+    function onSchScopeChange() {
+        clearFieldError('sch-scope');
+        clearFieldError('sch-agent');
+        toggleSchAgent();
+    }
+
+    function onSchFreqChange() {
+        clearFieldError('sch-freq');
+        clearFieldError('sch-day');
+        toggleFreqFields();
+    }
+
+    function adjustGridSpans() {
+        const isIndividual = (document.getElementById('sch-scope') || {}).value === 'individual';
+        const freq = (document.getElementById('sch-freq') || {}).value;
+        const isDayVisible = freq === 'weekly' || freq === 'monthly';
+        const recipWrap = document.getElementById('sch-recipients-wrap');
+        if (!recipWrap) return;
+
+        recipWrap.classList.remove('sch-col-span-1', 'sch-col-span-2', 'sch-col-span-3');
+        if (isIndividual && isDayVisible) {
+            recipWrap.classList.add('sch-col-span-2');
+        } else {
+            recipWrap.classList.add('sch-col-span-3');
+        }
+    }
+
+    function toggleSchAgent() {
+        const isIndividual = document.getElementById('sch-scope').value === 'individual';
+        const wrap = document.getElementById('sch-agent-wrap');
+        if (wrap) wrap.style.display = isIndividual ? '' : 'none';
+        if (!isIndividual) clearFieldError('sch-agent');
+        adjustGridSpans();
+    }
+
+    function toggleFreqFields() {
+        const freq = document.getElementById('sch-freq').value;
+        const dayWrap = document.getElementById('sch-day-wrap');
+        const dowWrap = document.getElementById('sch-dow-wrap');
+        const domWrap = document.getElementById('sch-dom-wrap');
+
+        if (freq === 'daily') {
+            if (dayWrap) dayWrap.style.display = 'none';
+            if (dowWrap) dowWrap.style.display = 'none';
+            if (domWrap) domWrap.style.display = 'none';
+            clearFieldError('sch-day');
+        } else if (freq === 'weekly') {
+            if (dayWrap) dayWrap.style.display = '';
+            if (dowWrap) dowWrap.style.display = '';
+            if (domWrap) domWrap.style.display = 'none';
+        } else if (freq === 'monthly') {
+            if (dayWrap) dayWrap.style.display = '';
+            if (dowWrap) dowWrap.style.display = 'none';
+            if (domWrap) domWrap.style.display = '';
+        }
+        adjustGridSpans();
+    }
+
     /**
      * Clear the schedule form back to its documented defaults (D13 / FR-029).
-     *
-     * The form is a set of live DOM inputs that persist between openings. Saving
-     * only hid the form, so the values a user had just submitted — and then
-     * deleted — were still sitting in the inputs when the form was next shown.
-     * A user could unknowingly recreate the schedule they had just removed.
      */
     function resetScheduleForm() {
+        _editingScheduleId = null;
+        const titleEl = document.getElementById('sch-form-title');
+        if (titleEl) titleEl.textContent = 'Create Schedule';
+        const submitBtn = document.getElementById('sch-submit-btn');
+        if (submitBtn) submitBtn.textContent = 'Save Schedule';
+
         const setVal = (id, value) => {
             const el = document.getElementById(id);
             if (el) el.value = value;
@@ -1053,126 +2408,466 @@
         setVal('sch-type', 'weekly');
         setVal('sch-scope', 'team');
         setVal('sch-agent', '');
-        setVal('sch-freq', 'weekly');
-        setVal('sch-dow', '0');
-        setVal('sch-dom', '1');
+        setVal('sch-time', '09:15');
         setVal('sch-hour', '9');
+        setVal('sch-dow', '0');
+        setVal('sch-dom', '15');
+
+        onSchTypeChange();
+        setVal('sch-freq', 'weekly');
+
+        clearAllFieldErrors();
 
         const status = document.getElementById('sch-status');
-        if (status) status.textContent = '';
+        if (status) {
+            status.textContent = '';
+            status.classList.add('hidden');
+        }
 
-        // Keep the conditional field visibility consistent with the values just
-        // restored, or the form reopens showing fields that no longer apply.
         if (typeof toggleSchAgent === 'function') toggleSchAgent();
         if (typeof toggleFreqFields === 'function') toggleFreqFields();
+        if (typeof adjustGridSpans === 'function') adjustGridSpans();
     }
 
     function toggleNewScheduleForm() {
         const f = document.getElementById('new-schedule-form');
         const opening = f.style.display === 'none';
-        // Clear on open rather than on close: that also covers a form left
-        // half-filled and abandoned, not just one that was saved (FR-029).
         if (opening) resetScheduleForm();
         f.style.display = opening ? '' : 'none';
+        if (opening && typeof initCustomReportsControls === 'function') initCustomReportsControls();
     }
-    function toggleSchAgent() {
-        document.getElementById('sch-agent-wrap').style.display =
-            document.getElementById('sch-scope').value === 'individual' ? '' : 'none';
+
+    function validateScheduleForm() {
+        clearAllFieldErrors();
+        let isValid = true;
+
+        // 1. Report Name
+        const nameInput = document.getElementById('sch-name');
+        const nameVal = (nameInput ? nameInput.value : '').trim();
+        if (!nameVal) {
+            showFieldError('sch-name', 'Report name is required');
+            isValid = false;
+        } else if (nameVal.length > 100) {
+            showFieldError('sch-name', 'Report name must be 100 characters or fewer');
+            isValid = false;
+        }
+
+        // 2. Report Type
+        const typeVal = document.getElementById('sch-type').value;
+        if (!typeVal || !['daily', 'weekly', 'monthly'].includes(typeVal)) {
+            showFieldError('sch-type', 'Please select a valid report type');
+            isValid = false;
+        }
+
+        // 3. Scope
+        const scopeVal = document.getElementById('sch-scope').value;
+        if (!scopeVal || !['team', 'individual'].includes(scopeVal)) {
+            showFieldError('sch-scope', 'Please select a scope');
+            isValid = false;
+        }
+
+        // 4. Agent (required when individual)
+        if (scopeVal === 'individual') {
+            const agentVal = document.getElementById('sch-agent').value;
+            if (!agentVal) {
+                showFieldError('sch-agent', 'Please select an agent');
+                isValid = false;
+            }
+        }
+
+        // 5. Frequency
+        const freqVal = document.getElementById('sch-freq').value;
+        const validFreqs = (SCH_FREQ_MAP[typeVal] || []).map(f => f.value);
+        if (!freqVal || !validFreqs.includes(freqVal)) {
+            showFieldError('sch-freq', `Invalid frequency for ${typeVal} report`);
+            isValid = false;
+        }
+
+        // 6. Schedule Day
+        if (freqVal === 'weekly') {
+            const dowVal = parseInt(document.getElementById('sch-dow').value, 10);
+            if (isNaN(dowVal) || dowVal < 0 || dowVal > 6) {
+                showFieldError('sch-day', 'Please select a day of week');
+                isValid = false;
+            }
+        } else if (freqVal === 'monthly') {
+            const domVal = parseInt(document.getElementById('sch-dom').value, 10);
+            if (isNaN(domVal) || domVal < 1 || domVal > 31) {
+                showFieldError('sch-day', 'Please enter a day of month between 1 and 31');
+                isValid = false;
+            }
+        }
+
+        // 7. Send Time (IST)
+        const timeInput = document.getElementById('sch-time');
+        const timeVal = (timeInput ? timeInput.value : '').trim();
+        const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+        if (!timeVal) {
+            showFieldError('sch-time', 'Send time (IST) is required');
+            isValid = false;
+        } else if (!timeRegex.test(timeVal)) {
+            showFieldError('sch-time', 'Please enter a valid time (00:00 to 23:59)');
+            isValid = false;
+        }
+
+        // 8. Recipients
+        const recipInput = document.getElementById('sch-recipients');
+        const recipRaw = (recipInput ? recipInput.value : '').trim();
+        if (!recipRaw) {
+            showFieldError('sch-recipients', 'At least one recipient email is required');
+            isValid = false;
+        } else {
+            const emails = recipRaw.split(',').map(s => s.trim()).filter(Boolean);
+            if (emails.length === 0) {
+                showFieldError('sch-recipients', 'At least one recipient email is required');
+                isValid = false;
+            } else {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                const invalidEmail = emails.find(e => !emailRegex.test(e));
+                if (invalidEmail) {
+                    showFieldError('sch-recipients', `Invalid email address: ${invalidEmail}`);
+                    isValid = false;
+                }
+            }
+        }
+
+        return isValid;
     }
-    function toggleFreqFields() {
-        const freq = document.getElementById('sch-freq').value;
-        document.getElementById('sch-dow-wrap').style.display = freq === 'weekly' ? '' : 'none';
-        document.getElementById('sch-dom-wrap').style.display = freq === 'monthly' ? '' : 'none';
+
+    function calculateNextRunIST(freq, dow, dom, timeStr) {
+        const [hStr, mStr] = (timeStr || '09:15').split(':');
+        const sendHour = parseInt(hStr, 10);
+        const sendMinute = parseInt(mStr, 10);
+        const now = new Date();
+        const parts = {};
+        new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric', month: 'numeric', day: 'numeric',
+            hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false
+        }).formatToParts(now).forEach(p => parts[p.type] = parseInt(p.value, 10));
+
+        let candidate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, sendHour, sendMinute, 0, 0));
+        const istNowMs = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, 0);
+
+        if (freq === 'daily') {
+            if (candidate.getTime() <= istNowMs) {
+                candidate.setUTCDate(candidate.getUTCDate() + 1);
+            }
+        } else if (freq === 'weekly') {
+            const targetDow = (dow !== null && dow !== undefined) ? parseInt(dow, 10) : 0;
+            const currentDow = (new Date(candidate).getUTCDay() + 6) % 7;
+            let daysAhead = (targetDow - currentDow) % 7;
+            if (daysAhead < 0) daysAhead += 7;
+            candidate.setUTCDate(candidate.getUTCDate() + daysAhead);
+            if (candidate.getTime() <= istNowMs) {
+                candidate.setUTCDate(candidate.getUTCDate() + 7);
+            }
+        } else if (freq === 'monthly') {
+            const targetDom = dom ? parseInt(dom, 10) : 1;
+            candidate.setUTCDate(targetDom);
+            if (candidate.getTime() <= istNowMs) {
+                candidate.setUTCMonth(candidate.getUTCMonth() + 1);
+            }
+        } else {
+            candidate = new Date(now.getTime() + 3600000);
+        }
+        return candidate;
+    }
+
+    function editSchedule(id) {
+        const s = (_schedulesData || []).find(item => item.id === id);
+        if (!s) return;
+
+        _editingScheduleId = id;
+        clearAllFieldErrors();
+
+        const setVal = (fieldId, val) => {
+            const el = document.getElementById(fieldId);
+            if (el) el.value = val;
+        };
+
+        setVal('sch-name', s.name || '');
+        setVal('sch-type', s.report_type || 'weekly');
+        setVal('sch-scope', s.scope || 'team');
+        setVal('sch-agent', s.agent_id || '');
+
+        // Populate valid frequency options for this report type
+        const validFreqs = SCH_FREQ_MAP[s.report_type] || SCH_FREQ_MAP.weekly;
+        const freqSelect = document.getElementById('sch-freq');
+        if (freqSelect) {
+            freqSelect.innerHTML = validFreqs.map(f => `<option value="${f.value}">${f.label}</option>`).join('');
+        }
+        setVal('sch-freq', s.frequency || validFreqs[0].value);
+
+        setVal('sch-dow', (s.day_of_week !== null && s.day_of_week !== undefined) ? String(s.day_of_week) : '0');
+        setVal('sch-dom', (s.day_of_month !== null && s.day_of_month !== undefined) ? String(s.day_of_month) : '15');
+
+        // Extract IST send time
+        let sendTimeStr = '09:15';
+        if (s.send_time && s.send_time.includes(':')) {
+            sendTimeStr = s.send_time;
+        } else if (s.next_run) {
+            const d = DateFmt.parseStored(s.next_run);
+            if (d) {
+                const parts = {};
+                new Intl.DateTimeFormat('en-GB', {
+                    timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false
+                }).formatToParts(d).forEach(p => parts[p.type] = p.value);
+                sendTimeStr = `${parts.hour}:${parts.minute}`;
+            }
+        } else if (s.send_hour !== null && s.send_hour !== undefined) {
+            sendTimeStr = `${String(s.send_hour).padStart(2, '0')}:00`;
+        }
+        setVal('sch-time', sendTimeStr);
+        setVal('sch-hour', String(parseInt(sendTimeStr.split(':')[0], 10)));
+
+        let recipList = [];
+        if (Array.isArray(s.recipients)) {
+            recipList = s.recipients;
+        } else if (typeof s.recipients === 'string') {
+            try {
+                if (s.recipients.startsWith('[')) recipList = JSON.parse(s.recipients);
+                else recipList = [s.recipients];
+            } catch (e) {
+                recipList = [s.recipients];
+            }
+        }
+        setVal('sch-recipients', recipList.join(', '));
+
+        if (typeof toggleSchAgent === 'function') toggleSchAgent();
+        if (typeof toggleFreqFields === 'function') toggleFreqFields();
+        if (typeof adjustGridSpans === 'function') adjustGridSpans();
+
+        const titleEl = document.getElementById('sch-form-title');
+        if (titleEl) titleEl.textContent = 'Edit Schedule';
+        const submitBtn = document.getElementById('sch-submit-btn');
+        if (submitBtn) submitBtn.textContent = 'Update Schedule';
+
+        const status = document.getElementById('sch-status');
+        if (status) {
+            status.textContent = '';
+            status.classList.add('hidden');
+        }
+
+        const f = document.getElementById('new-schedule-form');
+        if (f) {
+            f.style.display = '';
+            f.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
     async function loadSchedules() {
         const list = document.getElementById('schedules-list');
         try {
             const data = await fetchJSON('/dashboard/reports/schedules');
+            _schedulesData = data || [];
             if (!data || data.length === 0) {
                 list.innerHTML = '<p class="text-center text-gray-500 dark:text-gray-400 py-8">No schedules yet. Click "New Schedule" to create one.</p>';
                 return;
             }
-            list.innerHTML = `<div class="overflow-x-auto"><table class="w-full text-sm">
-                <thead><tr class="border-b border-gray-200 dark:border-gray-700">
-                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Name</th>
-                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Type</th>
-                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Frequency</th>
-                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Recipients</th>
-                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Next Run (UTC)</th>
-                    <th class="text-left py-2 px-3 font-medium text-gray-600 dark:text-gray-400">Last Run</th>
-                    <th class="py-2 px-3"></th>
+            list.innerHTML = `<div class="se-table-container se-table-container-flat"><table class="se-table se-table-schedules" id="schedules-table">
+                <colgroup>
+                    <col class="col-sch-name">
+                    <col class="col-sch-type">
+                    <col class="col-sch-freq">
+                    <col class="col-sch-recip">
+                    <col class="col-sch-next">
+                    <col class="col-sch-last">
+                    <col class="col-sch-act">
+                </colgroup>
+                <thead><tr>
+                    <th class="se-align-left">Name</th>
+                    <th class="se-align-left">Type</th>
+                    <th class="se-align-left">Frequency</th>
+                    <th class="se-align-left">Recipients</th>
+                    <th class="se-align-left">Next Run (IST)</th>
+                    <th class="se-align-left">Last Run</th>
+                    <th class="se-align-right">Actions</th>
                 </tr></thead>
-                <tbody>${data.map(s => `<tr class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td class="py-2 px-3 font-medium text-gray-900 dark:text-gray-100">${s.name}</td>
-                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400">${s.report_type} / ${s.scope}</td>
-                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400">${s.frequency}</td>
-                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400 text-xs">${(s.recipients||[]).slice(0,2).join(', ')}${s.recipients.length>2?' +more':''}</td>
-                    <!-- D14 / FR-013: was s.next_run.replace('T',' ').slice(0,16),
-                         which printed the raw ISO string as YYYY-MM-DD HH:mm with no
-                         timezone conversion at all. Now DD-MM-YYYY HH:mm in the
-                         viewer's zone, via the shared formatter. -->
-                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400">${s.next_run ? DateFmt.formatDateTime(s.next_run) : '—'}</td>
-                    <td class="py-2 px-3 text-gray-600 dark:text-gray-400">${s.last_run ? DateFmt.formatDateTime(s.last_run) : 'Never'}</td>
-                    <td class="py-2 px-3">
-                        <div class="flex gap-1">
-                            <button onclick="runScheduleNow(${s.id})" class="px-2 py-1 bg-green-100 hover:bg-green-200 dark:bg-green-900 dark:hover:bg-green-800 text-green-700 dark:text-green-300 rounded text-xs font-medium">▶ Run</button>
-                            <button onclick="deleteSchedule(${s.id})" class="px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900 dark:hover:bg-red-800 text-red-700 dark:text-red-300 rounded text-xs font-medium">✕</button>
+                <tbody>${data.map(s => {
+                    const name = s.name || '';
+                    const rType = (s.report_type || '').charAt(0).toUpperCase() + (s.report_type || '').slice(1);
+                    const rScope = (s.scope || '').charAt(0).toUpperCase() + (s.scope || '').slice(1);
+                    const typeStr = `${rType} / ${rScope}`;
+                    const freqStr = (s.frequency || '').charAt(0).toUpperCase() + (s.frequency || '').slice(1);
+                    const recipList = Array.isArray(s.recipients) ? s.recipients : (typeof s.recipients === 'string' ? (s.recipients.startsWith('[') ? JSON.parse(s.recipients) : [s.recipients]) : []);
+                    const recipStr = recipList.join(', ');
+                    const nextRunStr = s.next_run ? DateFmt.formatDateTime(s.next_run, 'Asia/Kolkata') : '—';
+                    const lastRunStr = s.last_run ? DateFmt.formatDateTime(s.last_run, 'Asia/Kolkata') : 'Never';
+                    return `<tr>
+                    <td class="col-sch-name se-align-left">
+                        <span class="se-cell-truncate font-bold text-gray-900 dark:text-gray-100" data-full-text="${escapeHtml(name)}">${escapeHtml(name)}</span>
+                    </td>
+                    <td class="col-sch-type se-align-left">
+                        <span class="se-cell-truncate text-gray-600 dark:text-gray-400" data-full-text="${escapeHtml(typeStr)}">${escapeHtml(typeStr)}</span>
+                    </td>
+                    <td class="col-sch-freq se-align-left">
+                        <span class="se-cell-truncate text-gray-600 dark:text-gray-400" data-full-text="${escapeHtml(freqStr)}">${escapeHtml(freqStr)}</span>
+                    </td>
+                    <td class="col-sch-recip se-align-left">
+                        <span class="se-cell-truncate text-gray-600 dark:text-gray-400" data-full-text="${escapeHtml(recipStr)}">${escapeHtml(recipStr)}</span>
+                    </td>
+                    <td class="col-sch-next se-align-left">
+                        <span class="se-cell-truncate text-gray-600 dark:text-gray-400 font-normal" data-full-text="${nextRunStr}">${nextRunStr}</span>
+                    </td>
+                    <td class="col-sch-last se-align-left">
+                        <span class="se-cell-truncate text-gray-600 dark:text-gray-400 font-normal" data-full-text="${escapeHtml(lastRunStr)}">${escapeHtml(lastRunStr)}</span>
+                    </td>
+                    <td class="col-sch-act se-align-right" data-no-tooltip>
+                        <div class="flex items-center justify-end gap-1.5" data-no-tooltip>
+                            <button onclick="runScheduleNow(${s.id})" data-no-tooltip class="sch-act-btn sch-btn-run" aria-label="Run schedule">
+                                ${HEROICON_RUN_BTN}
+                                <span>Run</span>
+                            </button>
+                            <button onclick="editSchedule(${s.id})" data-no-tooltip class="sch-act-btn sch-btn-edit px-2" aria-label="Edit schedule">
+                                ${HEROICON_EDIT_BTN}
+                            </button>
+                            <button onclick="deleteSchedule(${s.id})" data-no-tooltip class="sch-act-btn sch-btn-delete px-2" aria-label="Delete schedule">
+                                ${HEROICON_DELETE_BTN}
+                            </button>
                         </div>
                     </td>
-                </tr>`).join('')}</tbody>
+                </tr>`;
+                }).join('')}</tbody>
             </table></div>`;
+
+            // Attach precision tooltip listener: only show tooltip when text is actually truncated with ellipsis
+            const schTable = document.getElementById('schedules-table');
+            if (schTable) {
+                const checkSchTooltip = (e) => {
+                    const tipEl = document.getElementById('se-global-tooltip');
+                    const actCell = e.target.closest('.col-sch-act');
+                    if (actCell) {
+                        if (tipEl) {
+                            tipEl.classList.remove('se-tooltip-visible');
+                            tipEl.setAttribute('aria-hidden', 'true');
+                        }
+                        return;
+                    }
+                    const truncateEl = e.target.closest('.se-table-schedules .se-cell-truncate');
+                    if (truncateEl) {
+                        const isTrunc = truncateEl.scrollWidth > truncateEl.clientWidth + 1;
+                        if (!isTrunc && tipEl) {
+                            tipEl.classList.remove('se-tooltip-visible');
+                            tipEl.setAttribute('aria-hidden', 'true');
+                        }
+                    } else if (e.target.closest('td')) {
+                        if (tipEl) {
+                            tipEl.classList.remove('se-tooltip-visible');
+                            tipEl.setAttribute('aria-hidden', 'true');
+                        }
+                    }
+                };
+                schTable.addEventListener('mouseover', checkSchTooltip);
+                schTable.addEventListener('focusin', checkSchTooltip);
+            }
         } catch (e) {
             list.innerHTML = `<p class="text-center text-red-500 py-4">Failed to load: ${e.message}</p>`;
         }
     }
 
     async function createSchedule() {
+        if (!validateScheduleForm()) {
+            return;
+        }
+
+        const nameVal = document.getElementById('sch-name').value.trim();
+        const typeVal = document.getElementById('sch-type').value;
+        const scopeVal = document.getElementById('sch-scope').value;
+        const agentVal = (scopeVal === 'individual') ? (document.getElementById('sch-agent').value || null) : null;
+        const freqVal = document.getElementById('sch-freq').value;
+        const dowVal = (freqVal === 'weekly') ? parseInt(document.getElementById('sch-dow').value, 10) : null;
+        const domVal = (freqVal === 'monthly') ? parseInt(document.getElementById('sch-dom').value, 10) : null;
+        const timeVal = document.getElementById('sch-time').value.trim();
+        const [hStr, mStr] = timeVal.split(':');
+        const sendHour = parseInt(hStr, 10);
+        const sendMinute = parseInt(mStr, 10);
+
         const recipientsRaw = document.getElementById('sch-recipients').value.trim();
-        if (!document.getElementById('sch-name').value.trim()) { alert('Name is required'); return; }
-        if (!recipientsRaw) { alert('Recipients are required'); return; }
-        const freq = document.getElementById('sch-freq').value;
+        const recipientsList = recipientsRaw.split(',').map(s => s.trim()).filter(Boolean);
+
         const payload = {
-            name: document.getElementById('sch-name').value.trim(),
-            report_type: document.getElementById('sch-type').value,
-            scope: document.getElementById('sch-scope').value,
-            agent_id: document.getElementById('sch-agent').value || null,
-            frequency: freq,
-            day_of_week: freq === 'weekly' ? parseInt(document.getElementById('sch-dow').value) : null,
-            day_of_month: freq === 'monthly' ? parseInt(document.getElementById('sch-dom').value) : null,
-            send_hour: parseInt(document.getElementById('sch-hour').value),
-            recipients: recipientsRaw.split(',').map(s => s.trim()).filter(Boolean),
+            name: nameVal,
+            report_type: typeVal,
+            scope: scopeVal,
+            agent_id: agentVal,
+            frequency: freqVal,
+            day_of_week: dowVal,
+            day_of_month: domVal,
+            send_time: timeVal,
+            send_hour: sendHour,
+            send_minute: sendMinute,
+            recipients: recipientsList,
         };
+
         const statusEl = document.getElementById('sch-status');
-        statusEl.className = 'mb-3 p-3 bg-blue-50 dark:bg-blue-900 text-blue-700 dark:text-blue-200 rounded-lg text-sm';
-        statusEl.textContent = 'Saving…'; statusEl.classList.remove('hidden');
+        const isEditing = Boolean(_editingScheduleId);
+        const oldId = _editingScheduleId;
+
+        statusEl.className = 'mb-4 p-3 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 border border-blue-200 dark:border-blue-800 rounded-lg text-sm';
+        statusEl.textContent = isEditing ? 'Updating schedule…' : 'Saving schedule…';
+        statusEl.classList.remove('hidden');
+
         try {
             const resp = await fetch('/dashboard/reports/schedules', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
             const data = await resp.json();
             if (data.success) {
-                statusEl.className = 'mb-3 p-3 bg-green-50 dark:bg-green-900 text-green-700 dark:text-green-200 rounded-lg text-sm';
-                // Was hardcoded "UTC" while printing an unconverted raw string.
-                // Now converted to the viewer's zone and labelled with it (FR-008).
-                statusEl.textContent = `✓ Saved. Next run: ${DateFmt.formatDateTimeLabelled(data.next_run)}`;
+                if (isEditing && oldId) {
+                    await fetch(`/dashboard/reports/schedules/${oldId}`, { method: 'DELETE' });
+                    _editingScheduleId = null;
+                }
+                statusEl.className = 'mb-4 p-3 bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 rounded-lg text-sm';
+                statusEl.textContent = isEditing
+                    ? `✓ Schedule updated. Next run: ${DateFmt.formatDateTimeLabelled(data.next_run, 'Asia/Kolkata')}`
+                    : `✓ Schedule saved. Next run: ${DateFmt.formatDateTimeLabelled(data.next_run, 'Asia/Kolkata')}`;
                 setTimeout(() => { toggleNewScheduleForm(); loadSchedules(); }, 1500);
-            } else { throw new Error(data.error || 'Save failed'); }
+            } else {
+                throw new Error(data.error || (isEditing ? 'Update failed' : 'Save failed'));
+            }
         } catch (e) {
-            statusEl.className = 'mb-3 p-3 bg-red-50 dark:bg-red-900 text-red-700 dark:text-red-200 rounded-lg text-sm';
+            statusEl.className = 'mb-4 p-3 bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-200 border border-red-200 dark:border-red-800 rounded-lg text-sm';
             statusEl.textContent = 'Error: ' + e.message;
         }
     }
 
     async function deleteSchedule(id) {
-        if (!confirm('Delete this schedule?')) return;
+        const confirmed = await SentinelConfirm.show({
+            title: 'Delete Schedule',
+            message: 'Delete this schedule?',
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+            variant: 'danger',
+            icon: 'trash'
+        });
+        if (!confirmed) return;
         await fetch(`/dashboard/reports/schedules/${id}`, { method: 'DELETE' });
         loadSchedules();
     }
 
     async function runScheduleNow(id) {
-        if (!confirm('Run now and send email?')) return;
+        const confirmed = await SentinelConfirm.show({
+            title: 'Run Report Schedule',
+            message: 'Run now and send email to configured recipients?',
+            confirmText: 'Run Now',
+            cancelText: 'Cancel',
+            variant: 'primary',
+            icon: 'play'
+        });
+        if (!confirmed) return;
         try {
             const resp = await fetch(`/dashboard/reports/schedules/${id}/run`, { method: 'POST' });
             const data = await resp.json();
@@ -1192,7 +2887,11 @@
             allAgents.forEach(a => {
                 const o = document.createElement('option');
                 o.value = a.agent_id;
-                o.textContent = `${a.hostname || 'Unknown'} (${a.agent_id.substring(0,8)}…)`;
+                const rawHost = a.hostname || 'Unknown';
+                const host = rawHost.length > 20 ? rawHost.substring(0, 20) + '…' : rawHost;
+                const idShort = a.agent_id ? a.agent_id.substring(0, 8) + '…' : '';
+                o.textContent = idShort ? `${host} (${idShort})` : host;
+                o.title = `${rawHost} (${a.agent_id || ''})`;
                 sel.appendChild(o);
             });
         });
@@ -1200,7 +2899,7 @@
 
     // Override showSection to trigger lazy loads
     const _origShowSection = window.showSection;
-    window.showSection = function(section) {
+    window.showSection = function (section) {
         // Call original function if it exists
         if (typeof _origShowSection === 'function') {
             _origShowSection(section);
@@ -1209,8 +2908,12 @@
             const sectionEl = document.getElementById(`section-${section}`);
             if (sectionEl) sectionEl.style.display = 'block';
         }
-        if (section === 'schedules') loadSchedules();
-        if (section === 'activity') { populateActivityAgentSelects(); document.getElementById('section-job-history').style.display='block'; loadJobHistory(); }
+        if (section === 'schedules') {
+            loadSchedules();
+            populateActivityAgentSelects();
+        }
+        if (section === 'activity') { populateActivityAgentSelects(); toggleArDateFields(); document.getElementById('section-job-history').style.display = 'block'; loadJobHistory(); }
+        if (typeof initCustomReportsControls === 'function') initCustomReportsControls();
     }
 
     // ── Unified async report generation ────────────────────────────────────
@@ -1222,60 +2925,70 @@
         const type = document.getElementById('ar-type').value;
         const scope = document.getElementById('ar-scope').value;
         const agentId = (document.getElementById('ar-agent') || {}).value || null;
-        const start = document.getElementById('ar-start').value;
-        const end = document.getElementById('ar-end').value;
-        if (!start || !end) { showArStatus('error', 'Please select start and end dates.'); return; }
+        let start, end;
+        if (type === 'daily') {
+            const dateVal = (document.getElementById('ar-date') || {}).value || (document.getElementById('ar-start') || {}).value;
+            if (!dateVal) { showArStatus('error', 'Please select a date.'); return; }
+            start = dateVal;
+            end = dateVal;
+        } else {
+            start = (document.getElementById('ar-start') || {}).value;
+            end = (document.getElementById('ar-end') || {}).value;
+            if (!start || !end) { showArStatus('error', 'Please select start and end dates.'); return; }
+        }
+
+        if (scope === 'individual' && !agentId) { showArStatus('error', 'Please select an agent.'); return; }
 
         document.getElementById('ar-generate-btn').disabled = true;
         document.getElementById('ar-email-btn').style.display = 'none';
         document.getElementById('ar-view-btn').style.display = 'none';
         _arResultHtml = null;
-        showArStatus('info', '<svg class="w-4 h-4 inline-block align-[-0.125em] animate-spin fa-spin mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>Starting generation...');
+        showArStatus('info', `${HEROICON_SPINNER_SM} Starting generation...`);
 
         fetch('/dashboard/reports/unified/generate', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({report_type: type, scope: scope, agent_id: agentId, start_date: start, end_date: end})
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ report_type: type, scope: scope, agent_id: agentId, start_date: start, end_date: end, date: start })
         })
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) { showArStatus('error', data.error); document.getElementById('ar-generate-btn').disabled = false; return; }
-            _arJobId = data.job_id;
-            if (_arPollInterval) clearInterval(_arPollInterval);
-            _arPollInterval = setInterval(pollArJob, 2000);
-        })
-        .catch(e => { showArStatus('error', e.toString()); document.getElementById('ar-generate-btn').disabled = false; });
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) { showArStatus('error', data.error); document.getElementById('ar-generate-btn').disabled = false; return; }
+                _arJobId = data.job_id;
+                if (_arPollInterval) clearInterval(_arPollInterval);
+                _arPollInterval = setInterval(pollArJob, 2000);
+            })
+            .catch(e => { showArStatus('error', e.toString()); document.getElementById('ar-generate-btn').disabled = false; });
     }
 
     function pollArJob() {
         if (!_arJobId) return;
         fetch('/dashboard/reports/unified/jobs/' + _arJobId)
-        .then(r => r.json())
-        .then(job => {
-            if (job.status === 'running') {
-                const p = job.progress || {};
-                const msg = p.current_agent ? 'Processing ' + p.current + '/' + p.total + ': ' + p.current_agent : 'Running...';
-                showArStatus('info', '<svg class="w-4 h-4 inline-block align-[-0.125em] animate-spin fa-spin mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>' + msg);
-            } else if (job.status === 'completed') {
-                clearInterval(_arPollInterval);
-                _arResultHtml = job.result_html;
-                showArStatus('success', '✅ Report ready');
-                document.getElementById('ar-generate-btn').disabled = false;
-                document.getElementById('ar-view-btn').style.display = 'inline-flex';
-                document.getElementById('ar-email-btn').style.display = 'inline-flex';
-                loadJobHistory();
-            } else if (job.status === 'failed') {
-                clearInterval(_arPollInterval);
-                showArStatus('error', '❌ Failed: ' + (job.error_message || 'Unknown error'));
-                document.getElementById('ar-generate-btn').disabled = false;
-                loadJobHistory();
-            }
-        });
+            .then(r => r.json())
+            .then(job => {
+                if (job.status === 'running') {
+                    const p = job.progress || {};
+                    const msg = p.current_agent ? 'Processing ' + p.current + '/' + p.total + ': ' + p.current_agent : 'Running...';
+                    showArStatus('info', `${HEROICON_SPINNER_SM} ${msg}`);
+                } else if (job.status === 'completed') {
+                    clearInterval(_arPollInterval);
+                    _arResultHtml = job.result_html;
+                    showArStatus('success', `${HEROICON_CHECK_BADGE} Report ready`);
+                    document.getElementById('ar-generate-btn').disabled = false;
+                    document.getElementById('ar-view-btn').style.display = 'inline-flex';
+                    document.getElementById('ar-email-btn').style.display = 'inline-flex';
+                    loadJobHistory();
+                } else if (job.status === 'failed') {
+                    clearInterval(_arPollInterval);
+                    showArStatus('error', '❌ Failed: ' + (job.error_message || 'Unknown error'));
+                    document.getElementById('ar-generate-btn').disabled = false;
+                    loadJobHistory();
+                }
+            });
     }
 
     function viewActivityReport() {
         if (!_arResultHtml) return;
-        const blob = new Blob([_arResultHtml], {type: 'text/html'});
+        const blob = new Blob([_arResultHtml], { type: 'text/html' });
         window.open(URL.createObjectURL(blob), '_blank');
     }
 
@@ -1287,22 +3000,29 @@
             // Use cached job HTML — avoids re-generating the report (BUG-010)
             fetch(`/dashboard/reports/unified/jobs/${_arJobId}/email`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({recipients: rcptList, subject: 'SentinelEdge Report'})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipients: rcptList, subject: 'SentinelEdge Report' })
             }).then(r => r.json())
-              .then(d => { if (d.success) showArStatus('success', '✅ Email sent'); else showArStatus('error', d.error || 'Send failed'); });
+                .then(d => { if (d.success) showArStatus('success', '✅ Email sent'); else showArStatus('error', d.error || 'Send failed'); });
         } else {
             // Fallback: no cached job, re-generate via legacy endpoint
             const type = document.getElementById('ar-type').value;
             const scope = document.getElementById('ar-scope').value;
-            const start = document.getElementById('ar-start').value;
-            const end = document.getElementById('ar-end').value;
+            let start, end;
+            if (type === 'daily') {
+                const dateVal = (document.getElementById('ar-date') || {}).value || (document.getElementById('ar-start') || {}).value;
+                start = dateVal;
+                end = dateVal;
+            } else {
+                start = (document.getElementById('ar-start') || {}).value;
+                end = (document.getElementById('ar-end') || {}).value;
+            }
             fetch('/dashboard/reports/email', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({report_type: type, scope: scope, start_date: start, end_date: end, recipients: rcptList})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ report_type: type, scope: scope, start_date: start, end_date: end, date: start, recipients: rcptList })
             }).then(r => r.json())
-              .then(d => { if (d.success) showArStatus('success', '✅ Email sent'); else showArStatus('error', d.error || 'Send failed'); });
+                .then(d => { if (d.success) showArStatus('success', '✅ Email sent'); else showArStatus('error', d.error || 'Send failed'); });
         }
     }
 
@@ -1318,26 +3038,58 @@
 
     function loadJobHistory() {
         fetch('/dashboard/reports/unified/jobs')
-        .then(r => r.json())
-        .then(jobs => {
-            const container = document.getElementById('job-history-table');
-            if (!container) return;
-            if (!jobs.length) { container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-sm">No jobs yet.</p>'; return; }
-            const badge = s => ({'pending':'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
-                'running':'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200',
-                'completed':'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200',
-                'failed':'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200'}[s] || '');
-            container.innerHTML = '<table class="w-full text-sm"><thead><tr class="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">'
-                + '<th class="pb-2">Type</th><th class="pb-2">Scope</th><th class="pb-2">Status</th><th class="pb-2">Created</th></tr></thead><tbody>'
-                + jobs.map(j => '<tr class="border-b dark:border-gray-700"><td class="py-2">' + j.report_type + '</td>'
-                    + '<td class="py-2">' + j.scope + '</td>'
-                    + '<td class="py-2"><span class="px-2 py-0.5 rounded-full text-xs font-medium ' + badge(j.status) + '">' + j.status + '</span></td>'
-                    + '<td class="py-2 text-gray-500">' + (j.created_at ? DateFmt.formatDateTime(j.created_at) : '') + '</td></tr>').join('')
-                + '</tbody></table>';
-            if (jobs.some(j => j.status === 'running' || j.status === 'pending')) {
-                setTimeout(loadJobHistory, 5000);
-            }
-        }).catch(() => {});
+            .then(r => r.json())
+            .then(jobs => {
+                const container = document.getElementById('job-history-table');
+                if (!container) return;
+                if (!Array.isArray(jobs) || !jobs.length) {
+                    container.innerHTML = '<div class="se-table-container-compact p-6 text-center text-gray-500 dark:text-gray-400 text-sm">No report jobs yet.</div>';
+                    return;
+                }
+                const badge = s => ({
+                    'pending': 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50',
+                    'running': 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50',
+                    'completed': 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300 border border-transparent',
+                    'failed': 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 border border-transparent'
+                }[s] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 border border-transparent');
+
+                const esc = typeof escapeHtml === 'function' ? escapeHtml : (s => s ? String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') : '');
+
+                container.innerHTML = '<div class="se-table-container-compact max-h-80"><table class="se-table se-table-compact" id="activity-jobs-table">'
+                    + '<colgroup>'
+                    + '<col class="col-job-type">'
+                    + '<col class="col-job-scope">'
+                    + '<col class="col-job-status">'
+                    + '<col class="col-job-time">'
+                    + '</colgroup>'
+                    + '<thead><tr>'
+                    + '<th class="col-job-type se-align-left">Type</th>'
+                    + '<th class="col-job-scope se-align-left">Scope</th>'
+                    + '<th class="col-job-status se-align-center">Status</th>'
+                    + '<th class="col-job-time se-align-center">Created</th>'
+                    + '</tr></thead><tbody>'
+                    + jobs.map(j => {
+                        const rawType = (j.report_type || '').trim();
+                        const typeDisplay = rawType ? (rawType.charAt(0).toUpperCase() + rawType.slice(1).toLowerCase()) : '—';
+                        const rawScope = (j.scope || '').trim();
+                        const scopeDisplay = rawScope ? (rawScope.charAt(0).toUpperCase() + rawScope.slice(1).toLowerCase()) : '—';
+                        const rawStatus = (j.status || '').trim().toLowerCase();
+                        const statusDisplay = rawStatus ? (rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1)) : 'Unknown';
+                        const createdDisplay = j.created_at ? (typeof DateFmt !== 'undefined' && DateFmt.formatDateTime ? DateFmt.formatDateTime(j.created_at) : j.created_at) : '—';
+                        const badgeClass = badge(rawStatus);
+
+                        return '<tr>'
+                            + '<td class="col-job-type se-align-left font-medium text-gray-900 dark:text-gray-100"><span class="se-cell-truncate" title="' + esc(typeDisplay) + '">' + esc(typeDisplay) + '</span></td>'
+                            + '<td class="col-job-scope se-align-left text-gray-600 dark:text-gray-400"><span class="se-cell-truncate" title="' + esc(scopeDisplay) + '">' + esc(scopeDisplay) + '</span></td>'
+                            + '<td class="col-job-status se-align-center"><div class="se-badge-wrap"><span class="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-medium ' + badgeClass + '">' + esc(statusDisplay) + '</span></div></td>'
+                            + '<td class="col-job-time se-align-center text-gray-500 dark:text-gray-400 font-mono text-xs"><span class="se-cell-truncate" title="' + esc(createdDisplay) + '">' + esc(createdDisplay) + '</span></td>'
+                            + '</tr>';
+                    }).join('')
+                    + '</tbody></table></div>';
+                if (jobs.some(j => j.status === 'running' || j.status === 'pending')) {
+                    setTimeout(loadJobHistory, 5000);
+                }
+            }).catch(() => { });
     }
 
     // ── Unified Report Modal ────────────────────────────────────────────────
@@ -1420,7 +3172,7 @@
                 o.textContent = (a.username || a.hostname || a.agent_id.slice(0, 8));
                 sel.appendChild(o);
             });
-        }).catch(() => {});
+        }).catch(() => { });
     }
 
     function umLoadUsers() {
@@ -1502,10 +3254,12 @@
             try {
                 const resp = await fetch('/dashboard/reports/unified/schedules', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({name, report_type: type, scope, agent_id: agentId,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name, report_type: type, scope, agent_id: agentId,
                         recipients, frequency: freq, send_hour: sendHour,
-                        include_pdf: includePdf, auto_email: autoEmail})
+                        include_pdf: includePdf, auto_email: autoEmail
+                    })
                 });
                 const d = await resp.json();
                 if (d.success) {
@@ -1516,7 +3270,7 @@
                     document.getElementById('um-btn-email').classList.add('hidden');
                     umShowStep('result');
                 } else { umSetError(d.error || 'Failed to create schedule'); }
-            } catch(e) { umSetError(e.toString()); }
+            } catch (e) { umSetError(e.toString()); }
             return;
         }
 
@@ -1528,55 +3282,57 @@
         try {
             const resp = await fetch('/dashboard/reports/unified/generate', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({report_type: type, scope, agent_id: agentId,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    report_type: type, scope, agent_id: agentId,
                     start_date: start, end_date: end,
-                    include_pdf: includePdf, auto_email: autoEmail, recipients})
+                    include_pdf: includePdf, auto_email: autoEmail, recipients
+                })
             });
             const d = await resp.json();
             if (d.error) { umShowStep('config'); umSetError(d.error); return; }
             _umJobId = d.job_id;
             _umPollInterval = setInterval(umPollJob, 2000);
-        } catch(e) { umShowStep('config'); umSetError(e.toString()); }
+        } catch (e) { umShowStep('config'); umSetError(e.toString()); }
     }
 
     function umPollJob() {
         if (!_umJobId) return;
         fetch('/dashboard/reports/unified/jobs/' + _umJobId)
-        .then(r => r.json())
-        .then(job => {
-            if (job.status === 'running') {
-                const p = job.progress || {};
-                document.getElementById('um-gen-status').textContent = p.current_agent
-                    ? 'Processing agent ' + p.current + ' of ' + p.total + '...'
-                    : 'Running...';
-                document.getElementById('um-gen-detail').textContent = p.current_agent || '';
-            } else if (job.status === 'completed') {
-                clearInterval(_umPollInterval);
-                _umResultHtml = job.result_html;
-                document.getElementById('um-result-icon').textContent = '\u2705';
-                document.getElementById('um-result-msg').textContent = 'Report generated successfully';
-                document.getElementById('um-result-detail').textContent = job.result_pdf_path ? 'HTML + PDF generated' : 'HTML report generated';
-                document.getElementById('um-btn-view').classList.remove('hidden');
-                document.getElementById('um-btn-email').classList.remove('hidden');
-                umShowStep('result');
-                loadJobHistory();
-            } else if (job.status === 'failed') {
-                clearInterval(_umPollInterval);
-                document.getElementById('um-result-icon').textContent = '\u274c';
-                document.getElementById('um-result-msg').textContent = 'Generation failed';
-                document.getElementById('um-result-detail').textContent = job.error_message || 'Unknown error';
-                document.getElementById('um-btn-view').classList.add('hidden');
-                document.getElementById('um-btn-email').classList.add('hidden');
-                umShowStep('result');
-                loadJobHistory();
-            }
-        }).catch(() => {});
+            .then(r => r.json())
+            .then(job => {
+                if (job.status === 'running') {
+                    const p = job.progress || {};
+                    document.getElementById('um-gen-status').textContent = p.current_agent
+                        ? 'Processing agent ' + p.current + ' of ' + p.total + '...'
+                        : 'Running...';
+                    document.getElementById('um-gen-detail').textContent = p.current_agent || '';
+                } else if (job.status === 'completed') {
+                    clearInterval(_umPollInterval);
+                    _umResultHtml = job.result_html;
+                    document.getElementById('um-result-icon').textContent = '\u2705';
+                    document.getElementById('um-result-msg').textContent = 'Report generated successfully';
+                    document.getElementById('um-result-detail').textContent = job.result_pdf_path ? 'HTML + PDF generated' : 'HTML report generated';
+                    document.getElementById('um-btn-view').classList.remove('hidden');
+                    document.getElementById('um-btn-email').classList.remove('hidden');
+                    umShowStep('result');
+                    loadJobHistory();
+                } else if (job.status === 'failed') {
+                    clearInterval(_umPollInterval);
+                    document.getElementById('um-result-icon').textContent = '\u274c';
+                    document.getElementById('um-result-msg').textContent = 'Generation failed';
+                    document.getElementById('um-result-detail').textContent = job.error_message || 'Unknown error';
+                    document.getElementById('um-btn-view').classList.add('hidden');
+                    document.getElementById('um-btn-email').classList.add('hidden');
+                    umShowStep('result');
+                    loadJobHistory();
+                }
+            }).catch(() => { });
     }
 
     function umViewReport() {
         if (!_umResultHtml) return;
-        const blob = new Blob([_umResultHtml], {type: 'text/html'});
+        const blob = new Blob([_umResultHtml], { type: 'text/html' });
         window.open(URL.createObjectURL(blob), '_blank');
     }
 
@@ -1587,8 +3343,8 @@
             // Use cached job HTML — avoids re-generating the report (BUG-010)
             fetch(`/dashboard/reports/unified/jobs/${_umJobId}/email`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({recipients, subject: 'SentinelEdge Report'})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipients, subject: 'SentinelEdge Report' })
             }).then(r => r.json()).then(d => {
                 if (d.success) alert('\u2705 Email sent to ' + recipients.length + ' recipient(s)');
                 else alert('\u274c ' + (d.error || 'Send failed'));
@@ -1601,8 +3357,8 @@
             const end = document.getElementById('um-end').value;
             fetch('/dashboard/reports/email', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({report_type: type, scope, start_date: start, end_date: end, recipients})
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ report_type: type, scope, start_date: start, end_date: end, recipients })
             }).then(r => r.json()).then(d => {
                 if (d.success) alert('\u2705 Email sent to ' + recipients.length + ' recipient(s)');
                 else alert('\u274c ' + (d.error || 'Send failed'));
@@ -1634,5 +3390,8 @@
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeUnifiedModal();
     });
+
+    // Initialize Activity Report date field visibility
+    toggleArDateFields();
 </script>
 {% endblock %}

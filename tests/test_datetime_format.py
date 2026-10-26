@@ -4,6 +4,8 @@ Shared date/time presentation (feature 037, US4 / US5).
 Contract: specs/037-v4-qa-defect-fixes/contracts/datetime-format.md
   - dates      -> DD-MM-YYYY        (07-08-2026)
   - date-times -> DD-MM-YYYY HH:mm  (07-08-2026 14:30), 24-hour, zero-padded
+  - timestamps -> DD-MM-YYYY HH:mm:ss (07-08-2026 14:30:00), only where
+    second precision is needed (report "Generated on" footers)
   - rendered in the VIEWER's timezone, falling back to the SERVER's when the
     viewer's cannot be determined (FR-008a), always labelled
   - the same timezone resolution drives date filtering, so a selected date can
@@ -31,9 +33,12 @@ sys.path.insert(
 from utils.datetime_format import (
     DATE_FORMAT,
     DATETIME_FORMAT,
+    DATETIME_SECONDS_FORMAT,
     day_range_utc,
     format_date,
     format_datetime,
+    format_datetime_seconds,
+    format_datetime_seconds_labelled,
     resolve_timezone,
     timezone_label,
 )
@@ -50,6 +55,48 @@ class TestFormatStrings(unittest.TestCase):
         self.assertEqual(DATETIME_FORMAT, "%d-%m-%Y %H:%M")
         self.assertNotIn("%p", DATETIME_FORMAT)
         self.assertNotIn("%I", DATETIME_FORMAT)
+
+    def test_datetime_seconds_format_is_24_hour_with_seconds(self):
+        self.assertEqual(DATETIME_SECONDS_FORMAT, "%d-%m-%Y %H:%M:%S")
+        self.assertNotIn("%p", DATETIME_SECONDS_FORMAT)
+        self.assertNotIn("%I", DATETIME_SECONDS_FORMAT)
+
+
+class TestFormatDatetimeSeconds(unittest.TestCase):
+    """DD-MM-YYYY HH:mm:ss — only where second precision is required."""
+
+    def test_renders_seconds(self):
+        self.assertEqual(
+            format_datetime_seconds(datetime(2026, 8, 7, 14, 30, 5, tzinfo=timezone.utc), tz="UTC"),
+            "07-08-2026 14:30:05",
+        )
+
+    def test_zero_pads_seconds(self):
+        self.assertEqual(
+            format_datetime_seconds(datetime(2026, 8, 7, 14, 30, 0, tzinfo=timezone.utc), tz="UTC"),
+            "07-08-2026 14:30:00",
+        )
+
+    def test_month_is_numeric_never_a_name(self):
+        out = format_datetime_seconds(datetime(2026, 8, 7, 14, 30, 0, tzinfo=timezone.utc), tz="UTC")
+        self.assertNotIn("Aug", out)
+        self.assertNotIn("August", out)
+
+    def test_naive_input_is_treated_as_utc(self):
+        self.assertEqual(
+            format_datetime_seconds(datetime(2026, 8, 7, 14, 30, 0), tz="UTC"),
+            "07-08-2026 14:30:00",
+        )
+
+    def test_labelled_appends_timezone(self):
+        out = format_datetime_seconds_labelled(
+            datetime(2026, 8, 7, 14, 30, 0, tzinfo=timezone.utc), tz="UTC"
+        )
+        self.assertEqual(out, "07-08-2026 14:30:00 (UTC)")
+
+    def test_none_renders_as_placeholder(self):
+        self.assertEqual(format_datetime_seconds(None), "-")
+        self.assertEqual(format_datetime_seconds_labelled(None), "-")
 
 
 class TestFormatDate(unittest.TestCase):
