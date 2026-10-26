@@ -1182,13 +1182,17 @@ function renderFlipCards(st, stateEvents) {
     const eaAway = document.getElementById('ea-away-stat');
     const eaLocked = document.getElementById('ea-locked-stat');
     const eaIdle = document.getElementById('ea-idle-stat');
+    const eaInOffice = document.getElementById('ea-in-office-stat');
+    const eaOutOffice = document.getElementById('ea-out-office-stat');
 
     if (eaTime) eaTime.textContent = productiveTimeStr;
     if (eaBar) eaBar.style.width = productivePct + '%';
     if (eaCaption) eaCaption.textContent = `${productivePct}% of standard shift was active.`;
     if (eaAway) eaAway.textContent = `${awayTimeStr} (${awayPctNew}%)`;
-    if (eaLocked) eaLocked.textContent = `${lockedTimeStr} (${lockedPctNew}%)`;
+    if (eaLocked) eaLocked.textContent = lockedTimeStr || '--';
     if (eaIdle) eaIdle.textContent = `${idleTimeStr} (${idlePct}%)`;
+    if (eaInOffice) eaInOffice.textContent = st.in_office_time_str || '--';
+    if (eaOutOffice) eaOutOffice.textContent = st.out_of_office_time_str || '--';
     const eaShiftLabel = document.getElementById('ea-shift-target-label');
     if (eaShiftLabel && st.shift_target_label) eaShiftLabel.textContent = '/ ' + st.shift_target_label;
 

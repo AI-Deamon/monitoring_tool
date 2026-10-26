@@ -6378,7 +6378,7 @@ html.dark .sch-btn-secondary:hover:not(:disabled) {
 }
 
 .ea-dot-locked {
-    background: var(--state-locked);
+    background: #f0c526;
 }
 
 .ea-dot-idle {

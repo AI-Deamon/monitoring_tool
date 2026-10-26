@@ -2885,6 +2885,49 @@ def api_agent_full_report(agent_id):
         locked_s = screen_time.locked_seconds if screen_time else 0
         away_s = (screen_time.away_seconds or 0) if screen_time else 0
 
+        # Query screen_time_spans for in-office (10:00 - 19:00) vs out-of-office calculation and state_events
+        all_spans = db.session.execute(
+            text(
+                "SELECT state, start_time, end_time, duration_seconds"
+                " FROM screen_time_spans"
+                " WHERE agent_id = :agent_id"
+                "   AND start_time < :end_dt"
+                "   AND end_time >= :start_dt"
+                " ORDER BY start_time"
+            ),
+            {
+                "agent_id": resolved_agent_id,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+            },
+        ).fetchall()
+
+        # Office hours window: 10:00 to 19:00 in viewer's timezone
+        from utils.datetime_format import viewer_timezone
+        from datetime import time as dt_time
+        v_tz = viewer_timezone()
+        office_start_utc = datetime.combine(target_date, dt_time(10, 0, 0), tzinfo=v_tz).astimezone(timezone.utc).replace(tzinfo=None)
+        office_end_utc = datetime.combine(target_date, dt_time(19, 0, 0), tzinfo=v_tz).astimezone(timezone.utc).replace(tzinfo=None)
+
+        in_office_s = 0
+        out_of_office_s = 0
+
+        for span in all_spans:
+            if span.state in ('active', 'idle'):
+                s_start = max(span.start_time, start_dt)
+                s_end = min(span.end_time, end_dt)
+                if s_end > s_start:
+                    tot_s = int((s_end - s_start).total_seconds())
+                    overlap_start = max(s_start, office_start_utc)
+                    overlap_end = min(s_end, office_end_utc)
+                    if overlap_end > overlap_start:
+                        in_s = int((overlap_end - overlap_start).total_seconds())
+                    else:
+                        in_s = 0
+                    out_s = tot_s - in_s
+                    in_office_s += in_s
+                    out_of_office_s += out_s
+
         # Shift-goal utilization (8-hour target, productive = active only)
         from server_config import get_config as _get_config
         _cfg = _get_config()
@@ -2908,6 +2951,11 @@ def api_agent_full_report(agent_id):
             "total_seconds": active_s + idle_s + locked_s + away_s,
             "active_hours": round(active_s / 3600, 2),
             "away_note": "Prolonged lock (>2h) classified as away",
+            # Office hours breakdown (10:00 - 19:00)
+            "in_office_seconds": in_office_s,
+            "out_of_office_seconds": out_of_office_s,
+            "in_office_time_str": _fmt_duration(in_office_s),
+            "out_of_office_time_str": _fmt_duration(out_of_office_s),
             # Shift-goal fields (new)
             "productive_pct": _util["productive_pct"],
             "away_pct": _util["away_pct"],
@@ -3180,21 +3228,7 @@ def api_agent_full_report(agent_id):
                         "end_time": _format_ist_timestamp(min(span.end_time, end_dt)),
                         "duration_seconds": max(0, int((min(span.end_time, end_dt) - max(span.start_time, start_dt)).total_seconds())),
                     }
-                    for span in db.session.execute(
-                        text(
-                            "SELECT state, start_time, end_time, duration_seconds"
-                            " FROM screen_time_spans"
-                            " WHERE agent_id = :agent_id"
-                            "   AND start_time < :end_dt"
-                            "   AND end_time >= :start_dt"
-                            " ORDER BY start_time"
-                        ),
-                        {
-                            "agent_id": resolved_agent_id,
-                            "start_dt": start_dt,
-                            "end_dt": end_dt,
-                        },
-                    ).fetchall()
+                    for span in all_spans
                     if min(span.end_time, end_dt) > max(span.start_time, start_dt)
                 ],
             }
